@@ -1,0 +1,129 @@
+http:
+  middlewares:
+    sidecar-replace-path-regex-login-ui:
+      replacePathRegex:
+        regex: "^/self-service/(.*)"
+        replacement: "/api/kratos/self-service/$1"
+    replace-webauthn-path:
+      replacePath:
+        path: "/.well-known/ory/webauthn.js"
+
+  routers:
+    # ── Kratos direct routes (bypass login-ui proxy) ──────────────────────
+
+    # OIDC callback — must go directly to Kratos, not through the login-ui
+    # proxy.  The callback carries CSRF tokens and session cookies that Kratos
+    # manages natively; routing through login-ui breaks the flow.
+    kratos-oidc-callback:
+      entryPoints:
+        - web
+      rule: "PathPrefix(`/self-service/methods/oidc/callback`)"
+      service: kratos-public-svc
+      priority: 300
+
+    # WebAuthn JavaScript helper — served by Kratos at
+    # /.well-known/ory/webauthn.js.  The login-ui pages load this script for
+    # passkey registration and verification ceremonies.
+    kratos-webauthn-js:
+      entryPoints:
+        - web
+      rule: "Path(`/.well-known/webauthn.js`)"
+      service: kratos-public-svc
+      priority: 300
+      middlewares:
+        - replace-webauthn-path
+
+    # Identity JSON schemas — served directly by Kratos.
+    kratos-schemas:
+      entryPoints:
+        - web
+      rule: "PathPrefix(`/schemas`)"
+      service: kratos-public-svc
+      priority: 300
+
+    # ── Login-UI proxied routes ───────────────────────────────────────────
+
+    # Identifier-first login step — handled by the login-ui Go proxy (which
+    # calls Kratos internally and manages cookies correctly).
+    # Must have higher priority than the generic kratos-self-service route.
+    login-ui-id-first:
+      entryPoints:
+        - web
+      rule: "Path(`/self-service/login/id-first`)"
+      service: login-ui-svc
+      priority: 200
+      middlewares:
+        - sidecar-replace-path-regex-login-ui
+
+    # Self-service endpoints routed through the login-ui proxy so that CSRF
+    # cookies and session handling work correctly.  The OIDC callback is
+    # excluded (see kratos-oidc-callback above).
+    kratos-self-service:
+      entryPoints:
+        - web
+      rule: "PathPrefix(`/self-service`)"
+      service: login-ui-svc
+      priority: 100
+      middlewares:
+        - sidecar-replace-path-regex-login-ui
+
+    # Device auth endpoint
+    login-ui-api-device:
+      entryPoints:
+        - web
+      rule: "Path(`/api/device`)"
+      service: login-ui-svc
+
+    # Hydra consent endpoint
+    login-ui-api-consent:
+      entryPoints:
+        - web
+      rule: "Path(`/api/consent`)"
+      service: login-ui-svc
+
+    # App config API
+    login-ui-api-config:
+      entryPoints:
+        - web
+      rule: "Path(`/api/v0/app-config`)"
+      service: login-ui-svc
+
+    # Tenant lookup API — the browser's tenant picker.
+    #
+    # Exactly `/api/v0/tenants` belongs to login-ui; everything below it
+    # (notably `/api/v0/tenants/lookup`, which login-ui's own Go proxy calls
+    # server-side) belongs to tenant-service. tenant-service's docker-provider
+    # router claims the whole prefix with a longer rule and so wins Traefik's
+    # default rule-length tie-break, which would 401 the browser. `Path` plus an
+    # explicit priority splits the two deliberately rather than by rule length.
+    login-ui-api-tenants:
+      entryPoints:
+        - web
+      rule: "Path(`/api/v0/tenants`)"
+      priority: 200
+      service: login-ui-svc
+
+    # Tenant selection API
+    login-ui-api-auth-tenant:
+      entryPoints:
+        - web
+      rule: "Path(`/api/v0/auth/tenant`)"
+      service: login-ui-svc
+
+    # UI pages
+    login-ui-ui:
+      entryPoints:
+        - web
+      rule: "PathPrefix(`/ui`)"
+      service: login-ui-svc
+
+  services:
+    kratos-public-svc:
+      loadBalancer:
+        servers:
+          - url: "http://kratos:4433"
+
+    login-ui-svc:
+      loadBalancer:
+        servers:
+          - url: "http://login-ui:4455"

@@ -1,0 +1,59 @@
+# Mailslurper for the charmed matrix lane (phase 0).
+#
+# There is no charmed mail server. The Service MUST be named `mailslurper` in
+# the workload model's namespace: kratos-operator's unrelated-smtp fallback is
+# literally `smtps://test:test@mailslurper:1025/?skip_ssl_verify=true`
+# (kratos-operator src/integrations.py:222-259), which this satisfies with
+# zero wiring. Phase 1 should relate smtp-integrator instead so the real
+# `smtp` relation path is what gets tested; this manifest then only provides
+# the server behind it.
+#
+# Image matches the compose stack (docker/docker-compose.infra.yml): the
+# -smtps variant, because both the charm fallback and the compose courier URI
+# use the smtps:// scheme.
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mailslurper
+  namespace: iam-matrix
+  labels: { app: mailslurper }
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: mailslurper }
+  template:
+    metadata:
+      labels: { app: mailslurper }
+    spec:
+      containers:
+        - name: mailslurper
+          image: oryd/mailslurper:latest-smtps
+          ports:
+            - { containerPort: 1025, name: smtp }
+            - { containerPort: 4436, name: web }
+            - { containerPort: 4437, name: api }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailslurper # exact name is load-bearing (kratos charm smtp fallback)
+  namespace: iam-matrix
+spec:
+  selector: { app: mailslurper }
+  ports:
+    - { name: smtp, port: 1025, targetPort: 1025 }
+    - { name: web, port: 4436, targetPort: 4436 }
+    - { name: api, port: 4437, targetPort: 4437 }
+---
+# The suite's mail helper (MAIL_API_URL) runs on the host — expose the JSON
+# API on a fixed NodePort.
+apiVersion: v1
+kind: Service
+metadata:
+  name: mailslurper-api
+  namespace: iam-matrix
+spec:
+  type: NodePort
+  selector: { app: mailslurper }
+  ports:
+    - { name: api, port: 4437, targetPort: 4437, nodePort: 30437 }

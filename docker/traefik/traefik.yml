@@ -1,0 +1,23 @@
+api:
+  dashboard: true
+  insecure: true
+
+ping:
+  entryPoint: traefik
+
+entryPoints:
+  web:
+    address: ":80"
+  websecure:
+    address: ":443"
+  traefik:
+    address: ":8080"
+
+providers:
+  docker:
+    endpoint: "unix:///var/run/docker.sock"
+    exposedByDefault: false
+    network: intranet
+  file:
+    directory: /etc/traefik
+    watch: true

@@ -1,0 +1,21 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "outDir": "dist",
+    "resolveJsonModule": true,
+    "types": ["node"]
+  },
+  "include": [
+    "framework/**/*.ts",
+    "helpers/**/*.ts",
+    "scenarios/**/*.ts",
+    "seeder/**/*.ts",
+    "specs/**/*.ts",
+    "playwright.config.ts"
+  ]
+}

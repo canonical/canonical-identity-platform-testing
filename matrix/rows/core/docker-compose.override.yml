@@ -1,0 +1,34 @@
+# Matrix row: core (pinned) — GENERATED, DO NOT EDIT.
+# Source of truth: matrix/config-model.mjs; regenerate with `make matrix-generate`.
+# local_idp=on mfa=off verification=on webauthn=null providers=1 tenant_service=absent hook_service=absent user_verification=absent access_token=jwt
+
+services:
+  kratos:
+    environment:
+      - SELFSERVICE_METHODS_PASSWORD_ENABLED=true
+      - SELFSERVICE_METHODS_PROFILE_ENABLED=true
+      - SELFSERVICE_METHODS_CODE_ENABLED=true
+      - SELFSERVICE_METHODS_TOTP_ENABLED=false
+      - SELFSERVICE_METHODS_LOOKUP_SECRET_ENABLED=false
+      - SELFSERVICE_METHODS_WEBAUTHN_ENABLED=true
+      - SELFSERVICE_METHODS_WEBAUTHN_CONFIG_PASSWORDLESS=false
+      - SELFSERVICE_FLOWS_RECOVERY_ENABLED=true
+      - SELFSERVICE_FLOWS_VERIFICATION_ENABLED=true
+      - SESSION_WHOAMI_REQUIRED_AAL=aal1
+    command: exec kratos serve -c /etc/config/kratos/kratos.yml -c /etc/config/kratos/kratos.dex.yml --dev --watch-courier
+
+  login-ui:
+    environment:
+      - MFA_ENABLED=false
+      - OIDC_WEBAUTHN_SEQUENCING_ENABLED=false
+      - VERIFICATION_ENABLED=true
+
+  tenant-service:
+    scale: 0
+
+  hook-service:
+    scale: 0
+
+  user-verification-service:
+    scale: 0
+

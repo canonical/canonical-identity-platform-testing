@@ -1,0 +1,10 @@
+.terraform/
+# .terraform.lock.hcl is deliberately TRACKED: providers.tf floats on
+# `~> 1.0.0`, so the lock is the only record of which juju provider build a
+# lane actually ran against. Never add it back to this file.
+terraform.tfstate
+terraform.tfstate.backup
+imports.attach.tf.json
+terraform.tfstate.d/
+attach.tfvars.json
+terraform.tfstate.*.backup

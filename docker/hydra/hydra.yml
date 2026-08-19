@@ -1,0 +1,44 @@
+serve:
+  cookies:
+    same_site_mode: Lax
+  admin:
+    cors:
+      enabled: true
+      allowed_origins:
+        - "*"
+  public:
+    cors:
+      enabled: true
+      allowed_origins:
+        - "*"
+
+log:
+  leak_sensitive_values: true
+  level: debug
+
+oauth2:
+  expose_internal_errors: true
+  # NOTE: the token hook is deliberately NOT configured here. hydra.yml is shared
+  # by every profile, and Hydra fails token issuance outright when the hook is
+  # unreachable — on `core`, which scales hook-service to 0, every /oauth2/token
+  # call returns 500 "Unable to execute HTTP Request ... dial tcp: lookup
+  # hook-service". It is set per-profile instead, via OAUTH2_TOKEN_HOOK_* on the
+  # hydra service in the profiles that actually deploy hook-service.
+
+strategies:
+  access_token: jwt
+  jwt:
+    scope_claim: list
+  scope: exact
+
+urls:
+  self:
+    issuer: http://localhost:4444
+    public: http://localhost:4444
+  consent: http://localhost/ui/consent
+  login: http://localhost/ui/login
+  error: http://localhost/ui/oidc_error
+
+secrets:
+  system:
+    - youReallyNeedToChangeThis

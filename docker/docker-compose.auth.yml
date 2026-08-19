@@ -1,0 +1,113 @@
+services:
+  kratos-migrate:
+    image: ghcr.io/canonical/kratos:25.4.0
+    environment:
+      - DSN=postgres://kratos:kratos@postgres:5432/kratos?sslmode=disable
+    volumes:
+      - type: bind
+        source: ./kratos
+        target: /etc/config/kratos
+    command: exec kratos -c /etc/config/kratos/kratos.yml migrate sql -e --yes
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+    networks:
+      - intranet
+    labels:
+      - "traefik.enable=false"
+
+  kratos:
+    image: ghcr.io/canonical/kratos:25.4.0
+    depends_on:
+      kratos-migrate:
+        condition: service_completed_successfully
+    ports:
+      - "4433:4433"
+      - "4434:4434"
+    restart: unless-stopped
+    environment:
+      - DSN=postgres://kratos:kratos@postgres:5432/kratos?sslmode=disable
+      - LOG_LEVEL=trace
+    command: exec kratos serve -c /etc/config/kratos/kratos.yml --dev --watch-courier
+    volumes:
+      - type: bind
+        source: ./kratos
+        target: /etc/config/kratos
+    healthcheck:
+      test: ["CMD", "pebble", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - intranet
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.kratos-public.loadbalancer.server.port=4433"
+      - "traefik.http.services.kratos-admin.loadbalancer.server.port=4434"
+      # Kratos public and admin routes are defined in
+      # docker/traefik/login-ui-routes.yml with proper priority ordering so
+      # that the OIDC callback, webauthn.js, and schemas go directly to
+      # Kratos while other /self-service paths are proxied through login-ui.
+      # Only admin routes remain as Docker labels (no priority conflicts).
+      - "traefik.http.routers.kratos-admin.rule=PathPrefix(`/admin/identities`) || PathPrefix(`/admin/recovery`) || PathPrefix(`/admin/sessions`)"
+      - "traefik.http.routers.kratos-admin.entryPoints=web"
+      - "traefik.http.routers.kratos-admin.service=kratos-admin"
+
+  hydra-migrate:
+    image: ghcr.io/canonical/hydra:25.4.0
+    environment:
+      - DSN=postgres://hydra:hydra@postgres:5432/hydra?sslmode=disable
+    command: exec hydra migrate -c /etc/config/hydra/hydra.yml sql -e --yes
+    volumes:
+      - type: bind
+        source: ./hydra
+        target: /etc/config/hydra
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+    networks:
+      - intranet
+    labels:
+      - "traefik.enable=false"
+
+  hydra:
+    image: ghcr.io/canonical/hydra:25.4.0
+    depends_on:
+      hydra-migrate:
+        condition: service_completed_successfully
+    ports:
+      - "4444:4444"
+      - "4445:4445"
+    command: exec hydra serve -c /etc/config/hydra/hydra.yml all --dev
+    volumes:
+      - type: bind
+        source: ./hydra
+        target: /etc/config/hydra
+    environment:
+      - DSN=postgres://hydra:hydra@postgres:5432/hydra?sslmode=disable
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "pebble", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - intranet
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.hydra-public.loadbalancer.server.port=4444"
+      - "traefik.http.services.hydra-admin.loadbalancer.server.port=4445"
+      - "traefik.http.routers.hydra-public.rule=PathPrefix(`/oauth2`) || Path(`/.well-known/jwks.json`) || Path(`/.well-known/openid-configuration`) || Path(`/userinfo`)"
+      - "traefik.http.routers.hydra-public.entryPoints=web"
+      - "traefik.http.routers.hydra-public.service=hydra-public"
+      - "traefik.http.routers.hydra-admin.rule=PathPrefix(`/admin/oauth2`) || PathPrefix(`/admin/clients`) || PathPrefix(`/admin/trust`) || PathPrefix(`/admin/keys`)"
+      - "traefik.http.routers.hydra-admin.entryPoints=web"
+      - "traefik.http.routers.hydra-admin.service=hydra-admin"
+
+networks:
+  intranet:
+    external: true

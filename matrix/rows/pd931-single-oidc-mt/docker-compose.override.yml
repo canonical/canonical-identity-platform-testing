@@ -1,0 +1,33 @@
+# Matrix row: pd931-single-oidc-mt (seed) — GENERATED, DO NOT EDIT.
+# Source of truth: matrix/config-model.mjs; regenerate with `make matrix-generate`.
+# local_idp=off mfa=enforced verification=off webauthn=sequencing providers=1 tenant_service=present hook_service=absent user_verification=absent access_token=jwt
+
+services:
+  kratos:
+    environment:
+      - SELFSERVICE_METHODS_PASSWORD_ENABLED=false
+      - SELFSERVICE_METHODS_PROFILE_ENABLED=false
+      - SELFSERVICE_METHODS_CODE_ENABLED=false
+      - SELFSERVICE_METHODS_TOTP_ENABLED=false
+      - SELFSERVICE_METHODS_LOOKUP_SECRET_ENABLED=true
+      - SELFSERVICE_METHODS_WEBAUTHN_ENABLED=true
+      - SELFSERVICE_METHODS_WEBAUTHN_CONFIG_PASSWORDLESS=false
+      - SELFSERVICE_FLOWS_RECOVERY_ENABLED=false
+      - SELFSERVICE_FLOWS_VERIFICATION_ENABLED=false
+      - SESSION_WHOAMI_REQUIRED_AAL=highest_available
+    command: exec kratos serve -c /etc/config/kratos/kratos.yml -c /etc/config/kratos/kratos.dex.yml --dev --watch-courier
+
+  login-ui:
+    environment:
+      - MFA_ENABLED=true
+      - OIDC_WEBAUTHN_SEQUENCING_ENABLED=true
+      - VERIFICATION_ENABLED=false
+      - MULTI_TENANCY_ENABLED=true
+      - TENANT_SERVICE_GRPC_ADDRESS=tenant-service:50051
+
+  hook-service:
+    scale: 0
+
+  user-verification-service:
+    scale: 0
+

@@ -1,0 +1,207 @@
+services:
+  hook-service-migrate:
+    image: ghcr.io/canonical/hook-service:stable
+    # The migrate subcommand takes --dsn as a flag; it does not read the DSN
+    # env var the serve command uses.
+    command: exec hook-service migrate --dsn postgres://hooks:hooks@postgres:5432/hooks?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+    networks:
+      - intranet
+    labels:
+      - "traefik.enable=false"
+
+  hook-service:
+    image: ghcr.io/canonical/hook-service:stable
+    ports:
+      - "8080:8080"
+    environment:
+      - DSN=postgres://hooks:hooks@postgres:5432/hooks?sslmode=disable
+      - KRATOS_URL=http://kratos:4433
+      - KRATOS_ADMIN_URL=http://kratos:4434
+      - OPENFGA_API_SCHEME=http
+      - OPENFGA_API_HOST=openfga:8080
+      - OPENFGA_AUTHN_METHOD=preshared
+      - OPENFGA_AUTHN_PRESHARED_KEYS=42
+      - LOG_LEVEL=info
+      - TRACING_ENABLED=false
+      - AUTHENTICATION_ISSUER=http://localhost:4444
+      - AUTHENTICATION_JWKS_URL=http://hydra:4444/.well-known/jwks.json
+      - AUTHENTICATION_REQUIRED_SCOPE=hook-service:admin
+      # Shared secret for Hydra's token hook. hook-service only installs its
+      # hook auth middleware when this is non-empty; the value must match
+      # oauth2.token_hook.auth.config.value in docker/hydra/hydra.yml.
+      - API_TOKEN=hook-service-token
+    depends_on:
+      hook-service-migrate:
+        condition: service_completed_successfully
+      kratos:
+        condition: service_healthy
+      hydra:
+        condition: service_healthy
+      openfga:
+        condition: service_started  # openfga has no healthcheck yet; revisit when rock lands
+      postgres:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pebble", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - intranet
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.hook-service.loadbalancer.server.port=8080"
+      - "traefik.http.routers.hook-service.rule=PathPrefix(`/api/v0/hook`)"
+      - "traefik.http.routers.hook-service.entryPoints=web"
+      - "traefik.http.routers.hook-service.service=hook-service"
+
+  login-ui:
+    image: ghcr.io/canonical/identity-platform-login-ui:stable
+    ports:
+      - "8082:4455"
+    environment:
+      - KRATOS_PUBLIC_URL=http://kratos:4433
+      - KRATOS_ADMIN_URL=http://kratos:4434
+      - HYDRA_ADMIN_URL=http://hydra:4445
+      # No trailing slash: login-ui builds its CSP by concatenating BASE_URL with
+      # "/.well-known/webauthn.js", so a trailing slash yields a double-slashed
+      # script-src that cannot match the real script URL — silently CSP-blocking
+      # Ory's WebAuthn helper and breaking every security-key ceremony. Matches
+      # identity-platform-login-ui-operator, which sets scheme://host with no path.
+      - BASE_URL=http://localhost
+      - PORT=4455
+      - COOKIES_ENCRYPTION_KEY=WrfOcYmVBwyduEbKYTUhO4X7XVaOQ1wF
+      - LOG_LEVEL=debug
+      - TRACING_ENABLED=false
+      - MFA_ENABLED=true
+      - OPENFGA_API_SCHEME=http
+      - OPENFGA_API_HOST=openfga:8080
+      - IDENTIFIER_FIRST_ENABLED=true
+    depends_on:
+      kratos:
+        condition: service_healthy
+      hydra:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pebble", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 60s
+    networks:
+      - intranet
+    labels:
+      - "traefik.enable=false"  # routing handled by docker/traefik/login-ui-routes.yml
+
+  user-verification-service:
+    image: ghcr.io/canonical/user-verification-service:stable
+    ports:
+      - "8083:8080"
+    environment:
+      - KRATOS_PUBLIC_URL=http://kratos:4433
+      - KRATOS_ADMIN_URL=http://kratos:4434
+      - SMTP_HOST=mailslurper
+      - SMTP_PORT=1025
+      - LOG_LEVEL=info
+      - TRACING_ENABLED=false
+      - SALESFORCE_ENABLED=false
+    depends_on:
+      kratos:
+        condition: service_healthy
+      mailslurper:
+        condition: service_started  # mailslurper has no healthcheck (see infra compose)
+    healthcheck:
+      test: ["CMD", "pebble", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - intranet
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.user-verification-service.loadbalancer.server.port=8080"
+      # The service registers /api/v0/verify (and /ui/registration_error);
+      # PathPrefix(/api/v0/verification) matches nothing it serves (C-14).
+      - "traefik.http.routers.user-verification-service.rule=PathPrefix(`/api/v0/verify`)"
+      - "traefik.http.routers.user-verification-service.entryPoints=web"
+      - "traefik.http.routers.user-verification-service.service=user-verification-service"
+
+  tenant-service:
+    # v0.3.1 is the earliest release containing canonical/tenant-service@e2cb03b
+    # "fix: add interceptors" — cmd/serve.go:194-196 excludes
+    # /identity.platform.api.tenant.TenantService/LookupTenants from the auth interceptor, which
+    # login-ui's credential-less gRPC client needs. Anything older 500s every
+    # login when multi-tenancy is on (PD-1). Never pin below it.
+    image: ghcr.io/canonical/tenant-service:v0.3.1@sha256:2aef7ec80703d7f460665413a0a9d0d9f2c872c5c25076c262d035813a0ed62d
+    ports:
+      - "8081:8000"
+      - "50051:50051"
+    environment:
+      - DSN=postgres://tenants:tenants@postgres:5432/tenants?sslmode=disable
+      - OPENFGA_API_SCHEME=http
+      - OPENFGA_API_HOST=openfga:8080
+      - OPENFGA_AUTHN_METHOD=preshared
+      - OPENFGA_AUTHN_PRESHARED_KEYS=42
+      - LOG_LEVEL=info
+      - TRACING_ENABLED=false
+      - KRATOS_ADMIN_URL=http://kratos:4434
+      - KRATOS_PUBLIC_URL=http://kratos:4433
+      - AUTHENTICATION_ISSUER=http://localhost:4444
+      - AUTHENTICATION_JWKS_URL=http://hydra:4444/.well-known/jwks.json
+      - AUTHENTICATION_REQUIRED_SCOPE=tenant-service
+      - WEBHOOKS_API_TOKEN=secret_api_key
+      - PORT=8000
+    depends_on:
+      postgres:
+        condition: service_healthy
+      openfga:
+        condition: service_started  # openfga has no healthcheck yet; revisit when rock lands
+      kratos:
+        condition: service_healthy
+      hydra:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "pebble", "health"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+      start_period: 30s
+    networks:
+      - intranet
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.tenant-service.loadbalancer.server.port=8000"
+      - "traefik.http.routers.tenant-service.rule=PathPrefix(`/api/v0/tenants`) || PathPrefix(`/api/v0/webhooks`)"
+      - "traefik.http.routers.tenant-service.entryPoints=web"
+      - "traefik.http.routers.tenant-service.service=tenant-service"
+
+  dex:
+    image: dexidp/dex:v2.42.0
+    ports:
+      - "5556:5556"
+    volumes:
+      - type: bind
+        source: ./dex/config.yml
+        target: /etc/dex/config.yml
+    command: dex serve /etc/dex/config.yml
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:5556/dex/.well-known/openid-configuration"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+    restart: unless-stopped
+    networks:
+      - intranet
+    labels:
+      - "traefik.enable=false"
+
+networks:
+  intranet:
+    external: true

@@ -1,0 +1,37 @@
+# Substrate identity for the juju matrix lane — copy to local.auto.tfvars
+# (gitignored) and replace every value below with this cluster's own.
+#
+#     cp local.auto.tfvars.example local.auto.tfvars
+#
+# Nothing here is a row dimension: rows toggle charm config and relations,
+# never the cluster they land on. Keeping these four values in ONE gitignored
+# file is what lets every tracked file stay substrate-agnostic — after editing
+# it, re-run `make render-manifests` (repo root) so the k8s manifests pick up
+# the new values. Full semantics for each variable live in variables.tf.
+
+# Public traefik ingress hostname. WebAuthn forbids IP-based RP IDs, so a
+# domain-shaped name is required for webauthn rows ("" = bare-IP mode, those
+# rows will not run).
+#   Local workstation: "<LB-IP>.nip.io", where <LB-IP> is the pinned metallb
+#     address of traefik-public —
+#     `juju status --model iam-matrix-core --format=json | jq -r '.applications["traefik-public"].address'`
+#     (verify the name resolves: `getent hosts <LB-IP>.nip.io` — resolvers with
+#     DNS-rebind protection will refuse it).
+#   CI: any self-contained name plus one /etc/hosts line on the runner, e.g.
+#     "iam-matrix.internal".
+ingress_hostname = "REPLACE-ME.nip.io"
+
+# Address of the microk8s node fronting the lane's NodePort services (dex
+# 30556, mailslurper 30437). It must be reachable from BOTH the kratos pods
+# and the host browser, so use the node's routable address, not 127.0.0.1.
+#   `kubectl get nodes -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}'`
+#   (or `microk8s kubectl ...` on a snap install).
+node_ip = "REPLACE-ME"
+
+# Juju cloud/region backing the two models. Must match what the controller
+# already knows for this substrate — an imported model whose cloud block
+# disagrees is REPLACED, cascading through every model_uuid.
+#   `juju clouds --client --format=json | jq -r 'keys[]'` / `juju regions <cloud>`
+# Leave both "" to use the controller default (clean-mode behaviour).
+cloud_name   = "REPLACE-ME"
+cloud_region = "REPLACE-ME"

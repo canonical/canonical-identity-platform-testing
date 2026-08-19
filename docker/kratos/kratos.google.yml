@@ -1,0 +1,32 @@
+selfservice:
+  methods:
+    oidc:
+      enabled: true
+      config:
+        providers:
+          - id: dex
+            provider: generic
+            issuer_url: http://dex:5556/dex
+            client_id: kratos
+            client_secret: dex-client-secret
+            mapper_url: file:///etc/config/kratos/kratos.dex.jsonnet
+            scope:
+              - openid
+              - profile
+              - email
+              - offline_access
+          # Placeholder credentials: the provider must be declared for the
+          # canonical-internal shape (the suite asserts the provider SET the
+          # login flow offers), but the google journeys themselves are
+          # credential-gated and never run in the gate (known-coverage-gaps).
+          # To exercise them for real, substitute a client_id/client_secret
+          # from a Google Cloud OAuth client locally - never commit them.
+          - id: google
+            provider: google
+            client_id: 000000000000-placeholder.apps.googleusercontent.com
+            client_secret: GOCSPX-placeholder
+            mapper_url: file:///etc/config/kratos/kratos.google.jsonnet
+            scope:
+              - openid
+              - profile
+              - email

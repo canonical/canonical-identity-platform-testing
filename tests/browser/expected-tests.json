@@ -1,0 +1,35 @@
+{
+  "note": [
+    "Checked-in expected collection for the browser suite, tier A AND tier B.",
+    "Regenerate with: cd tests/browser && npx playwright test --list --reporter=json",
+    "scripts/gate.mjs diffs the collected set against this file and fails on any",
+    "mismatch, so a spec that silently stops being collected — a bad testMatch, a",
+    "file rename, a top-level throw during load — is caught. The matrix runner's",
+    "declaration-drift check covers tier A only, and every other baseline is",
+    "derived FROM collection, so without this a vanished tier-B spec is invisible.",
+    "A value may be a number, or an array when a file's collection legitimately",
+    "varies by profile — update the array deliberately, never to silence a run."
+  ],
+  "total": [47, 48],
+  "files": {
+    "error.spec.ts": 3,
+    "google-oidc.spec.ts": 3,
+    "login.spec.ts": 5,
+    "navigation.spec.ts": 2,
+    "oidc-error.spec.ts": 4,
+    "oidc.spec.ts": [4, 5],
+    "recovery-code-abuse.spec.ts": 1,
+    "recovery.spec.ts": 3,
+    "registration.spec.ts": 2,
+    "resilience.spec.ts": 5,
+    "session.spec.ts": 3,
+    "tenant.spec.ts": 4,
+    "use-backup-codes.spec.ts": 1,
+    "verification.spec.ts": 3,
+    "webauthn.spec.ts": 2,
+    "webhook-flow.spec.ts": 2
+  },
+  "variants": {
+    "oidc.spec.ts": "4 with OIDC/WebAuthn sequencing off, 5 with it on. The spec picks its scenario suite at COLLECTION time from the declared oidc_webauthn_sequencing_enabled (specs/oidc.spec.ts) so that exactly one variant per journey is reported per profile; the sequencing suite carries one extra scenario, oidc-webauthn-assertion, which is the suite's only WebAuthn assertion ceremony (R-5)."
+  }
+}

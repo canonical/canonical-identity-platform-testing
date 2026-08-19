@@ -1,0 +1,252 @@
+{
+  "generatedBy": "matrix/generate.mjs — edit matrix/config-model.mjs, then `make matrix-generate`",
+  "modelVersion": 1,
+  "dimensions": {
+    "local_idp": [
+      "on",
+      "off"
+    ],
+    "mfa": [
+      "enforced",
+      "off"
+    ],
+    "verification": [
+      "on",
+      "off"
+    ],
+    "webauthn": [
+      "none",
+      "passwordless",
+      "sequencing"
+    ],
+    "providers": [
+      "0",
+      "1",
+      "2"
+    ],
+    "tenant_service": [
+      "present",
+      "absent"
+    ],
+    "hook_service": [
+      "present",
+      "absent"
+    ],
+    "user_verification": [
+      "present",
+      "absent"
+    ],
+    "access_token": [
+      "jwt",
+      "opaque"
+    ]
+  },
+  "stats": {
+    "validRows": 448,
+    "achievablePairs": 157,
+    "coveredByPinned": 68,
+    "coveredBySeeds": 33,
+    "generatedRows": 6,
+    "totalRows": 11
+  },
+  "excludedPairs": [
+    "local_idp=off|verification=on",
+    "local_idp=on|webauthn=passwordless",
+    "local_idp=off|webauthn=passwordless",
+    "local_idp=off|providers=0",
+    "mfa=enforced|webauthn=passwordless",
+    "mfa=off|webauthn=passwordless",
+    "verification=on|webauthn=passwordless",
+    "verification=off|webauthn=passwordless",
+    "providers=0|webauthn=passwordless",
+    "providers=1|webauthn=passwordless",
+    "providers=2|webauthn=passwordless",
+    "providers=0|webauthn=sequencing",
+    "tenant_service=present|webauthn=passwordless",
+    "tenant_service=absent|webauthn=passwordless",
+    "hook_service=present|webauthn=passwordless",
+    "hook_service=absent|webauthn=passwordless",
+    "user_verification=present|webauthn=passwordless",
+    "user_verification=absent|webauthn=passwordless",
+    "access_token=jwt|webauthn=passwordless",
+    "access_token=opaque|webauthn=passwordless"
+  ],
+  "rows": [
+    {
+      "name": "core",
+      "kind": "pinned",
+      "dims": {
+        "local_idp": "on",
+        "mfa": "off",
+        "verification": "on",
+        "webauthn": null,
+        "providers": "1",
+        "tenant_service": "absent",
+        "hook_service": "absent",
+        "user_verification": "absent",
+        "access_token": "jwt"
+      },
+      "newPairs": 28
+    },
+    {
+      "name": "canonical-internal",
+      "kind": "pinned",
+      "dims": {
+        "local_idp": "on",
+        "mfa": "enforced",
+        "verification": "on",
+        "webauthn": "sequencing",
+        "providers": "2",
+        "tenant_service": "absent",
+        "hook_service": "present",
+        "user_verification": "present",
+        "access_token": "jwt"
+      },
+      "newPairs": 30
+    },
+    {
+      "name": "canonical-portal",
+      "kind": "pinned",
+      "dims": {
+        "local_idp": "on",
+        "mfa": "enforced",
+        "verification": "on",
+        "webauthn": null,
+        "providers": "1",
+        "tenant_service": "present",
+        "hook_service": "present",
+        "user_verification": "present",
+        "access_token": "jwt"
+      },
+      "newPairs": 10
+    },
+    {
+      "name": "pd931-single-oidc-mt",
+      "kind": "seed",
+      "dims": {
+        "local_idp": "off",
+        "mfa": "enforced",
+        "verification": "off",
+        "webauthn": "sequencing",
+        "providers": "1",
+        "tenant_service": "present",
+        "hook_service": "absent",
+        "user_verification": "absent",
+        "access_token": "jwt"
+      },
+      "newPairs": 23
+    },
+    {
+      "name": "tfdefault-oidc-only",
+      "kind": "seed",
+      "dims": {
+        "local_idp": "off",
+        "mfa": "enforced",
+        "verification": "off",
+        "webauthn": "none",
+        "providers": "1",
+        "tenant_service": "absent",
+        "hook_service": "absent",
+        "user_verification": "absent",
+        "access_token": "jwt"
+      },
+      "newPairs": 10
+    },
+    {
+      "name": "mx-l1m0v0wnp0t1h1u1ao",
+      "kind": "generated",
+      "dims": {
+        "local_idp": "on",
+        "mfa": "off",
+        "verification": "off",
+        "webauthn": "none",
+        "providers": "0",
+        "tenant_service": "present",
+        "hook_service": "present",
+        "user_verification": "present",
+        "access_token": "opaque"
+      },
+      "newPairs": 27
+    },
+    {
+      "name": "mx-l0m0v0wsp2t1h1u0ao",
+      "kind": "generated",
+      "dims": {
+        "local_idp": "off",
+        "mfa": "off",
+        "verification": "off",
+        "webauthn": "sequencing",
+        "providers": "2",
+        "tenant_service": "present",
+        "hook_service": "present",
+        "user_verification": "absent",
+        "access_token": "opaque"
+      },
+      "newPairs": 13
+    },
+    {
+      "name": "mx-l1m1v1wnp0t0h0u1ao",
+      "kind": "generated",
+      "dims": {
+        "local_idp": "on",
+        "mfa": "enforced",
+        "verification": "on",
+        "webauthn": "none",
+        "providers": "0",
+        "tenant_service": "absent",
+        "hook_service": "absent",
+        "user_verification": "present",
+        "access_token": "opaque"
+      },
+      "newPairs": 10
+    },
+    {
+      "name": "mx-l0m1v0wnp2t1h0u1aj",
+      "kind": "generated",
+      "dims": {
+        "local_idp": "off",
+        "mfa": "enforced",
+        "verification": "off",
+        "webauthn": "none",
+        "providers": "2",
+        "tenant_service": "present",
+        "hook_service": "absent",
+        "user_verification": "present",
+        "access_token": "jwt"
+      },
+      "newPairs": 3
+    },
+    {
+      "name": "mx-l1m1v1wnp0t1h1u0aj",
+      "kind": "generated",
+      "dims": {
+        "local_idp": "on",
+        "mfa": "enforced",
+        "verification": "on",
+        "webauthn": "none",
+        "providers": "0",
+        "tenant_service": "present",
+        "hook_service": "present",
+        "user_verification": "absent",
+        "access_token": "jwt"
+      },
+      "newPairs": 2
+    },
+    {
+      "name": "mx-l1m1v1wnp1t1h1u1ao",
+      "kind": "generated",
+      "dims": {
+        "local_idp": "on",
+        "mfa": "enforced",
+        "verification": "on",
+        "webauthn": "none",
+        "providers": "1",
+        "tenant_service": "present",
+        "hook_service": "present",
+        "user_verification": "present",
+        "access_token": "opaque"
+      },
+      "newPairs": 1
+    }
+  ]
+}

@@ -1,0 +1,39 @@
+# Dex OIDC provider for browser E2E tests.
+#
+# Dex acts as an external social login provider (like Google or GitHub)
+# that Kratos can use for OIDC login. It runs inside Docker Compose
+# and is reachable from the browser via Chromium's --host-resolver-rules
+# which maps "dex" → 127.0.0.1.
+#
+# Static password user for tests:
+#   Email:    dex-user@test.example
+#   Password: dex-password
+
+issuer: http://dex:5556/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+staticClients:
+  - id: kratos
+    name: Kratos
+    secret: dex-client-secret
+    redirectURIs:
+      - http://localhost/self-service/methods/oidc/callback/dex
+
+enablePasswordDB: true
+
+staticPasswords:
+  - email: "dex-user@test.example"
+    # bcrypt hash of "dex-password"
+    hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
+    username: "Dex Test User"
+    userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+
+oauth2:
+  # Skip the approval/consent screen to simplify test flows.
+  # Dex will auto-grant access after login.
+  skipApprovalScreen: true

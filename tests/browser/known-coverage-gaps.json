@@ -1,0 +1,27 @@
+{
+  "$comment": [
+    "Tests that currently execute on NO profile, with the reason each is blocked.",
+    "scripts/coverage-union.mjs fails if a test is uncovered and NOT listed here,",
+    "and ALSO fails if a listed test has started running again \u2014 so the register",
+    "cannot rot into a silent quarantine list. Removing an entry is the last step",
+    "of fixing the gap. Every entry must name what unblocks it.",
+    "See docs/testing-spec.md (open work)."
+  ],
+  "gaps": [
+    {
+      "test": "google-oidc.spec.ts \u203a google-oidc-first-login",
+      "reason": "no Google Workspace test credentials are supplied to this environment",
+      "unblocked_by": "exporting GOOGLE_TEST_EMAIL, GOOGLE_TEST_PASSWORD, GOOGLE_TEST_TOTP_SECRET and GOOGLE_TEST_SUBJECT_ID, and running the canonical-internal profile with the real Chrome channel (make test-browser-setup installs it)"
+    },
+    {
+      "test": "google-oidc.spec.ts \u203a google-oidc-session-reuse",
+      "reason": "no Google Workspace test credentials are supplied to this environment",
+      "unblocked_by": "exporting GOOGLE_TEST_EMAIL, GOOGLE_TEST_PASSWORD, GOOGLE_TEST_TOTP_SECRET and GOOGLE_TEST_SUBJECT_ID, and running the canonical-internal profile with the real Chrome channel (make test-browser-setup installs it)"
+    },
+    {
+      "test": "google-oidc.spec.ts \u203a google-oidc-sequencing",
+      "reason": "no Google Workspace test credentials are supplied to this environment",
+      "unblocked_by": "exporting GOOGLE_TEST_EMAIL, GOOGLE_TEST_PASSWORD, GOOGLE_TEST_TOTP_SECRET and GOOGLE_TEST_SUBJECT_ID, and running the canonical-internal profile with the real Chrome channel (make test-browser-setup installs it)"
+    }
+  ]
+}

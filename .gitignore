@@ -1,0 +1,34 @@
+# Active profile
+.active-profile
+
+# Python
+*.pyc
+.venv/
+venv/
+
+# Node
+node_modules/
+
+# Environment
+.env
+.env.local
+
+# Stray root-owned bind-mount artifacts
+docker/docker/
+
+# Browser test generated artifacts
+tests/browser/test-results/
+tests/browser/test-results.*/
+tests/browser/playwright-report/
+tests/browser/active-config.json
+tests/browser/manifest.json
+
+tests/browser/coverage/
+
+# Substrate identity + machine-local terraform state (juju lane). The
+# .example template is tracked on purpose — `*.auto.tfvars` does not match it.
+*.auto.tfvars
+
+# Manifests rendered from *.yaml.tpl by `make render-manifests`; they carry
+# this cluster's node IP / ingress hostname, so they are never tracked.
+matrix/backends/juju/manifests/.rendered/

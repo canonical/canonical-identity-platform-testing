@@ -1,0 +1,24 @@
+{
+  "name": "identity-platform-browser-tests",
+  "version": "1.0.0",
+  "description": "Unified Playwright browser tests for the Canonical Identity Platform",
+  "scripts": {
+    "test": "npx playwright test",
+    "test:ui": "npx playwright test --ui",
+    "test:headed": "npx playwright test --headed",
+    "test:debug": "npx playwright test --debug",
+    "test:live": "node scripts/run-lane-tests.mjs live",
+    "test:internal": "node scripts/run-lane-tests.mjs internal",
+    "audit:live": "node scripts/audit-live-compat.mjs",
+    "typecheck": "tsc --noEmit",
+    "test:unit": "npx tsx --test framework/*.test.ts seeder/*.test.ts"
+  },
+  "keywords": [],
+  "author": "Canonical Ltd.",
+  "license": "AGPL-3.0",
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^24.10.1",
+    "typescript": "^6.0.2"
+  }
+}

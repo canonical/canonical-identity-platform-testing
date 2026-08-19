@@ -1,0 +1,38 @@
+{
+  "oidc_webauthn_sequencing_enabled": false,
+  "base_url": "http://localhost",
+  "identifier_first_enabled": true,
+  "multi_tenancy_enabled": true,
+  "support_email": "",
+  "flags": [
+    "password",
+    "totp",
+    "backup_codes"
+  ],
+  "services": [
+    "kratos",
+    "hydra",
+    "login-ui",
+    "dex",
+    "openfga",
+    "tenant-service",
+    "hook-service"
+  ],
+  "methods_1fa": [
+    "password"
+  ],
+  "methods_2fa": [
+    "totp",
+    "backup_codes"
+  ],
+  "mfa_enforced": true,
+  "webauthn_enabled": false,
+  "oidc_enabled": false,
+  "local_users_enabled": true,
+  "registration_enabled": true,
+  "account_linking_enabled": false,
+  "oidc_providers": [],
+  "verification_enabled": true,
+  "access_token_format": "jwt",
+  "mail_api": true
+}
