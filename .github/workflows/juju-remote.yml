@@ -1,36 +1,36 @@
 # The remote charmed-deployment lane — docs/ci-spec.md.
-# Runs `make test-matrix-row ROW=<row> BACKEND=juju ATTACH=1` against an
-# EXISTING deployment (dev = blue-iam/blue-core nightly, stg =
-# green-iam/green-core weekly) through JIMM, using service-account client
-# credentials for both the juju CLI (JUJU_CLIENT_ID/JUJU_CLIENT_SECRET,
-# juju/juju#20716) and terraform (TF_VAR_jimm_* -> provider attributes in
-# matrix/backends/juju/root/providers.tf).
+# Runs `make test-matrix-row ROW=<row> BACKEND=juju ATTACH=1` against the
+# test-designated charmed deployment (yellow = yellow-iam/yellow-core) through
+# JIMM, using service-account client credentials for both the juju CLI
+# (JUJU_CLIENT_ID/JUJU_CLIENT_SECRET, juju/juju#20716) and terraform
+# (TF_VAR_jimm_* -> provider attributes in matrix/backends/juju/root/providers.tf).
 #
 # Scheduled runs are ALWAYS plan-only: the drift gate adopts nothing, applies
 # nothing, and reports how far the deployment sits from the row's declared
-# configuration. attach-apply (adopt -> transition) MUTATES config owned by
-# cd-identity-core-infrastructure and the operator repos' CD, so it is
-# dispatch-only, dev-only, and additionally gated on the environment variable
-# ALLOW_ATTACH_APPLY=true (see docs/ci-spec.md phase 2 for why it stays off).
-name: Juju drift gate (dev/stg)
+# configuration. attach-apply (adopt -> transition) MUTATES the deployment, so
+# it is dispatch-only and additionally gated on the target environment's
+# ALLOW_ATTACH_APPLY=true variable (see docs/ci-spec.md phase 2 for why it
+# stays off today). Policy lives in the environment's variables, not in
+# name-matching here — a new color slots in by creating a GitHub environment.
+name: Juju drift gate
 
 on:
   schedule:
-    - cron: '30 2 * * *' # dev, nightly
-    - cron: '0 3 * * 1' # stg, weekly
+    - cron: '30 2 * * *' # yellow, nightly
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Target deployment (GitHub environment: dev or stg)'
+        description: 'Target deployment (GitHub environment; yellow is the test-designated one)'
         type: environment
         required: true
+        default: 'yellow'
       row:
         description: Matrix row whose declaration the deployment is compared against
         type: string
         required: false
         default: 'core'
       mode:
-        description: 'plan-only = zero-mutation drift gate; attach-apply MUTATES the deployment (dev only, requires ALLOW_ATTACH_APPLY=true)'
+        description: 'plan-only = zero-mutation drift gate; attach-apply MUTATES the deployment (requires ALLOW_ATTACH_APPLY=true on the environment)'
         type: choice
         options: ['plan-only', 'attach-apply']
         default: 'plan-only'
@@ -56,23 +56,14 @@ jobs:
       - id: pick
         env:
           EVENT: ${{ github.event_name }}
-          SCHEDULE: ${{ github.event.schedule }}
           IN_ENV: ${{ inputs.environment }}
           IN_ROW: ${{ inputs.row }}
           IN_MODE: ${{ inputs.mode }}
         run: |
           if [ "$EVENT" = "workflow_dispatch" ]; then
             env_name="$IN_ENV"; row="${IN_ROW:-core}"; mode="${IN_MODE:-plan-only}"
-          elif [ "$SCHEDULE" = "30 2 * * *" ]; then
-            env_name="dev"; row="core"; mode="plan-only"
           else
-            env_name="stg"; row="core"; mode="plan-only"
-          fi
-          # stg config is owned by cd-identity-core-infrastructure CD: this
-          # lane never applies there, under any trigger.
-          if [ "$mode" = "attach-apply" ] && [ "$env_name" != "dev" ]; then
-            echo "::error::attach-apply is dev-only; $env_name is plan-only by policy (docs/ci-spec.md)"
-            exit 1
+            env_name="yellow"; row="core"; mode="plan-only"
           fi
           {
             echo "environment=$env_name"
