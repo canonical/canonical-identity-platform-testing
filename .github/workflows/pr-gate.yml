@@ -58,7 +58,10 @@ jobs:
     name: Gate (${{ matrix.profile }})
     needs: [hermetic, profiles]
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
+    # Evidence-based: three green runs measured 5-8 min per gate job
+    # (2026-08-26, runs 32942798877/32943709027/32944592116); 45 gives ~5x
+    # headroom without letting a hang absorb a runner for two hours.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
