@@ -195,6 +195,22 @@ MANIFEST=/secure/iam-test-manifest.json BROWSER_TEST_LANE=live npm run test:live
 MANIFEST=/secure/iam-test-manifest.json npx tsx seeder/seed.ts --purge --profile <row>
 ```
 
+#### The identity schema is NOT `default` on a real deployment
+
+`KRATOS_IDENTITY_SCHEMA_ID` (default `default`) names the schema every seeded
+identity is created under, and a charmed deployment ships its own set — ask it,
+never assume:
+
+```bash
+curl -s https://<host>/schemas | jq -r '.[].id'
+# iam.orange.canonical.com -> social_user_v0, admin_v0   (no "default")
+```
+
+Pass the human-user schema (`KRATOS_IDENTITY_SCHEMA_ID=social_user_v0` there).
+The seeder writes traits `email`, `name`, `surname`; a schema that requires only
+`email` and does not set `additionalProperties: false` — both of the above —
+accepts them unchanged.
+
 `MANIFEST=<path>` overrides the manifest location for the seeder and the suite
 alike; unset, both use `tests/browser/manifest.json`. `make unseed-test-data`
 is the local shorthand for the purge step.
@@ -208,4 +224,52 @@ With no manifest at all, scenarios that a lane or capability already excludes
 skip normally — gating happens before the manifest is read. Scenarios that do
 run still need a seeded user, so supply a manifest via `MANIFEST=<path>`; the
 `urls` matrix backend without `KRATOS_ADMIN_URL` is exactly this case.
+
+A manifest-less run does not touch the deployment at all: the scenario runner
+needs the seeded user before it opens a page, so it fails in fixture setup
+("Manifest file not found", or "totpSecret is null" against a stale manifest
+from another stack). Point `MANIFEST` at the right file — or delete the stale
+one — rather than reading those failures as deployment problems.
+
+### Worked example: iam.orange.canonical.com
+
+The whole contract for one live deployment, no substrate access, using the row
+that matches its shape (`matrix/rows/deployed-core-local-mfa`):
+
+```bash
+# 0. This target serves an incomplete TLS chain (leaf only). Complete it —
+#    do not disable verification (docs/testing-spec.md §9).
+curl -s http://yr1.i.lencr.org/ | openssl x509 -inform DER > /tmp/lechain.pem
+curl -s http://yr.i.lencr.org/  | openssl x509 -inform DER >> /tmp/lechain.pem
+export NODE_EXTRA_CA_CERTS=/tmp/lechain.pem
+
+# 1. Seed, on a host that can reach the admin APIs (port-forward, bastion, …).
+#    KRATOS_PUBLIC_URL here must be kratos ITSELF, not the ingress: TOTP
+#    enrolment is a native flow and the BFF serves no native API. The script
+#    proves that (and the schema id) before it writes anything; --check stops
+#    after the probes.
+export KRATOS_ADMIN_URL=http://127.0.0.1:4434 \
+       KRATOS_PUBLIC_URL=http://127.0.0.1:4433 \
+       HYDRA_ADMIN_URL=http://127.0.0.1:4445 \
+       KRATOS_IDENTITY_SCHEMA_ID=social_user_v0 \
+       MANIFEST=/secure/orange-manifest.json
+scripts/seed-remote.sh --check     # prerequisites only, zero mutation
+scripts/seed-remote.sh             # --fresh
+
+# 2. Run the row's full contract from a host with only the public ingress.
+LOGIN_UI_URL=https://iam.orange.canonical.com \
+KRATOS_PUBLIC_URL=https://iam.orange.canonical.com \
+HYDRA_PUBLIC_URL=https://iam.orange.canonical.com \
+MANIFEST=/secure/orange-manifest.json \
+  make test-matrix-row ROW=deployed-core-local-mfa BACKEND=urls
+
+# 3. Remove exactly what was seeded, from the seeding host.
+scripts/seed-remote.sh --purge
+```
+
+Note that `KRATOS_PUBLIC_URL` means two different things in the two steps, and
+both are correct: kratos's own API for seeding (native flows), the public ingress
+for testing (what a browser gets). Leaving `KRATOS_ADMIN_URL` unset in step 2 is
+deliberate — it is what selects the live lane (11 tier-A executions on this row)
+and keeps the run incapable of mutating the deployment.
 

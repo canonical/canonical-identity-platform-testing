@@ -28,9 +28,46 @@ test("rowName encoding round-trips every non-pinned row", () => {
   }
 });
 
-test("mail is a declared capability on every row", () => {
+// `mail_api` is a DECLARED capability on every row, and dims alone never turn
+// it off: only a row's `caps` block can, because a target without mailslurper
+// is a property of that target, not of the platform's configuration space.
+test("mail is a declared capability on every row, and only a caps block moves it", () => {
   for (const row of namedRows) {
-    assert.equal(capabilities(row.dims).mail_api, true, row.name);
+    assert.equal(capabilities(row.dims).mail_api, true, `${row.name} dims-derived`);
+    assert.equal(
+      capabilities(row.dims, row.caps).mail_api,
+      row.caps?.mail_api ?? true,
+      `${row.name} materialized`,
+    );
+  }
+});
+
+test("a caps override must name a real key and must actually change it", () => {
+  const dims = namedRows[0].dims;
+  assert.throws(
+    () => capabilities(dims, { mail_apo: false }),
+    /names no derived capability key/,
+    "a typo'd key must not silently shape the executed set",
+  );
+  assert.throws(
+    () => capabilities(dims, { mail_api: true }),
+    /repeats the derived value/,
+    "a no-op override is dead weight and hides intent",
+  );
+  assert.equal(capabilities(dims, { mail_api: false }).mail_api, false);
+  // Deep values compare structurally, so re-stating an array is a no-op too.
+  assert.throws(
+    () => capabilities(dims, { oidc_providers: capabilities(dims).oidc_providers }),
+    /repeats the derived value/,
+  );
+});
+
+test("every row's caps block survives materialization", () => {
+  for (const row of namedRows.filter((r) => r.caps)) {
+    const caps = capabilities(row.dims, row.caps);
+    for (const [key, want] of Object.entries(row.caps)) {
+      assert.deepEqual(caps[key], want, `${row.name} override ${key}`);
+    }
   }
 });
 

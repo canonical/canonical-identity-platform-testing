@@ -1,6 +1,6 @@
-# Matrix row: mx-l1m1v1wnp1t1h1u1ao (generated) — GENERATED, DO NOT EDIT.
+# Matrix row: mx-l1m1v1wnp0t1h1u0ao (generated) — GENERATED, DO NOT EDIT.
 # Source of truth: matrix/config-model.mjs; regenerate with `make matrix-generate`.
-# local_idp=on mfa=enforced verification=on webauthn=none providers=1 tenant_service=present hook_service=present user_verification=present access_token=opaque
+# local_idp=on mfa=enforced verification=on webauthn=none providers=0 tenant_service=present hook_service=present user_verification=absent access_token=opaque
 
 services:
   kratos:
@@ -14,7 +14,7 @@ services:
       - SELFSERVICE_FLOWS_RECOVERY_ENABLED=true
       - SELFSERVICE_FLOWS_VERIFICATION_ENABLED=true
       - SESSION_WHOAMI_REQUIRED_AAL=highest_available
-    command: exec kratos serve -c /etc/config/kratos/kratos.yml -c /etc/config/kratos/kratos.dex.yml --dev --watch-courier
+    command: exec kratos serve -c /etc/config/kratos/kratos.yml --dev --watch-courier
 
   login-ui:
     environment:
@@ -38,4 +38,7 @@ services:
       # Charm renders allowed_top_level_claims from the relation's claim list
       # (groups, + tenant_id iff hook↔tenant-service related).
       - OAUTH2_ALLOWED_TOP_LEVEL_CLAIMS=groups,tenant_id
+
+  user-verification-service:
+    scale: 0
 

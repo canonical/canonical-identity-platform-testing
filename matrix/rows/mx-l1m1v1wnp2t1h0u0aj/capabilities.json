@@ -5,6 +5,9 @@
   "multi_tenancy_enabled": true,
   "support_email": "",
   "flags": [
+    "password",
+    "totp",
+    "backup_codes",
     "account_linking"
   ],
   "services": [
@@ -13,24 +16,27 @@
     "login-ui",
     "dex",
     "openfga",
-    "tenant-service",
-    "user-verification-service"
+    "tenant-service"
   ],
   "methods_1fa": [
+    "password",
     "oidc"
   ],
-  "methods_2fa": [],
+  "methods_2fa": [
+    "totp",
+    "backup_codes"
+  ],
   "mfa_enforced": true,
   "webauthn_enabled": false,
   "oidc_enabled": true,
-  "local_users_enabled": false,
+  "local_users_enabled": true,
   "registration_enabled": true,
   "account_linking_enabled": true,
   "oidc_providers": [
     "dex",
     "google"
   ],
-  "verification_enabled": false,
+  "verification_enabled": true,
   "access_token_format": "jwt",
   "mail_api": true,
   "juju": {

@@ -727,6 +727,29 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
     }
   }
 
+  // Post-condition on the artifact, not on the steps that built it. TOTP
+  // enrolment drives a live login + settings flow and its failure was only ever
+  // a console.warn, so `--fresh` reported success while writing
+  // `totpSecret: null` — and every MFA scenario then died on "totpSecret is
+  // null in the manifest … re-seed", pointing the operator at the seeder
+  // instead of at whatever actually broke (on a real deployment: a
+  // KRATOS_PUBLIC_URL aimed at an ingress that fronts the login-ui BFF, which
+  // serves no native /self-service/login/api at all). Checking the manifest
+  // catches every route to a null secret, not just the one that warned.
+  for (const [ref, archetype] of userRequirements) {
+    if (!archetype.totpConfigured || !localUsersEnabled()) continue;
+    const seeded = users.find((u) => u.ref === ref);
+    if (seeded && seeded.totpSecret === null) {
+      record(
+        `provision TOTP for ${ref}`,
+        new Error(
+          "archetype declares totpConfigured but the manifest carries no secret — " +
+          "KRATOS_PUBLIC_URL must serve kratos's own native API (/self-service/login/api)",
+        ),
+      );
+    }
+  }
+
   // Write manifest
   const manifest: Manifest = {
     profile: activeProfile,

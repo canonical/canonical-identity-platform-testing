@@ -248,15 +248,24 @@ The spec's "non-blocking; failures file issues" contract, made real:
 
 ## 8. Phase 2 — staged work (deliberately not shipped broken)
 
-1. **Suite legs against the charmed deployment (urls backend, mode 5).** Blocked on:
-   (a) a pinned row whose declaration matches the deployed shape
-   (google external IdP via `kratos-external-idp-integrator`, no
-   mailslurper/dex/tenant-service) — `matrix/verify.mjs` correctly refuses to
-   run the suite against a declaration the deployment does not match, and
-   the deployment matches no current row; (b) an out-of-band-seeded manifest
-   (`MANIFEST=<path>`, `tests/browser/LANES.md`) provisioned as an environment
-   secret, since no admin ingress exists. Deliverable: live-lane subset
-   against `LOGIN_UI_URL=https://iam.yellow.canonical.com`.
+1. **Suite legs against the charmed deployment (urls backend, mode 5).**
+   Blocker (a) — *no row matched the deployed shape* — is **cleared**:
+   `deployed-core-local-mfa` is the shape read off `iam.orange.canonical.com`
+   through its public ingress alone (local idp + enforced MFA, no external IdP,
+   no add-ons, `mail_api=false`), and the preflight is green against it:
+   `LOGIN_UI_URL=https://iam.orange.canonical.com` plus the same host for
+   `KRATOS_PUBLIC_URL`/`HYDRA_PUBLIC_URL`, 5 checks pass, 6 warn-skip naming
+   exactly what a substrate-less lane cannot ask. Two prerequisites remain
+   before the leg is green end to end:
+   (b) an out-of-band-seeded manifest (`MANIFEST=<path>`,
+   `tests/browser/LANES.md`) provisioned as an environment secret, since no
+   admin ingress exists — without it the 11 live-lane executions fail on
+   missing seed data (they never reach the deployment);
+   (c) the target's TLS chain: it serves the leaf only, so any non-AIA-chasing
+   client needs `NODE_EXTRA_CA_CERTS` with the missing intermediates
+   (docs/testing-spec.md §9). Chromium is unaffected.
+   Deliverable: live-lane subset against
+   `LOGIN_UI_URL=https://iam.<colour>.canonical.com`.
 2. **`jujuEnv()` discovery guards.** `matrix/run-row.mjs` hard-parses
    `juju config idp-dex` (and friends) during URL discovery, so any juju-
    backend run past plan-only crashes on a model without the test-only apps —

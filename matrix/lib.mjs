@@ -165,7 +165,15 @@ export const TOGGLED_SERVICES = {
 // (tests/browser/framework/active-config.ts) plus two extra keys. This is what
 // the deployment ACTUALLY is — comparing it against the live /api/v0/app-config
 // response is itself a test of PD-5.
-export function capabilities(dims) {
+//
+// `overrides` is a row's `caps` block (seed rows only): row-level truths that
+// are NOT dimensions because no charm option or relation produces them — a
+// target with no mailslurper and no dex is a property of that deployment, not
+// of the platform's configuration space. It is a SHALLOW override, and it is
+// checked rather than trusted: an unknown key is a typo and a no-op value is
+// dead weight, so both throw at generation time instead of silently shaping the
+// executed set.
+export function capabilities(dims, overrides = {}) {
   const v = derive(dims);
   const services = ["kratos", "hydra", "login-ui", "dex", "openfga"];
   if (v.tenant) services.push("tenant-service");
@@ -193,7 +201,7 @@ export function capabilities(dims) {
   if (v.lookup) flags.push("backup_codes");
   if (v.oidc) flags.push("account_linking");
 
-  return {
+  const caps = {
     oidc_webauthn_sequencing_enabled: dims.webauthn === "sequencing",
     base_url: "http://localhost",
     identifier_first_enabled: true,
@@ -213,9 +221,9 @@ export function capabilities(dims) {
     verification_enabled: v.verificationFlow,
     access_token_format: dims.access_token,
     // Mail is a declared capability, not an assumption: both backends deploy
-    // mailslurper today, so every materialized row is true. A hand-written
-    // capabilities file for a mail-less target sets false and the suite gates
-    // mail-dependent scenarios off at runtime (requires.mailApi).
+    // mailslurper today, so every dims-derived row is true. A row whose TARGET
+    // has no mail API declares `caps: { mail_api: false }` in the model and the
+    // suite gates mail-dependent scenarios off at runtime (requires.mailApi).
     mail_api: true,
     // Backend-divergent keys: the juju lane renders its second provider as
     // a second dex client (idp-dex2 integrator - google needs real
@@ -224,6 +232,17 @@ export function capabilities(dims) {
     // MATRIX_BACKEND (matrix/verify.mjs, framework/global-setup.ts).
     ...(dims.providers === "2" ? { juju: { oidc_providers: ["dex", "dex2"] } } : {}),
   };
+
+  for (const [key, value] of Object.entries(overrides)) {
+    if (!(key in caps)) {
+      throw new Error(`capabilities override '${key}' names no derived capability key`);
+    }
+    if (JSON.stringify(caps[key]) === JSON.stringify(value)) {
+      throw new Error(`capabilities override '${key}' repeats the derived value — delete it`);
+    }
+    caps[key] = value;
+  }
+  return caps;
 }
 
 export function rowName(dims) {

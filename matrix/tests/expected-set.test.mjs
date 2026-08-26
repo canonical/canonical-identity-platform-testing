@@ -1,7 +1,7 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 //
-// Expected-set canaries for the two SEED rows.
+// Expected-set canaries for the SEED rows.
 //
 // `scripts/expected-set.ts` and the scenario runner share one `satisfies()` on
 // purpose — they cannot drift from each other. The cost of that design is that
@@ -74,9 +74,34 @@ const TFDEFAULT_RUN = [
   "specs/oidc.spec.ts :: oidc-forced-reauth",
 ];
 
+// The deployed-core shape: local users with MFA enforced, no external IdP, no
+// add-ons, no mail API. The only canary with local-user journeys and the whole
+// resilience suite, and the only one whose oidc.spec.ts contribution is empty —
+// which is what makes it discriminating about oidc gating in the other
+// direction. mail_api=false is what keeps recovery/verification/registration
+// out of the list even though local users exist.
+const DEPLOYED_CORE_RUN = [
+  "specs/error.spec.ts :: wrong-password-error",
+  "specs/error.spec.ts :: invalid-totp-code",
+  "specs/oidc-error.spec.ts :: unknown-client-renders-error-page",
+  "specs/oidc-error.spec.ts :: invalid-redirect-uri-renders-error-page",
+  "specs/oidc-error.spec.ts :: invalid-scope-redirects-error-to-rp",
+  "specs/oidc-error.spec.ts :: prompt-none-without-session",
+  "specs/login.spec.ts :: first-login-mfa",
+  "specs/login.spec.ts :: returning-login-mfa",
+  "specs/login.spec.ts :: expired-totp-code",
+  "specs/resilience.spec.ts :: refresh-survives-login-walk",
+  "specs/resilience.spec.ts :: double-click-submit",
+  "specs/resilience.spec.ts :: callback-replay-rejected",
+  "specs/resilience.spec.ts :: back-after-auth-terminal",
+  "specs/session.spec.ts :: session-reuse-no-max-age",
+  "specs/session.spec.ts :: forced-reauth-max-age-0",
+];
+
 for (const [row, expectedRun] of [
   ["pd931-single-oidc-mt", PD931_RUN],
   ["tfdefault-oidc-only", TFDEFAULT_RUN],
+  ["deployed-core-local-mfa", DEPLOYED_CORE_RUN],
 ]) {
   test(`expected-set for ${row} is exactly the pinned list`, () => {
     const out = expectedSet(row);
@@ -97,6 +122,8 @@ for (const [row, expectedRun] of [
   });
 }
 
-test("the two seed rows differ — the canaries are discriminating", () => {
+test("the seed rows differ — the canaries are discriminating", () => {
   assert.notDeepEqual(PD931_RUN, TFDEFAULT_RUN);
+  assert.notDeepEqual(PD931_RUN, DEPLOYED_CORE_RUN);
+  assert.notDeepEqual(TFDEFAULT_RUN, DEPLOYED_CORE_RUN);
 });

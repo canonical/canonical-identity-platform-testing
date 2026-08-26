@@ -1,12 +1,12 @@
 {
-  "oidc_webauthn_sequencing_enabled": false,
+  "oidc_webauthn_sequencing_enabled": true,
   "base_url": "http://localhost",
   "identifier_first_enabled": true,
-  "multi_tenancy_enabled": true,
+  "multi_tenancy_enabled": false,
   "support_email": "",
   "flags": [
     "password",
-    "totp",
+    "webauthn",
     "backup_codes",
     "account_linking"
   ],
@@ -16,8 +16,6 @@
     "login-ui",
     "dex",
     "openfga",
-    "tenant-service",
-    "hook-service",
     "user-verification-service"
   ],
   "methods_1fa": [
@@ -25,11 +23,11 @@
     "oidc"
   ],
   "methods_2fa": [
-    "totp",
-    "backup_codes"
+    "backup_codes",
+    "webauthn"
   ],
-  "mfa_enforced": true,
-  "webauthn_enabled": false,
+  "mfa_enforced": false,
+  "webauthn_enabled": true,
   "oidc_enabled": true,
   "local_users_enabled": true,
   "registration_enabled": true,

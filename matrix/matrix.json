@@ -45,8 +45,8 @@
     "validRows": 448,
     "achievablePairs": 157,
     "coveredByPinned": 68,
-    "coveredBySeeds": 33,
-    "generatedRows": 6,
+    "coveredBySeeds": 43,
+    "generatedRows": 5,
     "totalRows": 11
   },
   "excludedPairs": [
@@ -153,100 +153,108 @@
       "newPairs": 10
     },
     {
-      "name": "mx-l1m0v0wnp0t1h1u1ao",
-      "kind": "generated",
+      "name": "deployed-core-local-mfa",
+      "kind": "seed",
       "dims": {
         "local_idp": "on",
-        "mfa": "off",
+        "mfa": "enforced",
         "verification": "off",
         "webauthn": "none",
         "providers": "0",
-        "tenant_service": "present",
-        "hook_service": "present",
-        "user_verification": "present",
-        "access_token": "opaque"
+        "tenant_service": "absent",
+        "hook_service": "absent",
+        "user_verification": "absent",
+        "access_token": "jwt"
       },
-      "newPairs": 27
+      "caps": {
+        "mail_api": false,
+        "services": [
+          "kratos",
+          "hydra",
+          "login-ui"
+        ]
+      },
+      "newPairs": 10
     },
     {
-      "name": "mx-l0m0v0wsp2t1h1u0ao",
+      "name": "mx-l0m0v0wnp2t1h1u1ao",
       "kind": "generated",
       "dims": {
         "local_idp": "off",
         "mfa": "off",
         "verification": "off",
-        "webauthn": "sequencing",
+        "webauthn": "none",
         "providers": "2",
+        "tenant_service": "present",
+        "hook_service": "present",
+        "user_verification": "present",
+        "access_token": "opaque"
+      },
+      "newPairs": 26
+    },
+    {
+      "name": "mx-l1m1v1wnp0t1h1u0ao",
+      "kind": "generated",
+      "dims": {
+        "local_idp": "on",
+        "mfa": "enforced",
+        "verification": "on",
+        "webauthn": "none",
+        "providers": "0",
         "tenant_service": "present",
         "hook_service": "present",
         "user_verification": "absent",
         "access_token": "opaque"
       },
-      "newPairs": 13
+      "newPairs": 10
     },
     {
-      "name": "mx-l1m1v1wnp0t0h0u1ao",
+      "name": "mx-l1m0v1wsp1t0h0u1ao",
       "kind": "generated",
       "dims": {
         "local_idp": "on",
-        "mfa": "enforced",
+        "mfa": "off",
         "verification": "on",
-        "webauthn": "none",
-        "providers": "0",
+        "webauthn": "sequencing",
+        "providers": "1",
         "tenant_service": "absent",
         "hook_service": "absent",
         "user_verification": "present",
         "access_token": "opaque"
       },
-      "newPairs": 10
+      "newPairs": 6
     },
     {
-      "name": "mx-l0m1v0wnp2t1h0u1aj",
-      "kind": "generated",
-      "dims": {
-        "local_idp": "off",
-        "mfa": "enforced",
-        "verification": "off",
-        "webauthn": "none",
-        "providers": "2",
-        "tenant_service": "present",
-        "hook_service": "absent",
-        "user_verification": "present",
-        "access_token": "jwt"
-      },
-      "newPairs": 3
-    },
-    {
-      "name": "mx-l1m1v1wnp0t1h1u0aj",
+      "name": "mx-l1m1v1wnp2t1h0u0aj",
       "kind": "generated",
       "dims": {
         "local_idp": "on",
         "mfa": "enforced",
         "verification": "on",
         "webauthn": "none",
-        "providers": "0",
+        "providers": "2",
         "tenant_service": "present",
-        "hook_service": "present",
+        "hook_service": "absent",
         "user_verification": "absent",
         "access_token": "jwt"
       },
       "newPairs": 2
     },
     {
-      "name": "mx-l1m1v1wnp1t1h1u1ao",
+      "name": "mx-l1m0v1wnp0t1h1u1aj",
       "kind": "generated",
       "dims": {
         "local_idp": "on",
-        "mfa": "enforced",
+        "mfa": "off",
         "verification": "on",
         "webauthn": "none",
-        "providers": "1",
+        "providers": "0",
         "tenant_service": "present",
         "hook_service": "present",
         "user_verification": "present",
-        "access_token": "opaque"
+        "access_token": "jwt"
       },
-      "newPairs": 1
+      "newPairs": 2
     }
   ]
 }

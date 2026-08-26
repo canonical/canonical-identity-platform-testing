@@ -6,9 +6,17 @@ import { FullConfig } from "@playwright/test";
 import { writeActiveConfig, ActiveConfig } from "./active-config";
 
 /**
- * Keys /api/v0/app-config currently serves truthfully. Everything else it
- * omits or fabricates (PD-5), so only these may fail a run; the rest is
- * reported as product drift.
+ * Keys /api/v0/app-config currently serves truthfully — WHEN IT SERVES THEM.
+ * Everything else it omits or fabricates (PD-5), so only these may fail a run;
+ * the rest is reported as product drift.
+ *
+ * A key the running login-ui does not emit AT ALL is a version fact about the
+ * endpoint, not deployment drift: `multi_tenancy_enabled` entered the payload
+ * in login-ui v0.27.0 (canonical/identity-platform-login-ui@973f960
+ * pkg/status/handlers.go `DeploymentInfo.MultiTenancyEnabled`; absent at
+ * @48a7049 = v0.26.0). Aborting on an absent field would make every deployment
+ * older than that untestable while gating — which reads the declaration, never
+ * this endpoint — is unaffected. Present-and-different still aborts.
  */
 const TRUTHFUL_APP_CONFIG_KEYS: (keyof ActiveConfig)[] = [
   "multi_tenancy_enabled",
@@ -53,7 +61,9 @@ async function globalSetup(config: FullConfig) {
     }
     const reported = await res.json() as Partial<ActiveConfig>;
 
-    const drift = TRUTHFUL_APP_CONFIG_KEYS.filter(
+    const served = TRUTHFUL_APP_CONFIG_KEYS.filter((k) => k in reported);
+    const omitted = TRUTHFUL_APP_CONFIG_KEYS.filter((k) => !(k in reported));
+    const drift = served.filter(
       (k) => JSON.stringify(reported[k]) !== JSON.stringify(declared[k]),
     );
     if (drift.length > 0) {
@@ -65,7 +75,13 @@ async function globalSetup(config: FullConfig) {
         `Run \`node matrix/verify.mjs <row>\` for the full three-layer diagnosis.`,
       );
     }
-    console.log(`[global-setup] Deployment agrees with the declaration on all truthfully-served keys`);
+    if (omitted.length > 0) {
+      console.log(
+        `[global-setup] app-config omits ${omitted.join(", ")} — this login-ui predates those fields; ` +
+        `unverifiable from the endpoint, the declaration stands`,
+      );
+    }
+    console.log(`[global-setup] Deployment agrees with the declaration on all ${served.length} truthfully-served key(s)`);
     return;
   }
 

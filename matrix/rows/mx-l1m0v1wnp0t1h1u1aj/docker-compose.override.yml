@@ -1,6 +1,6 @@
-# Matrix row: mx-l1m1v1wnp0t1h1u0aj (generated) — GENERATED, DO NOT EDIT.
+# Matrix row: mx-l1m0v1wnp0t1h1u1aj (generated) — GENERATED, DO NOT EDIT.
 # Source of truth: matrix/config-model.mjs; regenerate with `make matrix-generate`.
-# local_idp=on mfa=enforced verification=on webauthn=none providers=0 tenant_service=present hook_service=present user_verification=absent access_token=jwt
+# local_idp=on mfa=off verification=on webauthn=none providers=0 tenant_service=present hook_service=present user_verification=present access_token=jwt
 
 services:
   kratos:
@@ -8,17 +8,17 @@ services:
       - SELFSERVICE_METHODS_PASSWORD_ENABLED=true
       - SELFSERVICE_METHODS_PROFILE_ENABLED=true
       - SELFSERVICE_METHODS_CODE_ENABLED=true
-      - SELFSERVICE_METHODS_TOTP_ENABLED=true
-      - SELFSERVICE_METHODS_LOOKUP_SECRET_ENABLED=true
+      - SELFSERVICE_METHODS_TOTP_ENABLED=false
+      - SELFSERVICE_METHODS_LOOKUP_SECRET_ENABLED=false
       - SELFSERVICE_METHODS_WEBAUTHN_ENABLED=false
       - SELFSERVICE_FLOWS_RECOVERY_ENABLED=true
       - SELFSERVICE_FLOWS_VERIFICATION_ENABLED=true
-      - SESSION_WHOAMI_REQUIRED_AAL=highest_available
+      - SESSION_WHOAMI_REQUIRED_AAL=aal1
     command: exec kratos serve -c /etc/config/kratos/kratos.yml --dev --watch-courier
 
   login-ui:
     environment:
-      - MFA_ENABLED=true
+      - MFA_ENABLED=false
       - OIDC_WEBAUTHN_SEQUENCING_ENABLED=false
       - VERIFICATION_ENABLED=true
       - MULTI_TENANCY_ENABLED=true
@@ -37,7 +37,4 @@ services:
       # Charm renders allowed_top_level_claims from the relation's claim list
       # (groups, + tenant_id iff hook↔tenant-service related).
       - OAUTH2_ALLOWED_TOP_LEVEL_CLAIMS=groups,tenant_id
-
-  user-verification-service:
-    scale: 0
 

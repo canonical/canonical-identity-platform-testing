@@ -49,17 +49,20 @@ const JUJU_MODEL = process.env.MATRIX_JUJU_MODEL ?? "iam-matrix";
  *  (see AGENTS.md "Port Mapping"). */
 function resolveUrls(env = {}, backend = "compose") {
   const pick = (key, fallback) => env[key] ?? process.env[key] ?? fallback;
+  // A localhost fallback is only meaningful where the backend PUBLISHES that
+  // port (compose/juju). In the `urls` backend it is actively harmful: the
+  // whole interface is the env, so an unset URL means "this surface is not
+  // reachable from here", and guessing localhost aims the probe at whatever
+  // unrelated stack happens to be running on this machine — which then FAILS
+  // the row on a socket that has nothing to do with the target. Unset stays
+  // undefined and each probe warn-skips itself, naming what it could not ask.
+  const local = (key, port) => pick(key, backend === "urls" ? undefined : `http://localhost:${port}`);
   return {
-    kratosPublic: pick("KRATOS_PUBLIC_URL", "http://localhost:4433"),
-    hydraPublic: pick("HYDRA_PUBLIC_URL", "http://localhost:4444"),
-    hydraAdmin: pick("HYDRA_ADMIN_URL", "http://localhost:4445"),
-    // Kratos ADMIN is defaulted only where the localhost defaults mean
-    // something (compose/juju publish 4434). The `urls` backend legitimately
-    // has no admin API — run-row.mjs keys its live-lane subset off exactly
-    // this being unset — and guessing localhost:4434 there would point the AAL
-    // probe at an unrelated stack, so it stays undefined and the probe skips
-    // with a recorded warning.
-    kratosAdmin: pick("KRATOS_ADMIN_URL", backend === "urls" ? undefined : "http://localhost:4434"),
+    kratosPublic: local("KRATOS_PUBLIC_URL", 4433),
+    hydraPublic: local("HYDRA_PUBLIC_URL", 4444),
+    hydraAdmin: local("HYDRA_ADMIN_URL", 4445),
+    // run-row.mjs keys its live-lane subset off kratosAdmin being unset.
+    kratosAdmin: local("KRATOS_ADMIN_URL", 4434),
     // Not a URL, but the same row-scoped resolution: the AAL probe creates a
     // throwaway identity and must name the schema the deployment serves.
     identitySchemaId: pick("KRATOS_IDENTITY_SCHEMA_ID", "default"),
@@ -186,9 +189,106 @@ const oidcProvidersOf = (flow) =>
     .map((n) => n.attributes.value)
     .sort();
 
-async function verifyBehavior(dims, caps, u) {
+// Layer 2's flow-shape probes read kratos's own flow config off kratos's PUBLIC
+// API. On a real deployment that API is usually NOT what the ingress serves:
+// login-ui-operator's public route rewrites /self-service/* onto the BFF's
+// /api/kratos/self-service/* (canonical/identity-platform-login-ui-operator@b8497db
+// templates/public-route.json.j2), and the BFF answers from its own chi route
+// table — a login-ui VERSION fact, not a kratos config fact. Read through it, a
+// missing BFF route is indistinguishable from a disabled kratos flow:
+// iam.orange.canonical.com (login-ui v0.24.0-v0.25.0) 404s
+// /self-service/registration/browser and .../verification/browser although
+// kratos has both, because those routes only exist in the BFF from v0.26.0
+// (canonical/identity-platform-login-ui pkg/kratos/handlers.go: 11 routes at
+// @ad44e9e, 17 at @48a7049). Kratos itself never 404s a disabled flow — it
+// forwards a 400 (ory/kratos@64e04ac
+// selfservice/flow/registration/handler.go:113-115,
+// selfservice/flow/verification/handler.go:167-170).
+//
+// Hence the gate: prove kratos answers before reading kratos config off it.
+// /self-service/login/api is the discriminator — a native-flow endpoint kratos
+// serves and the BFF has never routed at any version.
+async function kratosAnswersDirectly(u) {
+  if (!u.kratosPublic) {
+    return { ok: false, why: "KRATOS_PUBLIC_URL is unset — no kratos public API is reachable from here" };
+  }
+  const r = await fetchJson(`${u.kratosPublic}/self-service/login/api`);
+  if (r.status === 200 && r.body?.id) return { ok: true };
+  return {
+    ok: false,
+    why:
+      `GET ${u.kratosPublic}/self-service/login/api → HTTP ${r.status}${r.error ? ` (${r.error})` : ""}` +
+      " — that URL does not serve kratos's public API (an ingress fronting the login-ui BFF answers exactly this)",
+  };
+}
+
+/** The login flow as the BROWSER gets it, when kratos is only reachable behind
+ *  the BFF. The BFF answers /self-service/login/browser with a 303 to
+ *  /ui/login?flow=<id> and serves the kratos flow itself at
+ *  /self-service/login/flows?id=<id>, so the 1FA surface is still readable —
+ *  just not off the initiating response. */
+async function loginFlowThroughBff(u) {
+  const init = await fetch(`${u.kratosPublic}/self-service/login/browser?return_to=${encodeURIComponent(`${u.loginUi}/ui/login`)}`, {
+    redirect: "manual",
+    signal: AbortSignal.timeout(8000),
+    headers: { Accept: "application/json" },
+  }).catch(() => null);
+  if (!init) return { flow: null, why: "login flow init was unreachable" };
+  const id = init.headers.get("location")?.match(/[?&]flow=([^&]+)/)?.[1];
+  if (!id) return { flow: null, why: `login flow init → HTTP ${init.status} with no ?flow= in its Location` };
+  const cookies = init.headers.getSetCookie().map((c) => c.split(";")[0]).join("; ");
+  const flow = await fetchJson(`${u.kratosPublic}/self-service/login/flows?id=${id}`, { headers: { Cookie: cookies } });
+  if (flow.status !== 200 || !flow.body?.ui) return { flow: null, why: `GET /self-service/login/flows?id=${id} → HTTP ${flow.status}` };
+  return { flow: flow.body, why: "" };
+}
+
+function recordProviderSet(check, flow, caps, detailPrefix) {
+  const seen = oidcProvidersOf(flow);
+  const want = [...caps.oidc_providers].sort();
+  const ok = JSON.stringify(seen) === JSON.stringify(want);
+  record("behavior", check, ok, ok ? "" : `${detailPrefix} offers [${seen.join(", ")}]`);
+}
+
+async function verifyBehavior(dims, caps, u, backend) {
   const v = derive(dims);
 
+  const direct = await kratosAnswersDirectly(u);
+  if (direct.ok) {
+    await verifyKratosFlowShape(v, caps, u);
+  } else if (backend === "urls") {
+    // Mode 5's normal shape, not a broken deployment: warn, name exactly what
+    // went unasked, and keep the one witness the BFF surface still gives.
+    record(
+      "behavior",
+      "kratos public API answers directly",
+      false,
+      `${direct.why} — registration/recovery/verification flow-config probes skipped`,
+      { warn: true },
+    );
+    if (u.kratosPublic) {
+      const { flow, why } = await loginFlowThroughBff(u);
+      if (flow) {
+        recordProviderSet(`oidc providers [${[...caps.oidc_providers].sort().join(", ") || "none"}] (through the login-ui BFF)`, flow, caps, "the browser login flow");
+      } else {
+        record("behavior", "login flow readable through the login-ui BFF", false, why);
+      }
+    }
+  } else {
+    // compose and juju both publish kratos's public port; anything else here is
+    // a broken deployment, not a topology difference.
+    record("behavior", "kratos public API answers directly", false, direct.why);
+  }
+
+  // The two independent witnesses layer 2 was missing (R-7). Layer 1 can only
+  // compare container env against the SAME expectedEnv() that generated it, so
+  // these ask the deployment what it actually does with those keys.
+  await verifyAalBehavior(v, u);
+  await verifyHydraTokens(v, caps, u);
+
+  await verifyMailApi(caps, u);
+}
+
+async function verifyKratosFlowShape(v, caps, u) {
   // Registration is two-step on this kratos: step 1 is method-agnostic (oidc
   // buttons + csrf + the `profile` trait-collection chooser, which kratos
   // renders unconditionally — `methods.profile.enabled` gates the settings
@@ -208,13 +308,11 @@ async function verifyBehavior(dims, caps, u) {
     const reg = await regRes.json();
     const g1 = groupsOf(reg);
 
-    const regProviders = oidcProvidersOf(reg);
-    const wantProviders = [...caps.oidc_providers].sort();
-    record(
-      "behavior",
-      `oidc providers [${wantProviders.join(", ") || "none"}]`,
-      JSON.stringify(regProviders) === JSON.stringify(wantProviders),
-      JSON.stringify(regProviders) === JSON.stringify(wantProviders) ? "" : `registration flow offers [${regProviders.join(", ")}]`,
+    recordProviderSet(
+      `oidc providers [${[...caps.oidc_providers].sort().join(", ") || "none"}]`,
+      reg,
+      caps,
+      "the registration flow",
     );
 
     if (g1.has("profile")) {
@@ -250,19 +348,16 @@ async function verifyBehavior(dims, caps, u) {
     }
   }
 
-  // Login flow: provider set must agree with the declaration too.
-  const login = await fetchJson(`${u.kratosPublic}/self-service/login/browser`);
+  // Login flow: provider set must agree with the declaration too. `return_to`
+  // is not optional plumbing — the login-ui BFF rejects a login-flow init
+  // without it (canonical/identity-platform-login-ui@197703c
+  // pkg/kratos/handlers.go:101-104) while kratos accepts it, so passing it
+  // keeps one probe shape valid on every surface.
+  const login = await fetchJson(`${u.kratosPublic}/self-service/login/browser?return_to=${encodeURIComponent(`${u.loginUi}/ui/login`)}`);
   if (login.status !== 200) {
     record("behavior", "login flow creatable", false, `HTTP ${login.status}`);
   } else {
-    const loginProviders = oidcProvidersOf(login.body);
-    const wantProviders = [...caps.oidc_providers].sort();
-    record(
-      "behavior",
-      "login flow provider set",
-      JSON.stringify(loginProviders) === JSON.stringify(wantProviders),
-      JSON.stringify(loginProviders) === JSON.stringify(wantProviders) ? "" : `login flow offers [${loginProviders.join(", ")}]`,
-    );
+    recordProviderSet("login flow provider set", login.body, caps, "the login flow");
   }
 
   // Flow toggles: kratos 404s a disabled endpoint with a distinctive body.
@@ -279,14 +374,6 @@ async function verifyBehavior(dims, caps, u) {
       enabled === expected ? "" : `HTTP ${r.status}`,
     );
   }
-
-  // The two independent witnesses layer 2 was missing (R-7). Layer 1 can only
-  // compare container env against the SAME expectedEnv() that generated it, so
-  // these ask the deployment what it actually does with those keys.
-  await verifyAalBehavior(v, u);
-  await verifyHydraTokens(v, caps, u);
-
-  await verifyMailApi(caps, u);
 }
 
 // ── Layer 2 probe: AAL / second-factor behaviour (R-7) ──────────────────────
@@ -529,6 +616,19 @@ async function tokenClaims(token, u) {
 //    path, so it is deliberately not done here.
 export async function verifyHydraTokens(v, caps, u) {
   const hookCheck = `token hook ${v.hook ? "wired" : "not wired"} (hook_service=${v.hook ? "present" : "absent"})`;
+  // Both halves of this probe need a throwaway client, and only the ADMIN API
+  // can register one. Without it there is nothing to mint with — same shape as
+  // the AAL probe's guard, and for the same reason: on the `urls` backend a
+  // missing admin API is the documented mode-5 reality (docs/testing-spec.md
+  // §9), not a drifted row, so it warn-skips instead of failing the row on a
+  // socket the operator never claimed to have.
+  const missing = !u.hydraAdmin ? "HYDRA_ADMIN_URL" : !u.hydraPublic ? "HYDRA_PUBLIC_URL" : null;
+  if (missing) {
+    const why = `skipped: no ${missing} — no throwaway client can be registered, so neither the access-token shape nor the token hook is observable`;
+    record("behavior", "access-token shape", false, why, { warn: true });
+    record("behavior", hookCheck, false, why, { warn: true });
+    return;
+  }
   const dropClient = () => fetch(`${u.hydraAdmin}/admin/clients/${PROBE_CLIENT_ID}`, { method: "DELETE", signal: AbortSignal.timeout(5000) }).catch(() => {});
   const mint = (body) =>
     fetchJson(`${u.hydraPublic}/oauth2/token`, {
@@ -640,29 +740,53 @@ async function verifyMailApi(caps, u) {
 
 // ── Layer 3: self-report ────────────────────────────────────────────────────
 
-// Keys /api/v0/app-config serves truthfully today; a mismatch here is a
-// harness/deployment failure. Everything else the endpoint omits or fabricates
-// (PD-5), so drift there is a *product* finding, reported but non-fatal.
+// Keys /api/v0/app-config serves truthfully — WHEN IT SERVES THEM. A key that
+// is present and disagrees with the declaration is a harness/deployment
+// failure. A key the running login-ui does not emit at all is a version fact
+// about the endpoint, i.e. the PD-5 class, and is reported as drift instead:
+// `multi_tenancy_enabled` only entered the payload in login-ui v0.27.0
+// (canonical/identity-platform-login-ui@973f960 pkg/status/handlers.go
+// `DeploymentInfo.MultiTenancyEnabled`; absent at @48a7049 = v0.26.0), and
+// `flags` in v0.24.0 (@72d4b5b; absent at @b964996 = v0.23.1). Failing a row
+// because the deployment predates a field would make mode 5 unusable against
+// exactly the deployments it exists for — and gating never reads this endpoint
+// anyway: the declaration is the gating source (BROWSER_TEST_CAPABILITIES).
 const TRUTHFUL_KEYS = ["multi_tenancy_enabled", "oidc_webauthn_sequencing_enabled", "identifier_first_enabled", "base_url"];
 
 async function verifySelfReport(caps, u) {
   let appConfig;
   try {
     const r = await fetchJson(`${u.loginUi}/api/v0/app-config`);
-    if (r.status !== 200) throw new Error(`HTTP ${r.status}`);
+    // `fetchJson` reports a transport failure as status 0 plus the cause; drop
+    // the cause and every TLS problem in this lane reads as a bare "HTTP 0".
+    if (r.status !== 200) throw new Error(`HTTP ${r.status}${r.error ? ` (${r.error})` : ""}`);
     appConfig = r.body;
   } catch (err) {
-    record("self-report", "app-config reachable", false, String(err));
+    record("self-report", "app-config reachable", false, `GET ${u.loginUi}/api/v0/app-config → ${err.message ?? err}`);
     return;
   }
 
+  const omitted = [];
   for (const key of TRUTHFUL_KEYS) {
+    if (!(key in appConfig)) {
+      omitted.push(key);
+      continue;
+    }
     // base_url is substrate-dependent (compose: http://localhost; juju: the
     // ingress LB) — when the runner supplies LOGIN_UI_URL, that IS the
     // declared base for this run, overriding the capabilities file's value.
     const want = key === "base_url" && u.loginUiOverridden ? u.loginUi : caps[key];
     const ok = JSON.stringify(appConfig[key]) === JSON.stringify(want);
     record("self-report", key, ok, ok ? "" : `declared ${JSON.stringify(want)}, reported ${JSON.stringify(appConfig[key])}`);
+  }
+  if (omitted.length > 0) {
+    record(
+      "self-report",
+      `app-config omits ${omitted.length} truthful key(s)`,
+      false,
+      `${omitted.join(", ")} — this login-ui predates those fields; unverifiable from the endpoint, declaration stands`,
+      { warn: true },
+    );
   }
 
   const drift = [];
@@ -797,7 +921,7 @@ export async function verifyRow(rowName, backend = process.env.MATRIX_BACKEND ??
       );
     }
   }
-  await verifyBehavior(row.dims, caps, u);
+  await verifyBehavior(row.dims, caps, u, backend);
   await verifySelfReport(caps, u);
 
   const failures = results.filter((r) => !r.ok && !r.warn);

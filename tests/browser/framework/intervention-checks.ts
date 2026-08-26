@@ -44,7 +44,8 @@ async function codeReplayRevokesFamily({ page, tokens, manifest }: PostCheckArgs
       'postCheck "code-replay-revokes-family": manifest carries no RP client credentials — re-seed.',
     );
   }
-  const code = new URL(page.url()).searchParams.get("code");
+  const callback = new URL(page.url());
+  const code = callback.searchParams.get("code");
   if (!code) {
     throw new Error(
       'postCheck "code-replay-revokes-family": current URL carries no ?code= — ' +
@@ -52,12 +53,17 @@ async function codeReplayRevokesFamily({ page, tokens, manifest }: PostCheckArgs
     );
   }
 
-  // Re-exchange the already-redeemed code.
+  // Re-exchange the already-redeemed code. `redirect_uri` MUST be the one the
+  // authorize request carried, which is this very callback URL — the manifest's
+  // first registered redirect is NOT it whenever the consumer runs on another
+  // port (the seeder registers 4446 and 4447; the charmed and urls lanes use
+  // 4447). A mismatch there makes hydra answer `invalid_grant` for the wrong
+  // reason, and this check would go green without ever testing code reuse.
   const exchange = await page.request.post(`${HYDRA_PUBLIC_URL}/oauth2/token`, {
     form: {
       grant_type: "authorization_code",
       code,
-      redirect_uri: rp.redirectUri,
+      redirect_uri: `${callback.origin}${callback.pathname}`,
       client_id: rp.clientId,
       client_secret: rp.clientSecret,
     },

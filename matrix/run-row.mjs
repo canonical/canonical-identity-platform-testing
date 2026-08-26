@@ -48,11 +48,18 @@ const JUJU_ROOT = path.join(HERE, "backends", "juju", "root");
 const JUJU_MODEL = process.env.MATRIX_JUJU_MODEL ?? "iam-matrix";
 const JUJU_CORE_MODEL = process.env.MATRIX_JUJU_CORE_MODEL ?? "iam-matrix-core";
 
+// The scenario-driven (tier-A) spec files. MUST stay identical to the TIER_A
+// table in tests/browser/scripts/expected-set.ts: a file missing here is
+// counted as tier B, so its declared executions are reported as "expected to
+// run but did not" while its runtime skips are held to the tier-B allowlist.
+// matrix/tests/runner.test.mjs pins the two lists against each other.
 export const TIER_A_FILES = new Set([
   "error.spec.ts",
+  "oidc-error.spec.ts",
   "login.spec.ts",
   "oidc.spec.ts",
   "recovery.spec.ts",
+  "resilience.spec.ts",
   "registration.spec.ts",
   "session.spec.ts",
   "tenant.spec.ts",
@@ -708,13 +715,17 @@ async function runRow(rowName, backend) {
     return true;
   }
 
-  // The RP consumer container needs docker + hydra URLs. The charmed lane
-  // always runs it for the test leg; the urls backend runs it only when both
-  // hydra URLs are provided AND no externally running consumer is already
-  // pointed at via OIDC_CONSUMER_URL (compose runs it as a compose service).
+  // The RP consumer container needs docker plus the two URLs it actually talks
+  // to — hydra PUBLIC (`--endpoint`, the token exchange) and the login-ui
+  // (`--auth-url`). It never touches the admin API: the seeder registers
+  // `browser-test-rp` with the 4447 redirect, so requiring HYDRA_ADMIN_URL here
+  // only refused the consumer on exactly the deployments that have no admin
+  // ingress — the mode-5 target. The charmed lane always runs it for the test
+  // leg; the urls backend runs it unless an externally running consumer is
+  // already pointed at via OIDC_CONSUMER_URL (compose runs it as a service).
   const wantConsumer =
     backend === "juju" ||
-    (backend === "urls" && !!rowEnv.HYDRA_PUBLIC_URL && !!rowEnv.HYDRA_ADMIN_URL && !rowEnv.OIDC_CONSUMER_URL);
+    (backend === "urls" && !!rowEnv.HYDRA_PUBLIC_URL && !rowEnv.OIDC_CONSUMER_URL);
   if (wantConsumer) {
     if (!startConsumer(rowEnv)) {
       console.error("✗ could not start the OIDC consumer container");
@@ -722,12 +733,19 @@ async function runRow(rowName, backend) {
     }
     if (backend === "urls") rowEnv.OIDC_CONSUMER_URL = "http://127.0.0.1:4447";
   } else if (backend === "urls") {
-    console.log("── consumer: SKIPPED (urls backend) — authorization_code journeys will gate off unless OIDC_CONSUMER_URL points at an externally running consumer");
+    console.log("── consumer: SKIPPED (urls backend, no HYDRA_PUBLIC_URL) — authorization_code journeys will fail unless OIDC_CONSUMER_URL points at an externally running consumer");
   }
   try {
 
-  // 5. Expected execution set, from the same declaration + satisfies().
-  const expectedRaw = sh("npx", ["tsx", "scripts/expected-set.ts", capsPath], { cwd: BROWSER_DIR });
+  // 5. Expected execution set, from the same declaration + satisfies() — and
+  //    from the SAME LANE the run below uses. `getExecutionLane()` reads
+  //    BROWSER_TEST_LANE, so computing it in the inherited (internal) lane while
+  //    running in `live` compares two different sets and the verdict is noise.
+  const laneEnv = liveLane ? { BROWSER_TEST_LANE: "live" } : {};
+  const expectedRaw = sh("npx", ["tsx", "scripts/expected-set.ts", capsPath], {
+    cwd: BROWSER_DIR,
+    env: { ...process.env, ...laneEnv },
+  });
   if (expectedRaw.status !== 0) {
     process.stderr.write(expectedRaw.stderr ?? "");
     console.error("✗ expected-set computation failed");
@@ -745,7 +763,7 @@ async function runRow(rowName, backend) {
       ...process.env,
       ...rowEnv,
       ...(rowEnv.LOGIN_UI_URL ? { BASE_URL: rowEnv.LOGIN_UI_URL } : {}),
-      ...(liveLane ? { BROWSER_TEST_LANE: "live" } : {}),
+      ...laneEnv,
       BROWSER_TEST_CAPABILITIES: capsPath,
     },
   });

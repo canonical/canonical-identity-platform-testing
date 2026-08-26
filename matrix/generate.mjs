@@ -102,7 +102,9 @@ function build() {
 
   for (const s of model.seeds) {
     if (!isValid(s.dims)) throw new Error(`seed ${s.name} violates a constraint`);
-    rows.push({ name: s.name, kind: "seed", dims: s.dims, newPairs: cover(s.dims) });
+    // `caps` rides on the row so renderAll() — and matrix.json's readers — see
+    // the same declaration the row is materialized from.
+    rows.push({ name: s.name, kind: "seed", dims: s.dims, ...(s.caps ? { caps: s.caps } : {}), newPairs: cover(s.dims) });
   }
   const coveredBySeeds = covered.size - coveredByPinned;
 
@@ -148,7 +150,7 @@ function renderAll() {
   for (const row of matrix.rows) {
     const dir = path.join(ROWS_DIR, row.name);
     files.set(path.join(dir, "docker-compose.override.yml"), composeOverride(row.name, row.kind, row.dims) + "\n");
-    files.set(path.join(dir, "capabilities.json"), JSON.stringify(capabilities(row.dims), null, 2) + "\n");
+    files.set(path.join(dir, "capabilities.json"), JSON.stringify(capabilities(row.dims, row.caps), null, 2) + "\n");
     if (Object.values(row.dims).every((v) => v !== null)) {
       files.set(path.join(dir, "juju.tfvars.json"), JSON.stringify(jujuTfvars(row.dims), null, 2) + "\n");
     }

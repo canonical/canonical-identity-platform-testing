@@ -174,13 +174,13 @@ shape nothing else covered:
 |---|---|
 | Valid rows in the space | 448 |
 | Achievable dimension pairs | **157** |
-| Rows needed to cover them | **11** — 3 pinned + 2 seed + 6 generated |
+| Rows needed to cover them | **11** — 3 pinned + 3 seed + 5 generated |
 | Pairs covered by the 3 pinned profiles alone | **68 (43.3%)** — the measured gap that motivated the matrix |
-| Further pairs added by the 2 seed rows | 33 |
+| Further pairs added by the 3 seed rows | 43 |
 
 Every number above is generated. Re-derive with `jq .stats matrix/matrix.json`;
 at the current tree that is
-`{"validRows":448,"achievablePairs":157,"coveredByPinned":68,"coveredBySeeds":33,"generatedRows":6,"totalRows":11}`.
+`{"validRows":448,"achievablePairs":157,"coveredByPinned":68,"coveredBySeeds":43,"generatedRows":5,"totalRows":11}`.
 If `matrix/config-model.mjs` changes, run `make matrix-generate && make
 matrix-check` and update this table.
 
@@ -213,7 +213,7 @@ flowchart LR
 | 2 | Juju, clean deploy (`--backend=juju`) | Proven — terraform root, rows as var-files |
 | 3 | Juju, **attach** to an existing deployment (`--attach`) | Proven — ephemeral-state terraform import; `--plan-only` = zero-mutation drift gate |
 | 4 | Juju without k8s-manifest access | Groundwork — mail/dex are declared capabilities; a mail-less target runs the subset |
-| 5 | URLs only (`--backend=urls`) | Proven — no substrate access; env URLs are the whole interface |
+| 5 | URLs only (`--backend=urls`) | Proven **against a real deployment** — `iam.orange.canonical.com`, row `deployed-core-local-mfa`, preflight green from the public ingress alone (5 checks pass, 6 warn-skip naming what a substrate-less lane cannot ask) |
 
 Interfaces 3 and 5 are the ones that make this usable against deployments we do
 not own, and both are defined by what they **refuse** to do:
@@ -270,12 +270,18 @@ asserted by `make matrix-check`:
 
 | Seed row | Scenarios it must run |
 |---|---|
-| `pd931-single-oidc-mt` | exactly **4** |
-| `tfdefault-oidc-only` | exactly **3** |
+| `pd931-single-oidc-mt` | exactly **9** |
+| `tfdefault-oidc-only` | exactly **7** |
+| `deployed-core-local-mfa` | exactly **15** |
 
-Both sets come entirely from `specs/oidc.spec.ts`, and the two rows' sets
-**differ** — which is what makes the canary discriminating rather than a tautology.
-Pinned at `3086d4e`.
+The three sets pairwise **differ**, which is what makes the canaries
+discriminating rather than tautological: the first two are oidc-only shapes
+(`specs/oidc.spec.ts` plus the four `specs/oidc-error.spec.ts` scenarios that
+require nothing but hydra and login-ui), while the third is the local-user shape
+— no oidc contribution at all, the whole resilience suite, and
+recovery/verification/registration held out by `mail_api=false`. Re-derive any
+cell with `cd tests/browser && npx tsx scripts/expected-set.ts
+../../matrix/rows/<row>/capabilities.json`.
 
 Whether the seed rows run the full contract green on the charmed stack is a
 live measurement: a `make test-matrix` run establishes it, and this document
@@ -290,7 +296,7 @@ finding, never a silent skip.
 
 | Command | Covers | Count |
 |---|---|---|
-| `make matrix-test` | The matrix runner's pure logic; chained into `matrix-check` | **52** tests |
+| `make matrix-test` | The matrix runner's pure logic; chained into `matrix-check` | **57** tests |
 | `make test-browser-unit` | The suite framework's pure logic — scenario validation, claim assertions, manifest, ownership | **72** tests |
 
 `make matrix-check` also prints `✓ matrix artifacts match the model (11 rows, 157
@@ -779,12 +785,43 @@ Safety properties, all load-bearing:
 
 | Missing URL | Effect on the run |
 |---|---|
-| admin | seeding skipped loudly, live-lane subset |
-| hydra pair | authorization-code journeys gate off |
+| `KRATOS_ADMIN_URL` | seeding skipped loudly, live-lane subset |
+| `HYDRA_ADMIN_URL` | access-token shape + token-hook probes warn-skip (no throwaway client is registrable) |
+| `HYDRA_PUBLIC_URL` | the RP consumer is not started, so authorization-code journeys fail unless `OIDC_CONSUMER_URL` names an external one |
+| `KRATOS_PUBLIC_URL` | kratos flow-shape probes warn-skip |
+
+No URL falls back to `localhost` in this backend. The compose/juju defaults are
+published host ports; here an unset URL means *this surface is not reachable from
+here*, and guessing localhost aimed a probe at whatever unrelated stack the
+operator happened to be running — failing the row on a socket the target never
+claimed to have.
 
 The preflight skips the substrate layer; behaviour probes, self-report and
 declaration gating are unchanged — the anti-silent-shrink contract holds with
 zero cluster credentials.
+
+**Read kratos config off kratos, never off the ingress.** On a charmed
+deployment the public ingress routes `/self-service/*` to the login-ui **BFF**,
+not to kratos (`login-ui-operator` rewrites it onto the BFF's
+`/api/kratos/self-service/*`), and the BFF answers from its own route table — a
+login-ui *version* fact. Read through it, a missing BFF route is
+indistinguishable from a disabled kratos flow: `iam.orange.canonical.com` runs
+login-ui v0.24.0–v0.25.0, whose route table has no registration and no
+verification routes, so both 404 while kratos has both enabled (kratos never
+404s a disabled flow — it forwards a 400). The behaviour layer therefore proves
+kratos answers before believing it: `GET /self-service/login/api` — an endpoint
+kratos serves and the BFF has never routed. Not kratos ⇒ on `urls` a warning
+naming the skipped probes, plus the one witness the BFF surface still yields
+(the login flow's provider set, read back through
+`/self-service/login/flows?id=`); on compose/juju, where the port *is*
+published, a hard failure.
+
+**A truthfully-served app-config key that the deployment simply does not emit is
+not drift.** `multi_tenancy_enabled` entered `/api/v0/app-config` in login-ui
+v0.27.0 and `flags` in v0.24.0; aborting on an absent field would make mode 5
+unusable against exactly the deployments it exists for. Present-and-different
+still aborts, in the preflight and in `global-setup` alike. Gating never reads
+the endpoint — the declaration is the gating source.
 
 **TLS verification is on in this backend.** It is the lane pitched at real
 deployments, so a certificate the harness cannot verify is a finding, not noise.
@@ -796,6 +833,25 @@ chromium's `--ignore-certificate-errors` from the latter). For contrast: the
 charmed backend keeps insecure TLS unconditionally — its ingress terminates with
 a self-signed CA this harness created — and the compose gate sets neither, so
 verification is real there.
+
+The first thing this lane catches on a real target is an **incomplete chain**.
+`iam.orange.canonical.com` (2026-08-26) serves the leaf alone: neither the `YR1`
+intermediate nor the ISRG-Root-X1-cross-signed `Root YR` is sent, so browsers
+succeed by fetching them from the leaf's AIA extension while Node, Go, curl and
+`requests` — none of which chase AIA — cannot build a path at all. The harness
+deliberately does **not** fetch them: auto-repairing a deployment's chain is
+precisely the silent fix this lane exists to refuse. Two honest responses, in
+order of preference:
+
+1. fix the server so it sends its intermediates;
+2. point `NODE_EXTRA_CA_CERTS` at the missing intermediates
+   (`curl -o - http://yr1.i.lencr.org/ | openssl x509 -inform DER` and the same
+   for the issuer named in *its* AIA). Verification stays **on** — the chain is
+   completed, not skipped. Chromium needs nothing: it already AIA-chases, so the
+   browser leg runs against a verified certificate either way.
+
+`MATRIX_INSECURE_TLS=1` is the wrong tool here: it turns verification off
+wholesale and would hide the next, real certificate problem.
 
 ## 10. Open work
 

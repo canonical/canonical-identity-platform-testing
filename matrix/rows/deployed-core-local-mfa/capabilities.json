@@ -2,7 +2,7 @@
   "oidc_webauthn_sequencing_enabled": false,
   "base_url": "http://localhost",
   "identifier_first_enabled": true,
-  "multi_tenancy_enabled": true,
+  "multi_tenancy_enabled": false,
   "support_email": "",
   "flags": [
     "password",
@@ -12,11 +12,7 @@
   "services": [
     "kratos",
     "hydra",
-    "login-ui",
-    "dex",
-    "openfga",
-    "tenant-service",
-    "hook-service"
+    "login-ui"
   ],
   "methods_1fa": [
     "password"
@@ -32,7 +28,7 @@
   "registration_enabled": true,
   "account_linking_enabled": false,
   "oidc_providers": [],
-  "verification_enabled": true,
+  "verification_enabled": false,
   "access_token_format": "jwt",
-  "mail_api": true
+  "mail_api": false
 }

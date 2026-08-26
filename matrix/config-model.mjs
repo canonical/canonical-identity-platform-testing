@@ -262,6 +262,70 @@ export const model = {
         access_token: "jwt",
       },
     },
+    {
+      name: "deployed-core-local-mfa",
+      reason:
+        "The shape of the internal charmed CORE deployments, read off https://iam.orange.canonical.com on 2026-08-26 with nothing but its public ingress: local idp on with MFA enforced (app-config flags [password, totp, backup_codes]), no external IdP (the login flow offers identifier_first + csrf only, no oidc nodes), no add-on charms, and — per docs/ci-spec.md §4 — no mailslurper and no dex, which is why this row is the only one declaring mail_api=false. It is the mode-5 (`--backend=urls`) target: no existing row combined local_idp=on with mfa=enforced, verification=off and providers=0, so `matrix/verify.mjs` had nothing to verify such a deployment against (docs/ci-spec.md §8 item 1, blocker (a)).",
+      dims: {
+        local_idp: "on",
+        mfa: "enforced",
+        verification: "off",
+        webauthn: "none",
+        providers: "0",
+        tenant_service: "absent",
+        hook_service: "absent",
+        user_verification: "absent",
+        access_token: "jwt",
+      },
+      // Row-level truths that are NOT dimensions because no charm option or
+      // relation produces them — they are properties of the TARGET, not of the
+      // platform's configuration space (the `mail_api` case harnessGaps already
+      // described as "hand-writes mail_api=false").
+      caps: {
+        mail_api: false,
+        services: ["kratos", "hydra", "login-ui"],
+      },
+      // Values this row DECLARES but the target cannot be asked about through a
+      // public ingress. Recorded rather than silently assumed:
+      //  - verification=off: login-ui only began reporting verification state in
+      //    a later app-config revision (see below), and kratos's verification
+      //    endpoint is not exposed. mail_api=false gates every verification and
+      //    recovery journey off regardless, so the dim does not move the
+      //    executed set — it is chosen to match the charm default
+      //    (canonical/kratos-operator@99da536 charmcraft.yaml:139-145
+      //    `enable_verification`, default false).
+      //  - access_token=jwt: matches the hydra charm default
+      //    (canonical/hydra-operator@f7e000b charmcraft.yaml:95-99
+      //    `jwt_access_tokens`, default true); unverifiable without an admin API
+      //    to register a probe client, and the preflight warn-skips it there.
+      //  - tenant_service=absent: `multi_tenancy_enabled` entered
+      //    /api/v0/app-config only in login-ui v0.27.0
+      //    (canonical/identity-platform-login-ui@973f960 pkg/status/handlers.go
+      //    `DeploymentInfo.MultiTenancyEnabled`; absent at @48a7049 = v0.26.0),
+      //    and this target predates it — see the version window below.
+      unobservable: ["verification", "access_token", "tenant_service"],
+      // The target runs login-ui v0.24.0-v0.25.0, pinned by two independent
+      // observations of its own responses:
+      //  - /api/v0/app-config carries `flags` but not `multi_tenancy_enabled`:
+      //    `flags` arrived in v0.24.0 (present at @72d4b5b, absent at @b964996
+      //    = v0.23.1) and `multi_tenancy_enabled` in v0.27.0 (@973f960) — so
+      //    v0.24.0 <= version <= v0.26.0.
+      //  - /self-service/registration/browser and .../verification/browser both
+      //    answer a bare Go `404 page not found`: the BFF's chi route table has
+      //    no registration or verification routes before v0.26.0 (17 routes at
+      //    @48a7049 = v0.26.0, 11 at @ad44e9e = v0.25.0 and @72d4b5b = v0.24.0,
+      //    canonical/identity-platform-login-ui pkg/kratos/handlers.go) — so
+      //    version <= v0.25.0.
+      // Neither 404 means a disabled kratos flow: kratos registers those routes
+      // unconditionally and answers a disabled flow with an HTTP 400 JSON error
+      // (ory/kratos@64e04ac selfservice/flow/registration/handler.go:81,113-115
+      // and selfservice/flow/verification/handler.go:78,167-170), and
+      // kratos-operator ships no option to disable registration at all
+      // (canonical/kratos-operator@99da536 charmcraft.yaml:104-206). The 404s
+      // are the BFF's route table, which is why the preflight must not read
+      // kratos flow config off an ingress that fronts it.
+      loginUiVersion: "v0.24.0-v0.25.0",
+    },
   ],
 
   // ── Known harness gaps (dimensions reality has, the compose stack cannot express yet) ──

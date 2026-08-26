@@ -95,6 +95,24 @@ test("token-hook probe records failed checks when hydra is unreachable", async (
   assert.ok(results.every((r) => /probe client creation failed: HTTP 0/.test(r.detail)));
 });
 
+// The mode-5 counterpart of the AAL guard: on the `urls` backend a missing
+// admin API is the documented reality, not a drifted row. Before this guard the
+// probe aimed at localhost:4445 and failed every urls row on an unrelated
+// socket.
+test("token-hook probe warns instead of failing when the backend has no hydra admin URL", async () => {
+  const results = await probe(() =>
+    verifyHydraTokens(derive(dims({ hook_service: "present" })), { access_token_format: "jwt" }, { ...deadUrls(), hydraAdmin: undefined }),
+  );
+  assert.deepEqual(
+    results.map((r) => [r.check, r.ok, r.warn]),
+    [
+      ["access-token shape", false, true],
+      ["token hook wired (hook_service=present)", false, true],
+    ],
+  );
+  assert.ok(results.every((r) => /no HYDRA_ADMIN_URL/.test(r.detail)));
+});
+
 // ── Token-hook decision table, against a stub hydra ─────────────────────────
 //
 // The wiring check is two-sided, so its polarity is worth defending: an

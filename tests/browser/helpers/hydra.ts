@@ -10,7 +10,7 @@
  */
 
 import { Page, expect } from "@playwright/test";
-import { OIDC_CONSUMER_URL } from "./config";
+import { OIDC_CONSUMER_URL, HYDRA_PUBLIC_URL, LOGIN_UI_URL } from "./config";
 
 /**
  * Extract the authorize URL from the OIDC consumer page link,
@@ -36,6 +36,22 @@ export async function buildAuthorizeUrl(
   const url = new URL(href);
   if (url.hostname === "hydra") {
     url.hostname = "localhost";
+  }
+  // The consumer is a SEPARATE process configured with its own endpoint, so its
+  // authorize URL is the one place the suite can end up driving a different
+  // deployment than the one under test. That is not hypothetical: with a compose
+  // stack up on the same host, an unset OIDC_CONSUMER_URL resolves to compose's
+  // consumer on :4446 — pointed at compose's hydra — and every
+  // authorization-code journey silently tests localhost while the report names
+  // the remote target. Findings from such a run are findings about here.
+  const expectedOrigins = [HYDRA_PUBLIC_URL, LOGIN_UI_URL].map((u) => new URL(u).origin);
+  if (!expectedOrigins.includes(url.origin)) {
+    throw new Error(
+      `OIDC consumer at ${OIDC_CONSUMER_URL} issues authorize URLs on ${url.origin}, ` +
+      `but this run targets ${expectedOrigins.join(" / ")}. The consumer belongs to a different ` +
+      `deployment — point OIDC_CONSUMER_URL at a consumer configured for this one ` +
+      `(the urls/juju matrix backends start theirs on 127.0.0.1:4447).`,
+    );
   }
   // Strip max_age from the base URL (oidc_debug may inject a default).
   // Callers that need it pass { max_age: "0" } explicitly.

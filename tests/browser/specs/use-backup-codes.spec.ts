@@ -30,7 +30,10 @@ let identityIds: string[] = [];
 test.beforeEach(async () => {
   test.skip(
     getExecutionLane() === "live",
-    "Internal-only spec: requires runtime identity lifecycle via admin API",
+    // Wording is load-bearing: the justified-skip allow-list recognises
+    // "Internal-only spec in live lane" (tests/browser/scripts/skip-allowlist.mjs),
+    // and this spec is tier B, so an off-pattern reason fails the row.
+    "Internal-only spec in live lane: runtime identity lifecycle needs the admin API",
   );
   // Backup codes are issued as part of TOTP enrolment, which login-ui only
   // forces where MFA is enforced — so this flow does not exist on a no-MFA

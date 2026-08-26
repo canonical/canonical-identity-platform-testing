@@ -8,12 +8,19 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
+import * as fs from "node:fs";
+import * as path from "node:path";
+import { fileURLToPath } from "node:url";
+
 import {
   classifyOutcome,
   buildAttachImports,
   relationExists,
   JUSTIFIED_SKIP,
+  TIER_A_FILES,
 } from "../run-row.mjs";
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // ── classifyOutcome ──────────────────────────────────────────────────────────
 // Playwright statuses: "expected" = passed, "unexpected" = FAILED. The
@@ -199,4 +206,22 @@ test("relationExists reads both string and object peer shapes", () => {
   assert.ok(relationExists(objStatus, "a", "ep", "b"));
   assert.ok(relationExists(strStatus, "a", "ep", "b"));
   assert.ok(!relationExists(objStatus, "a", "ep", "c"));
+});
+
+// ── TIER_A_FILES vs the expected-set script ──────────────────────────────────
+// These two lists are the same fact stated twice. When they diverged (
+// oidc-error.spec.ts and resilience.spec.ts were tier A in expected-set.ts but
+// absent from TIER_A_FILES) every row verdict grew phantom "expected to run but
+// did not" entries for scenarios that had just run, and those suites' runtime
+// skips were held to the tier-B allowlist. Reading the TS table textually keeps
+// this offline and dependency-free.
+test("TIER_A_FILES matches the tier-A table in scripts/expected-set.ts", () => {
+  const src = fs.readFileSync(
+    path.join(REPO, "tests", "browser", "scripts", "expected-set.ts"),
+    "utf-8",
+  );
+  const table = src.slice(src.indexOf("const TIER_A:"), src.indexOf("];", src.indexOf("const TIER_A:")));
+  const declared = [...table.matchAll(/"specs\/([^"]+)"/g)].map((m) => m[1]);
+  assert.ok(declared.length > 0, "could not read the TIER_A table");
+  assert.deepEqual([...TIER_A_FILES].sort(), [...new Set(declared)].sort());
 });
