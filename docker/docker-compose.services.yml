@@ -132,6 +132,22 @@ services:
       - "traefik.http.routers.user-verification-service.entryPoints=web"
       - "traefik.http.routers.user-verification-service.service=user-verification-service"
 
+  tenant-service-migrate:
+    # tenant-service does not auto-migrate: on a FRESH volume the tenants
+    # schema never exists and every list call 500s with SQLSTATE 42P01 (CI
+    # found this; dev volumes predate it). Mirrors hook-service-migrate.
+    # Same digest pin as the service — the PD-1 floor applies to both.
+    image: ghcr.io/canonical/tenant-service:v0.3.1@sha256:2aef7ec80703d7f460665413a0a9d0d9f2c872c5c25076c262d035813a0ed62d
+    command: exec tenant-service migrate --dsn postgres://tenants:tenants@postgres:5432/tenants?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+    networks:
+      - intranet
+    labels:
+      - "traefik.enable=false"
+
   tenant-service:
     # v0.3.1 is the earliest release containing canonical/tenant-service@e2cb03b
     # "fix: add interceptors" — cmd/serve.go:194-196 excludes
@@ -160,6 +176,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      tenant-service-migrate:
+        condition: service_completed_successfully
       openfga:
         condition: service_started  # openfga has no healthcheck yet; revisit when rock lands
       kratos:
