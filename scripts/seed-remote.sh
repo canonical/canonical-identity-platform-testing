@@ -131,9 +131,22 @@ fi
 
 echo "── seed ($MODE)"
 cd "$REPO/tests/browser"
-npm install --silent
+
+# NOT --silent: it hid its own failure, and this step is the one that needs the
+# network. A seeding host inside the cluster reaches the admin APIs and often
+# nothing else, so an unreachable npm registry looked like the script dying
+# after "── seed" with no output at all.
+npm install || fail "npm install failed in tests/browser — the seeding host needs the npm registry
+    (proxy: npm config set proxy/https-proxy, or vendor node_modules from a host that has it:
+     tar czf nm.tgz -C tests/browser node_modules && untar here)"
+
+# --no-install: resolve tsx from node_modules, never from the registry at run
+# time. Unpinned, `npx tsx` fetched it on every invocation and failed opaquely
+# where egress is blocked.
 ACTIVE_PROFILE="$ROW" BROWSER_TEST_CAPABILITIES="$CAPS" \
-  npx tsx seeder/seed.ts "$MODE" --profile "$ROW"
+  npx --no-install tsx seeder/seed.ts "$MODE" --profile "$ROW" \
+  || fail "the seeder exited non-zero — see its output above. The manifest may still have been
+    written ($MANIFEST): it is written BEFORE the strict-mode failure report."
 
 [[ "$MODE" == "--purge" ]] && exit 0
 
