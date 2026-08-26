@@ -44,7 +44,7 @@ ALL_PROFILES := $(shell node -p "JSON.parse(require('fs').readFileSync('matrix/m
         test-browser-live test-browser-internal test-browser-audit-live test-browser-profile \
         gate gate-all-profiles \
         matrix-generate matrix-test matrix-check matrix-up matrix-baseline test-matrix-row test-matrix render-manifests \
-        audit-ports dev-check clean
+        audit-ports dev-check clean ensure-intranet
 
 help: ## Show all available targets
 	@echo "Canonical Identity Platform — Make Targets"
@@ -84,11 +84,18 @@ profile-validate: ## Validate a profile's materialized row artifacts (PROFILE=na
 	fi; \
 	[[ "$$FAIL" -eq 0 ]] && echo "✓ Profile $(PROFILE) validated" || { echo "✗ Profile $(PROFILE) validation failed"; exit 1; }
 
-up: ## Spin up infra + auth + services for active profile (blocks until healthy)
+# auth/services declare the `intranet` network external (it is shared wiring
+# with other local stacks), so compose never creates it: on a fresh machine or
+# CI runner every `up` fails with "network intranet declared as external, but
+# could not be found" until someone creates it once. This makes "once" happen.
+ensure-intranet:
+	@docker network inspect intranet >/dev/null 2>&1 || docker network create intranet
+
+up: ensure-intranet ## Spin up infra + auth + services for active profile (blocks until healthy)
 	$(COMPOSE) up -d --wait
 	@echo "✓ Platform running with profile: $(PROFILE)"
 
-up-infra-only: ## Spin up only infra (postgres, traefik, mailslurper, openfga) — no auth
+up-infra-only: ensure-intranet ## Spin up only infra (postgres, traefik, mailslurper, openfga) — no auth
 	COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) docker compose -f $(COMPOSE_INFRA) up -d --wait
 	@echo "✓ Infrastructure running (no auth services)"
 
@@ -243,7 +250,7 @@ render-manifests: ## Render the juju lane's k8s manifests from root/local.auto.t
 	done
 	@echo "Apply with: kubectl apply -f $(JUJU_MANIFESTS)/.rendered/"
 
-matrix-up: ## Bring up a materialized matrix row: make matrix-up ROW=<name> (tear down with `make down`)
+matrix-up: ensure-intranet ## Bring up a materialized matrix row: make matrix-up ROW=<name> (tear down with `make down`)
 	@if [ -z "$(ROW)" ] || [ ! -d "matrix/rows/$(ROW)" ]; then \
 	  echo "Usage: make matrix-up ROW=<name>  (rows listed in matrix/matrix.json)"; exit 1; fi
 	COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) docker compose \
