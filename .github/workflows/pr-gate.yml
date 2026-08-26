@@ -93,8 +93,10 @@ jobs:
             echo "## Image digests this gate tested (${{ matrix.profile }})"
             echo '```'
             docker ps -a --filter label=com.docker.compose.project=identity-platform --format '{{.Image}}' | sort -u \
-              | xargs -r docker image inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{index .RepoTags 0}} (no repo digest){{end}}' \
-              | sort -u
+              | while read -r img; do
+                  docker image inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{index .RepoTags 0}} (no repo digest){{end}}' "$img" 2>/dev/null \
+                    || echo "$img (never pulled)"
+                done | sort -u
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
       - name: Capture compose logs

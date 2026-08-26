@@ -67,8 +67,10 @@ jobs:
           {
             echo "── image digests this run tested"
             docker ps -a --filter label=com.docker.compose.project=identity-platform --format '{{.Image}}' | sort -u \
-              | xargs -r docker image inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{index .RepoTags 0}} (no repo digest){{end}}' \
-              | sort -u
+              | while read -r img; do
+                  docker image inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{index .RepoTags 0}} (no repo digest){{end}}' "$img" 2>/dev/null \
+                    || echo "$img (never pulled)"
+                done | sort -u
           } | tee -a nightly-log.txt >> "$GITHUB_STEP_SUMMARY"
       - name: Upload lane log
         if: always()
