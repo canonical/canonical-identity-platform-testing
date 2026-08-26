@@ -209,8 +209,12 @@ matrix-test: ## Offline tests for the matrix harness's pure logic (milliseconds,
 matrix-check: matrix-test ## Verify matrix artifacts match matrix/config-model.mjs (CI guard; runs matrix-test first)
 	node matrix/generate.mjs --check
 
-check: matrix-check test-browser-typecheck test-browser-unit audit-ports ## The whole hermetic guard: matrix artifacts + offline tests + typecheck + suite unit tests + port audit (no stack, no cluster)
-	@echo "✓ hermetic checks passed (matrix artifacts, offline harness tests, typecheck, satisfies() unit tests, port audit)"
+# typecheck FIRST: it runs the suite's `npm install`, which matrix-test's
+# expected-set subprocess needs (it imports @playwright/test through the
+# scenario files). On a fresh clone/CI runner the old order failed with
+# MODULE_NOT_FOUND before any install had happened.
+check: test-browser-typecheck matrix-check test-browser-unit audit-ports ## The whole hermetic guard: typecheck + matrix artifacts + offline tests + suite unit tests + port audit (no stack, no cluster)
+	@echo "✓ hermetic checks passed (typecheck, matrix artifacts, offline harness tests, satisfies() unit tests, port audit)"
 
 render-manifests: ## Render the juju lane's k8s manifests from root/local.auto.tfvars (envsubst; no cluster contact)
 	@if [ ! -f "$(JUJU_TFVARS)" ]; then \
