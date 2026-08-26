@@ -16,9 +16,8 @@ Two families, mirroring the spec's blocking/non-blocking split:
 |---|---|---|---|---|---|
 | PR gate | `pr-gate.yml` | `pull_request`, push to `main` | compose (mode 1) | YES | red blocks merge |
 | Nightly matrix | `nightly-matrix.yml` | cron `0 1 * * *`, dispatch | compose (mode 1) | no | red files/updates a triaged issue |
-| Juju drift gate (dev) | `juju-remote.yml` | cron `30 2 * * *`, dispatch | juju attach (mode 3), plan-only | no | red files/updates a triaged issue |
-| Juju drift gate (stg) | `juju-remote.yml` | cron `0 3 * * 1` (weekly), dispatch | juju attach (mode 3), plan-only | no | red files/updates a triaged issue |
-| attach-apply (dev only) | `juju-remote.yml` | dispatch only | juju attach (mode 3), apply | no | experimental — §8 |
+| Juju drift gate (yellow) | `juju-remote.yml` | cron `30 2 * * *`, dispatch | juju attach (mode 3), plan-only | no | red files/updates a triaged issue |
+| attach-apply | `juju-remote.yml` | dispatch only, `ALLOW_ATTACH_APPLY` env var | juju attach (mode 3), apply | no | experimental — §8 |
 
 `_triage.yml` is the shared reusable triage step (§6).
 
@@ -55,11 +54,11 @@ debugging and deliberately never touches the issue tracker.
 Runs `make test-matrix-row ROW=<row> BACKEND=juju ATTACH=1 PLAN_ONLY=1`
 against an EXISTING charmed deployment through JIMM:
 
-- dev = `blue-iam` + `blue-core` (nightly),
-- stg = `green-iam` + `green-core` (weekly),
-
-both owned by `cd-identity-core-infrastructure`
-(`environments/juju/prodstack/6/production/{blue,green}-{iam,core}`).
+yellow = `yellow-iam` + `yellow-core`, the test-designated color, owned by
+`cd-identity-core-infrastructure`
+(`environments/juju/prodstack/6/production/yellow-{iam,core}`). Additional
+colors slot in by creating a GitHub environment with the same secret/variable
+names (§5); no workflow change.
 
 The scheduled mode is ALWAYS plan-only. What it proves nightly:
 
@@ -71,16 +70,15 @@ The scheduled mode is ALWAYS plan-only. What it proves nightly:
    configuration (default row: `core`).
 
 A plan-only run mutates nothing — `run-row.mjs` returns before any apply and
-before URL discovery. Full adopt→transition (`attach-apply`) is dispatch-only,
-dev-only, and additionally disabled behind the `ALLOW_ATTACH_APPLY`
-environment variable until the §8 harness gaps close, because it would
-transition config that the operator repos' CD and
-`cd-identity-core-infrastructure` own.
+before URL discovery. Full adopt→transition (`attach-apply`) is dispatch-only
+and disabled behind the target environment's `ALLOW_ATTACH_APPLY` variable
+until the §8 harness gaps close, because it transitions config that the
+operator repos' CD and `cd-identity-core-infrastructure` own.
 
 ## 2. JIMM authentication
 
 Pattern source: `identity-team/.github/workflows/charm-deploy.yaml` (used by
-`hydra-operator/.github/workflows/deploy.yaml` for the same dev/stg models).
+`hydra-operator/.github/workflows/deploy.yaml` for the same JIMM-managed models).
 
 Two consumers, one service account:
 
@@ -149,13 +147,13 @@ discovered, never chosen); the compose lane matches it.
   `matrix/backends/juju/root/main.tf` (module refs + `charm_revisions`), and
   `.terraform.lock.hcl` pins the provider — both change only via reviewed
   commits.
-- **Attach against dev/stg (mode 3): versions are DISCOVERED, not chosen.**
+- **Attach against the remote deployment (mode 3): versions are DISCOVERED, not chosen.**
   The deployment under test runs whatever `cd-identity-core-infrastructure`
   and the operator repos' CD deployed; attach records the live charm
   revisions (`charm_revisions` in the emitted tfvars) into the run summary.
   This lane answers "does the platform AS DEPLOYED match the declared
   config", so choosing versions here would be self-deception. The version
-  *decision* for dev/stg belongs to the infra repo, and this repo
+  *decision* for the deployment belongs to the infra repo, and this repo
   deliberately does not duplicate it.
 
 ## 4. Runner network reality
@@ -167,10 +165,10 @@ promise:
 |---|---|---|
 | JIMM API | yes (proven by the operator repos' deploy workflows) | juju CLI + terraform work |
 | Juju model facades via JIMM | yes | attach discovery works |
-| dev/stg public ingress (`iam.blue.canonical.com` / `iam.green.canonical.com`) | assumed; verify on first provisioned run | future urls-backend suite leg (§8) |
-| kratos/hydra ADMIN APIs | NO — the core models expose no admin ingress by design | no seeding from CI ⇒ no internal-lane suite against dev/stg |
+| deployment public ingress (`iam.yellow.canonical.com` — yellow-core.tfvars `external_hostname`) | assumed reachable; verify on first provisioned run | future urls-backend suite leg (§8) |
+| kratos/hydra ADMIN APIs | NO — the core models expose no admin ingress by design | no seeding from CI ⇒ no internal-lane suite against the deployment |
 | cluster/pod IPs (`jujuEnv()` discovery addresses) | NO | full juju suite legs cannot run from a hosted runner today |
-| mailslurper / dex NodePorts | absent on dev/stg entirely (test-only apps) | mail/dex-dependent scenarios can never run against dev/stg |
+| mailslurper / dex NodePorts | absent on the charmed deployments entirely (test-only apps) | mail/dex-dependent scenarios can never run against them |
 
 This table is why the scheduled remote lane is a drift gate and not a suite
 run — §8 stages the rest honestly instead of shipping a lane that silently
@@ -178,16 +176,17 @@ shrinks (the anti-pattern `docs/testing-spec.md` exists to prevent).
 
 ## 5. Secrets and variables surface (names only)
 
-Per GitHub **environment** (`dev`, `stg`), consumed by `juju-remote.yml`:
+Per GitHub **environment** (`yellow`; more colors = more environments),
+consumed by `juju-remote.yml`:
 
 | Kind | Name | Meaning |
 |---|---|---|
 | secret | `JIMM_CLIENT_ID` | service-account OAuth client id |
 | secret | `JIMM_CLIENT_SECRET` | service-account OAuth client secret |
 | secret | `JIMM_URL` | JIMM controller address, `host:port` |
-| variable | `MATRIX_IAM_MODEL` | IAM model name (`blue-iam` / `green-iam`) |
-| variable | `MATRIX_CORE_MODEL` | core model name (`blue-core` / `green-core`) |
-| variable | `ALLOW_ATTACH_APPLY` | `true` unlocks attach-apply (dev; keep unset) |
+| variable | `MATRIX_IAM_MODEL` | IAM model name (`yellow-iam`) |
+| variable | `MATRIX_CORE_MODEL` | core model name (`yellow-core`) |
+| variable | `ALLOW_ATTACH_APPLY` | `true` unlocks attach-apply (keep unset — §8) |
 
 Repository-level, consumed by `_triage.yml` (both optional — triage degrades
 to a verbatim log tail without them):
@@ -200,9 +199,10 @@ to a verbatim log tail without them):
 Optional, for the google-oidc tier-B specs in the PR gate: `GOOGLE_TEST_*`
 (absent ⇒ justified skip; that is the skip allow-list working as designed).
 
-Environment protection rules (reviewers on `stg`, and on `dev` if
-attach-apply is ever unlocked) are provisioning-time configuration, not CI
-code.
+Environment protection rules are provisioning-time configuration, not CI
+code. Do NOT put a required reviewer on an environment with scheduled runs —
+the approval gate pauses cron-triggered jobs too, and the nightly would sit
+waiting for a human every night.
 
 ## 6. Failure triage flow (`_triage.yml`)
 
@@ -217,8 +217,8 @@ The spec's "non-blocking; failures file issues" contract, made real:
    wedge), quoted evidence lines, one next diagnostic step. The prompt forbids
    speculation beyond the log. Without the key, the issue carries the verbatim
    log tail instead — triage is an enhancement, never a dependency.
-3. One OPEN issue per lane label (`ci-nightly-matrix`, `ci-juju-dev`,
-   `ci-juju-stg`): first failure creates it, repeats comment on it, and the
+3. One OPEN issue per lane label (`ci-nightly-matrix`, `ci-juju-yellow`,
+   …per environment): first failure creates it, repeats comment on it, and the
    next green run comments and closes it. No issue-per-run spam, no silent
    red.
 4. Issue bodies state that the triage may be LLM-generated and must be
@@ -229,8 +229,9 @@ The spec's "non-blocking; failures file issues" contract, made real:
 
 ## 7. Safety invariants
 
-- **Nothing in CI ever mutates dev/stg on a schedule.** Plan-only is enforced
-  in `resolve` (stg unconditionally) and by `ALLOW_ATTACH_APPLY` (dev).
+- **Nothing in CI ever mutates the deployment on a schedule.** Scheduled runs
+  are hardwired plan-only in `resolve`; mutation exists only behind dispatch
+  plus the environment's `ALLOW_ATTACH_APPLY` variable.
 - **State never leaves the runner.** `terraform.tfstate.d/` is secret-bearing
   by construction (cleartext `juju_secret` values). The only artifact the
   remote lane uploads is the runner's stdout log, and `run-row.mjs` already
@@ -247,15 +248,15 @@ The spec's "non-blocking; failures file issues" contract, made real:
 
 ## 8. Phase 2 — staged work (deliberately not shipped broken)
 
-1. **Suite legs against dev/stg (urls backend, mode 5).** Blocked on:
-   (a) a pinned row whose declaration matches the dev/stg deployed shape
+1. **Suite legs against the charmed deployment (urls backend, mode 5).** Blocked on:
+   (a) a pinned row whose declaration matches the deployed shape
    (google external IdP via `kratos-external-idp-integrator`, no
    mailslurper/dex/tenant-service) — `matrix/verify.mjs` correctly refuses to
    run the suite against a declaration the deployment does not match, and
-   dev/stg matches no current row; (b) an out-of-band-seeded manifest
+   the deployment matches no current row; (b) an out-of-band-seeded manifest
    (`MANIFEST=<path>`, `tests/browser/LANES.md`) provisioned as an environment
    secret, since no admin ingress exists. Deliverable: live-lane subset
-   against `LOGIN_UI_URL=https://iam.<env>.canonical.com`.
+   against `LOGIN_UI_URL=https://iam.yellow.canonical.com`.
 2. **`jujuEnv()` discovery guards.** `matrix/run-row.mjs` hard-parses
    `juju config idp-dex` (and friends) during URL discovery, so any juju-
    backend run past plan-only crashes on a model without the test-only apps —
