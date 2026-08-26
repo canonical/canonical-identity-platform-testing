@@ -1,8 +1,4 @@
-# The blocking PR gate — docs/ci-spec.md.
-# Compose backend only: every pinned matrix row gets its own runner, its own
-# stack, and the full `make gate` contract (typecheck, up, smoke, browser
-# suite twice, Go E2E). The cross-profile coverage union runs once afterwards
-# so a scenario silently skipped by EVERY profile still fails the gate.
+# Blocking PR gate — design: docs/ci-spec.md §1.
 name: PR gate
 
 on:
@@ -35,8 +31,6 @@ jobs:
         with:
           go-version-file: tests/e2e/go.mod
           cache-dependency-path: tests/e2e/go.sum
-      # matrix artifacts + offline harness tests + typecheck + satisfies()
-      # unit tests + port audit. No stack, no cluster.
       - run: make check
 
   profiles:
@@ -47,8 +41,7 @@ jobs:
       profiles: ${{ steps.rows.outputs.profiles }}
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
-      # The pinned rows of matrix/matrix.json ARE the gate profiles — the
-      # matrix strategy below tracks the generated file, never a hand list.
+      # pinned rows of matrix/matrix.json ARE the gate profiles
       - id: rows
         run: |
           profiles="$(node -p "JSON.stringify(JSON.parse(require('fs').readFileSync('matrix/matrix.json','utf8')).rows.filter(r=>r.kind==='pinned').map(r=>r.name))")"
@@ -58,9 +51,7 @@ jobs:
     name: Gate (${{ matrix.profile }})
     needs: [hermetic, profiles]
     runs-on: ubuntu-24.04
-    # Evidence-based: three green runs measured 5-8 min per gate job
-    # (2026-08-26, runs 32942798877/32943709027/32944592116); 45 gives ~5x
-    # headroom without letting a hang absorb a runner for two hours.
+    # ~5x measured gate time (docs/ci-spec.md §8)
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -76,9 +67,6 @@ jobs:
           go-version-file: tests/e2e/go.mod
           cache-dependency-path: tests/e2e/go.sum
       - run: make dev-check
-      # Chromium is downloaded per run; the google-oidc tier-B specs use the
-      # runner image's system Chrome (channel: 'chrome') and skip justified
-      # when GOOGLE_TEST_* credentials are absent.
       - name: Browser toolchain
         working-directory: tests/browser
         run: |
@@ -87,8 +75,7 @@ jobs:
           npx playwright install chromium
       - name: Gate
         run: make gate PROFILE=${{ matrix.profile }}
-      # The stack tracks floating tags (`:stable`) on purpose — docs/ci-spec.md
-      # §3. Recording what actually ran is what keeps findings build-named.
+      # floating tags by policy; record what ran (docs/ci-spec.md §3)
       - name: Record image digests
         if: always()
         run: |
@@ -142,8 +129,6 @@ jobs:
           pattern: coverage-*
           merge-multiple: true
           path: tests/browser/coverage
-      # A profile may legitimately skip what it cannot deploy, so no single
-      # profile proves the suite is alive. This does (same check as
-      # `make gate-all-profiles`).
+      # same cross-profile aliveness check as `make gate-all-profiles`
       - working-directory: tests/browser
         run: node scripts/coverage-union.mjs coverage/*.json

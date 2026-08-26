@@ -133,10 +133,8 @@ services:
       - "traefik.http.routers.user-verification-service.service=user-verification-service"
 
   tenant-service-migrate:
-    # tenant-service does not auto-migrate: on a FRESH volume the tenants
-    # schema never exists and every list call 500s with SQLSTATE 42P01 (CI
-    # found this; dev volumes predate it). Mirrors hook-service-migrate.
-    # Same digest pin as the service — the PD-1 floor applies to both.
+    # tenant-service ships no auto-migration; without this, fresh volumes 500
+    # with SQLSTATE 42P01. Same PD-1 digest pin as the service.
     image: ghcr.io/canonical/tenant-service:v0.3.1@sha256:2aef7ec80703d7f460665413a0a9d0d9f2c872c5c25076c262d035813a0ed62d
     command: exec tenant-service migrate --dsn postgres://tenants:tenants@postgres:5432/tenants?sslmode=disable
     depends_on:

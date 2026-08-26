@@ -84,10 +84,8 @@ profile-validate: ## Validate a profile's materialized row artifacts (PROFILE=na
 	fi; \
 	[[ "$$FAIL" -eq 0 ]] && echo "✓ Profile $(PROFILE) validated" || { echo "✗ Profile $(PROFILE) validation failed"; exit 1; }
 
-# auth/services declare the `intranet` network external (it is shared wiring
-# with other local stacks), so compose never creates it: on a fresh machine or
-# CI runner every `up` fails with "network intranet declared as external, but
-# could not be found" until someone creates it once. This makes "once" happen.
+# auth/services declare `intranet` external (shared with other local stacks);
+# compose never creates it, so fresh machines need this once.
 ensure-intranet:
 	@docker network inspect intranet >/dev/null 2>&1 || docker network create intranet
 
@@ -216,10 +214,8 @@ matrix-test: ## Offline tests for the matrix harness's pure logic (milliseconds,
 matrix-check: matrix-test ## Verify matrix artifacts match matrix/config-model.mjs (CI guard; runs matrix-test first)
 	node matrix/generate.mjs --check
 
-# typecheck FIRST: it runs the suite's `npm install`, which matrix-test's
-# expected-set subprocess needs (it imports @playwright/test through the
-# scenario files). On a fresh clone/CI runner the old order failed with
-# MODULE_NOT_FOUND before any install had happened.
+# typecheck first: its npm install provisions node_modules for matrix-test's
+# expected-set subprocess.
 check: test-browser-typecheck matrix-check test-browser-unit audit-ports ## The whole hermetic guard: typecheck + matrix artifacts + offline tests + suite unit tests + port audit (no stack, no cluster)
 	@echo "✓ hermetic checks passed (typecheck, matrix artifacts, offline harness tests, satisfies() unit tests, port audit)"
 

@@ -1,8 +1,5 @@
-# The nightly configuration-matrix lane (compose backend) — docs/ci-spec.md.
-# Non-blocking by contract (docs/testing-spec.md): every seed + generated row
-# runs once; failures become deduplicated, triaged GitHub issues instead of a
-# gate. Scheduled runs file/close issues; manual dispatches are debugging aids
-# and never touch the issue tracker.
+# Nightly matrix lane (compose, non-blocking) — design: docs/ci-spec.md §1.
+# Only scheduled runs file/close issues; dispatches are debugging aids.
 name: Nightly matrix (compose)
 
 on:
@@ -59,8 +56,7 @@ jobs:
           else
             make test-matrix 2>&1 | tee nightly-log.txt
           fi
-      # The lane tracks floating tags (`:stable`) on purpose — docs/ci-spec.md
-      # §3. Recording what actually ran is what keeps findings build-named.
+      # floating tags by policy; record what ran (docs/ci-spec.md §3)
       - name: Record image digests
         if: always()
         run: |

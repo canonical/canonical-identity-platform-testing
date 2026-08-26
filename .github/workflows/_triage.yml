@@ -1,9 +1,5 @@
-# Reusable failure-triage step for the non-blocking lanes — docs/ci-spec.md.
-# On failure: summarize the lane log (LLM-assisted via OpenRouter when
-# OPENROUTER_API_KEY is provisioned, verbatim tail otherwise) and file/update
-# ONE deduplicated issue per lane label. On success: close the lane's open
-# issue, citing the run.
-# The tested lane stays non-blocking: this workflow never re-runs anything.
+# Reusable lane triage — design: docs/ci-spec.md §6. One deduplicated issue
+# per lane label; closes it on green; never re-runs anything.
 name: Triage
 
 on:
@@ -56,8 +52,7 @@ jobs:
         if: env.OUTCOME == 'failure'
         run: |
           find lane-log -type f \( -name '*.txt' -o -name '*.log' \) -exec cat {} + > full-log.txt || true
-          # Tail only: the verdict and failure lines live at the end of the
-          # lane output; 100 KiB keeps the LLM request bounded.
+          # tail: verdicts live at the end; 100 KiB bounds the LLM request
           tail -c 102400 full-log.txt > excerpt.txt
           [ -s excerpt.txt ] || echo "(lane produced no log output)" > excerpt.txt
       - name: LLM triage (optional)
@@ -88,9 +83,6 @@ jobs:
           Never speculate beyond the log; if evidence is insufficient, say exactly that.
           Keep it under 400 words.
           EOF
-          # OpenRouter speaks the OpenAI chat-completions dialect; the system
-          # prompt rides as the first message and the reply lives in
-          # .choices[0].message.content.
           jq -n --rawfile log excerpt.txt --rawfile system system.txt \
                 --arg model "$MODEL" --arg lane "$LANE" \
                 '{model: $model, max_tokens: 1500,

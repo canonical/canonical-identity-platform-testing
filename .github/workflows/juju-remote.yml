@@ -1,36 +1,24 @@
-# The remote charmed-deployment lane — docs/ci-spec.md.
-# Runs `make test-matrix-row ROW=<row> BACKEND=juju ATTACH=1` against the
-# test-designated charmed deployment (yellow = yellow-iam/yellow-core) through
-# JIMM, using service-account client credentials for both the juju CLI
-# (JUJU_CLIENT_ID/JUJU_CLIENT_SECRET, juju/juju#20716) and terraform
-# (TF_VAR_jimm_* -> provider attributes in matrix/backends/juju/root/providers.tf).
-#
-# Scheduled runs are ALWAYS plan-only: the drift gate adopts nothing, applies
-# nothing, and reports how far the deployment sits from the row's declared
-# configuration. attach-apply (adopt -> transition) MUTATES the deployment, so
-# it is dispatch-only and additionally gated on the target environment's
-# ALLOW_ATTACH_APPLY=true variable (see docs/ci-spec.md phase 2 for why it
-# stays off today). Policy lives in the environment's variables, not in
-# name-matching here — a new color slots in by creating a GitHub environment.
+# Remote charmed-deployment drift gate — design: docs/ci-spec.md.
+# Scheduled runs target vars.CI_JUJU_ENVIRONMENT and are always plan-only;
+# attach-apply is dispatch-only, behind the environment's ALLOW_ATTACH_APPLY.
 name: Juju drift gate
 
 on:
   schedule:
-    - cron: '30 2 * * *' # yellow, nightly
+    - cron: '30 2 * * *'
   workflow_dispatch:
     inputs:
       environment:
-        description: 'Target deployment (GitHub environment; yellow is the test-designated one)'
+        description: 'Target GitHub environment (empty = CI_JUJU_ENVIRONMENT)'
         type: environment
-        required: true
-        default: 'yellow'
+        required: false
       row:
-        description: Matrix row whose declaration the deployment is compared against
+        description: Matrix row to compare the deployment against
         type: string
         required: false
         default: 'core'
       mode:
-        description: 'plan-only = zero-mutation drift gate; attach-apply MUTATES the deployment (requires ALLOW_ATTACH_APPLY=true on the environment)'
+        description: 'plan-only = zero mutation; attach-apply MUTATES the deployment'
         type: choice
         options: ['plan-only', 'attach-apply']
         default: 'plan-only'
@@ -56,14 +44,20 @@ jobs:
       - id: pick
         env:
           EVENT: ${{ github.event_name }}
+          CFG_ENV: ${{ vars.CI_JUJU_ENVIRONMENT }}
           IN_ENV: ${{ inputs.environment }}
           IN_ROW: ${{ inputs.row }}
           IN_MODE: ${{ inputs.mode }}
         run: |
+          env_name="${IN_ENV:-$CFG_ENV}"
+          if [ -z "$env_name" ]; then
+            echo "::error::no target: set the repo variable CI_JUJU_ENVIRONMENT (docs/ci-spec.md §5) or pass the environment input"
+            exit 1
+          fi
           if [ "$EVENT" = "workflow_dispatch" ]; then
-            env_name="$IN_ENV"; row="${IN_ROW:-core}"; mode="${IN_MODE:-plan-only}"
+            row="${IN_ROW:-core}"; mode="${IN_MODE:-plan-only}"
           else
-            env_name="yellow"; row="core"; mode="plan-only"
+            row="core"; mode="plan-only"
           fi
           {
             echo "environment=$env_name"
@@ -81,17 +75,13 @@ jobs:
       group: juju-remote-${{ needs.resolve.outputs.environment }}
       cancel-in-progress: false
     env:
-      # Controller identity: the workflow registers JIMM under the local name
-      # `jimm`; matrix/controller-guard.mjs then requires `juju
-      # show-controller` to resolve to exactly that name.
+      # controller-guard contract: `juju show-controller` must resolve to `jimm`
       JUJU_CONTROLLER: jimm
       MATRIX_ALLOWED_CONTROLLER: jimm
-      # Which models on that controller are the deployment under test.
       MATRIX_JUJU_MODEL: ${{ vars.MATRIX_IAM_MODEL }}
       MATRIX_JUJU_CORE_MODEL: ${{ vars.MATRIX_CORE_MODEL }}
-      # Service-account client credentials: same secret drives the juju CLI
-      # (env login, juju/juju#20716) and terraform (provider attributes via
-      # TF_VAR_*; JUJU_CONTROLLER_ADDRESSES stays unset - the guard refuses it).
+      # same service account for the CLI (juju/juju#20716) and terraform;
+      # TF_VAR_* instead of JUJU_CONTROLLER_ADDRESSES, which the guard refuses
       JUJU_CLIENT_ID: ${{ secrets.JIMM_CLIENT_ID }}
       JUJU_CLIENT_SECRET: ${{ secrets.JIMM_CLIENT_SECRET }}
       TF_VAR_jimm_url: ${{ secrets.JIMM_URL }}
@@ -104,7 +94,7 @@ jobs:
       - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
         with:
           terraform_wrapper: false
-      - name: Install juju (3.6 ships service-account env login)
+      - name: Install juju
         run: sudo snap install juju --channel=3.6/stable
       - name: Toolchain check
         run: JUJU_LANE=1 make dev-check
@@ -114,17 +104,17 @@ jobs:
           ALLOW: ${{ vars.ALLOW_ATTACH_APPLY }}
         run: |
           if [ "$ALLOW" != "true" ]; then
-            echo "::error::attach-apply is disabled for this environment (set the environment variable ALLOW_ATTACH_APPLY=true after reading docs/ci-spec.md phase 2 - post-apply URL discovery is a known harness gap)"
+            echo "::error::attach-apply is disabled here (docs/ci-spec.md §8)"
             exit 1
           fi
-      - name: Register JIMM controller (service-account login)
+      - name: Register JIMM controller
         run: |
           target="${TF_VAR_jimm_url#*://}"
           target="${target%%/*}"
           juju login "$target" -c jimm
       - name: Controller guard self-check
         run: node matrix/controller-guard.mjs --check
-      - name: Terraform init (lock-file pinned)
+      - name: Terraform init
         run: terraform -chdir=matrix/backends/juju/root init -input=false
       - name: Drift gate
         run: |
@@ -145,7 +135,7 @@ jobs:
             grep -E '^(Plan:|No changes|  # )|relation transition|drift gate|✗' juju-lane-log.txt || true
             echo '```'
             if [ -f matrix/backends/juju/root/attach.tfvars.json ]; then
-              echo '### Deployed charm revisions (discovered, not chosen - docs/ci-spec.md pinning policy)'
+              echo '### Deployed charm revisions (discovered)'
               echo '```json'
               jq .charm_revisions matrix/backends/juju/root/attach.tfvars.json
               echo '```'
@@ -155,14 +145,12 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          # The log ONLY: matrix/backends/juju/root/terraform.tfstate.d is
-          # secret-bearing by construction and must never leave the runner.
-          # run-row already prints a filtered plan summary, never raw state.
+          # log only — terraform state is secret-bearing and never leaves the runner
           name: juju-lane-log
           path: juju-lane-log.txt
           if-no-files-found: ignore
           retention-days: 14
-      - name: Scrub attach artifacts (defense in depth)
+      - name: Scrub attach artifacts
         if: always()
         run: |
           rm -rf matrix/backends/juju/root/terraform.tfstate.d

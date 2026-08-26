@@ -4,9 +4,7 @@ CREATE USER hydra WITH PASSWORD 'hydra';
 CREATE USER openfga WITH PASSWORD 'openfga';
 CREATE USER tenants WITH PASSWORD 'tenants';
 CREATE USER hooks WITH PASSWORD 'hooks';
--- "authorization" is a PostgreSQL reserved word: unquoted it is a syntax
--- error in the CREATE DATABASE position, which aborted this whole script on
--- any FRESH volume (dev machines never noticed - their volume predates it).
+-- "authorization" is reserved: unquoted it aborted init on fresh volumes.
 CREATE USER "authorization" WITH PASSWORD 'authorization';
 CREATE USER sts WITH PASSWORD 'sts';
 CREATE USER verification WITH PASSWORD 'verification';

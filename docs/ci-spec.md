@@ -188,13 +188,13 @@ consumed by `juju-remote.yml`:
 | variable | `MATRIX_CORE_MODEL` | core model name (`yellow-core`) |
 | variable | `ALLOW_ATTACH_APPLY` | `true` unlocks attach-apply (keep unset — §8) |
 
-Repository-level, consumed by `_triage.yml` (both optional — triage degrades
-to a verbatim log tail without them):
+Repository-level:
 
 | Kind | Name | Meaning |
 |---|---|---|
-| secret | `OPENROUTER_API_KEY` | enables LLM triage (OpenRouter, OpenAI-compatible API) |
-| variable | `CI_TRIAGE_MODEL` | overrides the triage model (default `google/gemini-3.7-flash`, an OpenRouter model slug) |
+| variable | `CI_JUJU_ENVIRONMENT` | GitHub environment the SCHEDULED drift gate targets (`yellow`); resolve fails loudly when unset |
+| secret | `OPENROUTER_API_KEY` | enables LLM triage (optional; verbatim log tail without it) |
+| variable | `CI_TRIAGE_MODEL` | overrides the triage model (default `google/gemini-3.7-flash`, an OpenRouter slug) |
 
 Optional, for the google-oidc tier-B specs in the PR gate: `GOOGLE_TEST_*`
 (absent ⇒ justified skip; that is the skip allow-list working as designed).
