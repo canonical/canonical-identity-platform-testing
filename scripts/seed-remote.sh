@@ -61,6 +61,13 @@ for var in KRATOS_ADMIN_URL KRATOS_PUBLIC_URL HYDRA_ADMIN_URL MANIFEST; do
   [[ -n "${!var:-}" ]] || fail "$var is required (see the header of $0)"
 done
 
+# Absolutize BEFORE the `cd tests/browser` below: resolveManifestPath() does
+# path.resolve(MANIFEST), which is relative to the SEEDER's cwd, so a relative
+# MANIFEST silently lands in tests/browser/ instead of where you ran this from.
+# -m: the parent may not exist yet — the seeder mkdirs it.
+MANIFEST="$(realpath -m "$MANIFEST")"
+export MANIFEST
+
 # `json <url> <expr>` prints a field of a JSON response, or the transport error.
 # node, not curl+jq: node is already required (make dev-check) and it honours
 # NODE_EXTRA_CA_CERTS, so a TLS problem here reads the same as in the seeder.
