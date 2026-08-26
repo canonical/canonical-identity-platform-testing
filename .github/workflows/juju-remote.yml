@@ -1,0 +1,189 @@
+# The remote charmed-deployment lane — docs/ci-spec.md.
+# Runs `make test-matrix-row ROW=<row> BACKEND=juju ATTACH=1` against an
+# EXISTING deployment (dev = blue-iam/blue-core nightly, stg =
+# green-iam/green-core weekly) through JIMM, using service-account client
+# credentials for both the juju CLI (JUJU_CLIENT_ID/JUJU_CLIENT_SECRET,
+# juju/juju#20716) and terraform (TF_VAR_jimm_* -> provider attributes in
+# matrix/backends/juju/root/providers.tf).
+#
+# Scheduled runs are ALWAYS plan-only: the drift gate adopts nothing, applies
+# nothing, and reports how far the deployment sits from the row's declared
+# configuration. attach-apply (adopt -> transition) MUTATES config owned by
+# cd-identity-core-infrastructure and the operator repos' CD, so it is
+# dispatch-only, dev-only, and additionally gated on the environment variable
+# ALLOW_ATTACH_APPLY=true (see docs/ci-spec.md phase 2 for why it stays off).
+name: Juju drift gate (dev/stg)
+
+on:
+  schedule:
+    - cron: '30 2 * * *' # dev, nightly
+    - cron: '0 3 * * 1' # stg, weekly
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target deployment (GitHub environment: dev or stg)'
+        type: environment
+        required: true
+      row:
+        description: Matrix row whose declaration the deployment is compared against
+        type: string
+        required: false
+        default: 'core'
+      mode:
+        description: 'plan-only = zero-mutation drift gate; attach-apply MUTATES the deployment (dev only, requires ALLOW_ATTACH_APPLY=true)'
+        type: choice
+        options: ['plan-only', 'attach-apply']
+        default: 'plan-only'
+
+permissions:
+  contents: read
+  issues: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  resolve:
+    name: Resolve target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      environment: ${{ steps.pick.outputs.environment }}
+      row: ${{ steps.pick.outputs.row }}
+      mode: ${{ steps.pick.outputs.mode }}
+    steps:
+      - id: pick
+        env:
+          EVENT: ${{ github.event_name }}
+          SCHEDULE: ${{ github.event.schedule }}
+          IN_ENV: ${{ inputs.environment }}
+          IN_ROW: ${{ inputs.row }}
+          IN_MODE: ${{ inputs.mode }}
+        run: |
+          if [ "$EVENT" = "workflow_dispatch" ]; then
+            env_name="$IN_ENV"; row="${IN_ROW:-core}"; mode="${IN_MODE:-plan-only}"
+          elif [ "$SCHEDULE" = "30 2 * * *" ]; then
+            env_name="dev"; row="core"; mode="plan-only"
+          else
+            env_name="stg"; row="core"; mode="plan-only"
+          fi
+          # stg config is owned by cd-identity-core-infrastructure CD: this
+          # lane never applies there, under any trigger.
+          if [ "$mode" = "attach-apply" ] && [ "$env_name" != "dev" ]; then
+            echo "::error::attach-apply is dev-only; $env_name is plan-only by policy (docs/ci-spec.md)"
+            exit 1
+          fi
+          {
+            echo "environment=$env_name"
+            echo "row=$row"
+            echo "mode=$mode"
+          } >> "$GITHUB_OUTPUT"
+
+  drift:
+    name: ${{ needs.resolve.outputs.mode }} (${{ needs.resolve.outputs.environment }}, row ${{ needs.resolve.outputs.row }})
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: ${{ needs.resolve.outputs.environment }}
+    concurrency:
+      group: juju-remote-${{ needs.resolve.outputs.environment }}
+      cancel-in-progress: false
+    env:
+      # Controller identity: the workflow registers JIMM under the local name
+      # `jimm`; matrix/controller-guard.mjs then requires `juju
+      # show-controller` to resolve to exactly that name.
+      JUJU_CONTROLLER: jimm
+      MATRIX_ALLOWED_CONTROLLER: jimm
+      # Which models on that controller are the deployment under test.
+      MATRIX_JUJU_MODEL: ${{ vars.MATRIX_IAM_MODEL }}
+      MATRIX_JUJU_CORE_MODEL: ${{ vars.MATRIX_CORE_MODEL }}
+      # Service-account client credentials: same secret drives the juju CLI
+      # (env login, juju/juju#20716) and terraform (provider attributes via
+      # TF_VAR_*; JUJU_CONTROLLER_ADDRESSES stays unset - the guard refuses it).
+      JUJU_CLIENT_ID: ${{ secrets.JIMM_CLIENT_ID }}
+      JUJU_CLIENT_SECRET: ${{ secrets.JIMM_CLIENT_SECRET }}
+      TF_VAR_jimm_url: ${{ secrets.JIMM_URL }}
+      TF_VAR_jimm_client_id: ${{ secrets.JIMM_CLIENT_ID }}
+      TF_VAR_jimm_client_secret: ${{ secrets.JIMM_CLIENT_SECRET }}
+      ROW: ${{ needs.resolve.outputs.row }}
+      MODE: ${{ needs.resolve.outputs.mode }}
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_wrapper: false
+      - name: Install juju (3.6 ships service-account env login)
+        run: sudo snap install juju --channel=3.6/stable
+      - name: Toolchain check
+        run: JUJU_LANE=1 make dev-check
+      - name: Enforce the attach-apply opt-in
+        if: env.MODE == 'attach-apply'
+        env:
+          ALLOW: ${{ vars.ALLOW_ATTACH_APPLY }}
+        run: |
+          if [ "$ALLOW" != "true" ]; then
+            echo "::error::attach-apply is disabled for this environment (set the environment variable ALLOW_ATTACH_APPLY=true after reading docs/ci-spec.md phase 2 - post-apply URL discovery is a known harness gap)"
+            exit 1
+          fi
+      - name: Register JIMM controller (service-account login)
+        run: |
+          target="${TF_VAR_jimm_url#*://}"
+          target="${target%%/*}"
+          juju login "$target" -c jimm
+      - name: Controller guard self-check
+        run: node matrix/controller-guard.mjs --check
+      - name: Terraform init (lock-file pinned)
+        run: terraform -chdir=matrix/backends/juju/root init -input=false
+      - name: Drift gate
+        run: |
+          set -o pipefail
+          if [ "$MODE" = "attach-apply" ]; then
+            make test-matrix-row ROW="$ROW" BACKEND=juju ATTACH=1 2>&1 | tee juju-lane-log.txt
+          else
+            make test-matrix-row ROW="$ROW" BACKEND=juju ATTACH=1 PLAN_ONLY=1 2>&1 | tee juju-lane-log.txt
+          fi
+      - name: Summarize drift
+        if: always()
+        env:
+          ENV_NAME: ${{ needs.resolve.outputs.environment }}
+        run: |
+          {
+            echo "## Drift gate: $ENV_NAME / row $ROW ($MODE)"
+            echo '```'
+            grep -E '^(Plan:|No changes|  # )|relation transition|drift gate|✗' juju-lane-log.txt || true
+            echo '```'
+            if [ -f matrix/backends/juju/root/attach.tfvars.json ]; then
+              echo '### Deployed charm revisions (discovered, not chosen - docs/ci-spec.md pinning policy)'
+              echo '```json'
+              jq .charm_revisions matrix/backends/juju/root/attach.tfvars.json
+              echo '```'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload lane log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          # The log ONLY: matrix/backends/juju/root/terraform.tfstate.d is
+          # secret-bearing by construction and must never leave the runner.
+          # run-row already prints a filtered plan summary, never raw state.
+          name: juju-lane-log
+          path: juju-lane-log.txt
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Scrub attach artifacts (defense in depth)
+        if: always()
+        run: |
+          rm -rf matrix/backends/juju/root/terraform.tfstate.d
+          rm -f matrix/backends/juju/root/attach.tfvars.json matrix/backends/juju/root/imports.attach.tf.json
+
+  triage:
+    needs: [resolve, drift]
+    if: always() && needs.drift.result != 'cancelled' && github.event_name == 'schedule'
+    uses: ./.github/workflows/_triage.yml
+    with:
+      lane: juju drift gate (${{ needs.resolve.outputs.environment }})
+      label: ci-juju-${{ needs.resolve.outputs.environment }}
+      artifact: juju-lane-log
+      outcome: ${{ needs.drift.result }}
+    secrets: inherit

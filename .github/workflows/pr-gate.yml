@@ -1,0 +1,144 @@
+# The blocking PR gate — docs/ci-spec.md.
+# Compose backend only: every pinned matrix row gets its own runner, its own
+# stack, and the full `make gate` contract (typecheck, up, smoke, browser
+# suite twice, Go E2E). The cross-profile coverage union runs once afterwards
+# so a scenario silently skipped by EVERY profile still fails the gate.
+name: PR gate
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-gate-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  hermetic:
+    name: Hermetic checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: tests/e2e/go.mod
+          cache-dependency-path: tests/e2e/go.sum
+      # matrix artifacts + offline harness tests + typecheck + satisfies()
+      # unit tests + port audit. No stack, no cluster.
+      - run: make check
+
+  profiles:
+    name: Enumerate pinned rows
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      profiles: ${{ steps.rows.outputs.profiles }}
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      # The pinned rows of matrix/matrix.json ARE the gate profiles — the
+      # matrix strategy below tracks the generated file, never a hand list.
+      - id: rows
+        run: |
+          profiles="$(node -p "JSON.stringify(JSON.parse(require('fs').readFileSync('matrix/matrix.json','utf8')).rows.filter(r=>r.kind==='pinned').map(r=>r.name))")"
+          echo "profiles=${profiles}" >> "$GITHUB_OUTPUT"
+
+  gate:
+    name: Gate (${{ matrix.profile }})
+    needs: [hermetic, profiles]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: ${{ fromJSON(needs.profiles.outputs.profiles) }}
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: tests/e2e/go.mod
+          cache-dependency-path: tests/e2e/go.sum
+      - run: make dev-check
+      # Chromium is downloaded per run; the google-oidc tier-B specs use the
+      # runner image's system Chrome (channel: 'chrome') and skip justified
+      # when GOOGLE_TEST_* credentials are absent.
+      - name: Browser toolchain
+        working-directory: tests/browser
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install-deps chromium
+          npx playwright install chromium
+      - name: Gate
+        run: make gate PROFILE=${{ matrix.profile }}
+      # The stack tracks floating tags (`:stable`) on purpose — docs/ci-spec.md
+      # §3. Recording what actually ran is what keeps findings build-named.
+      - name: Record image digests
+        if: always()
+        run: |
+          {
+            echo "## Image digests this gate tested (${{ matrix.profile }})"
+            echo '```'
+            docker ps -a --filter label=com.docker.compose.project=identity-platform --format '{{.Image}}' | sort -u \
+              | xargs -r docker image inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{index .RepoTags 0}} (no repo digest){{end}}' \
+              | sort -u
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      - name: Capture compose logs
+        if: failure()
+        run: |
+          mkdir -p compose-logs
+          docker ps -aq --filter label=com.docker.compose.project=identity-platform | while read -r c; do
+            name="$(docker inspect --format '{{.Name}}' "$c" | tr -d /)"
+            docker logs "$c" > "compose-logs/${name}.log" 2>&1 || true
+          done
+      - name: Upload failure evidence
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: gate-failure-${{ matrix.profile }}
+          path: |
+            compose-logs/
+            tests/browser/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload coverage
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: coverage-${{ matrix.profile }}
+          path: tests/browser/coverage/*.json
+          retention-days: 7
+      - name: Tear down
+        if: always()
+        run: make down || true
+
+  coverage-union:
+    name: Cross-profile coverage union
+    needs: gate
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: coverage-*
+          merge-multiple: true
+          path: tests/browser/coverage
+      # A profile may legitimately skip what it cannot deploy, so no single
+      # profile proves the suite is alive. This does (same check as
+      # `make gate-all-profiles`).
+      - working-directory: tests/browser
+        run: node scripts/coverage-union.mjs coverage/*.json

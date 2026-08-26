@@ -819,7 +819,7 @@ references** — other documents cite "§10 item N", so renumber nothing.
 | 13 | The unexplained run-1/run-2 split (S-10) | Instrumented; cause still open |
 | 14 | Preflight asserts identifier-first | Staged |
 | 15 | Account-linking coverage | Committed — staged |
-| 16 | Blocking PR gate CI integration | Staged — future work |
+| 16 | Blocking PR gate CI integration | Implemented — see docs/ci-spec.md |
 
 1. **Scenario variants** for legitimate behaviour forks:
    - oidc-only login/tenant journeys (tenant scenarios currently require
@@ -969,7 +969,7 @@ references** — other documents cite "§10 item N", so renumber nothing.
     - **Committed coverage shape:** A seeded archetype (existing password identity + dex-matchable email) in `seeder/archetypes.ts` — seeder remains the sole admin-API owner; minimum two scenarios gated on `requires.accountLinking`: a login-time link journey ending at `oidc-callback` with claim assertions proving the linked identity's tokens, and a settings link/unlink journey with a mandatory cleanup (it mutates a shared identity — §8 determinism rules apply).
     - **Dimension decision rule:** If the login-ui charm exposes account linking as an operator toggle, it becomes a model dimension (cited) when implemented; otherwise it stays a capability derived from flags, with the reason recorded in the model.
     - **No-dead-machinery rule:** Every added state and edge MUST be traversed by a scenario in the same change (item 12 is the cautionary tale).
-16. **Blocking PR gate CI integration (staged — future work).** Automating the baseline profile gate (`make gate`) as a mandatory, blocking CI check on pull requests is staged as future work following team adoption, operational experience, and feedback.
+16. **Blocking PR gate CI integration (implemented).** The baseline profile gate (`make gate`) runs as a blocking check on pull requests, with the non-blocking nightly matrix and juju drift lanes beside it. `docs/ci-spec.md` is the CI design contract (triggers, JIMM auth, pinning policy, triage flow).
 
 ## 11. Reviewing a change to this suite
 

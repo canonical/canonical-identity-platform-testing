@@ -1,0 +1,97 @@
+# The nightly configuration-matrix lane (compose backend) — docs/ci-spec.md.
+# Non-blocking by contract (docs/testing-spec.md): every seed + generated row
+# runs once; failures become deduplicated, triaged GitHub issues instead of a
+# gate. Scheduled runs file/close issues; manual dispatches are debugging aids
+# and never touch the issue tracker.
+name: Nightly matrix (compose)
+
+on:
+  schedule:
+    - cron: '0 1 * * *'
+  workflow_dispatch:
+    inputs:
+      row:
+        description: Run a single matrix row instead of the whole lane
+        type: string
+        required: false
+        default: ''
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: nightly-matrix
+  cancel-in-progress: false
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  matrix-compose:
+    name: Matrix lane (compose)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - uses: actions/setup-go@d35c59abb061a4a6fb18e82ac0862c26744d6ab5 # v5.5.0
+        with:
+          go-version-file: tests/e2e/go.mod
+          cache-dependency-path: tests/e2e/go.sum
+      - run: make dev-check
+      - name: Browser toolchain
+        working-directory: tests/browser
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install-deps chromium
+          npx playwright install chromium
+      - name: Matrix lane
+        env:
+          ROW: ${{ inputs.row }}
+        run: |
+          set -o pipefail
+          if [ -n "$ROW" ]; then
+            make test-matrix-row ROW="$ROW" BACKEND=compose 2>&1 | tee nightly-log.txt
+          else
+            make test-matrix 2>&1 | tee nightly-log.txt
+          fi
+      # The lane tracks floating tags (`:stable`) on purpose — docs/ci-spec.md
+      # §3. Recording what actually ran is what keeps findings build-named.
+      - name: Record image digests
+        if: always()
+        run: |
+          {
+            echo "── image digests this run tested"
+            docker ps -a --filter label=com.docker.compose.project=identity-platform --format '{{.Image}}' | sort -u \
+              | xargs -r docker image inspect --format '{{if .RepoDigests}}{{index .RepoDigests 0}}{{else}}{{index .RepoTags 0}} (no repo digest){{end}}' \
+              | sort -u
+          } | tee -a nightly-log.txt >> "$GITHUB_STEP_SUMMARY"
+      - name: Upload lane log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nightly-matrix-log
+          path: |
+            nightly-log.txt
+            tests/browser/test-results/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Tear down
+        if: always()
+        run: make down || true
+
+  triage:
+    needs: matrix-compose
+    if: always() && needs.matrix-compose.result != 'cancelled' && github.event_name == 'schedule'
+    uses: ./.github/workflows/_triage.yml
+    with:
+      lane: nightly compose matrix
+      label: ci-nightly-matrix
+      artifact: nightly-matrix-log
+      outcome: ${{ needs.matrix-compose.result }}
+    secrets: inherit
+
