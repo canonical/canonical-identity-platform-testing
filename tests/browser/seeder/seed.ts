@@ -31,7 +31,7 @@ import { createIdentity, createIdentityWithOIDC, deleteIdentity, findIdentityByE
 import { generateTotpCode } from "../helpers/totp";
 import { createTenant, deleteTenant, getServiceToken, listTenants, provisionUser } from "../helpers/tenants";
 import { addUsersToGroup, ensureGroup, getHookAdminToken, listUserGroups } from "../helpers/hooks";
-import { HYDRA_ADMIN_URL, isServiceInProfile, localUsersEnabled, GOOGLE_TEST_EMAIL, GOOGLE_TEST_SUBJECT_ID } from "../helpers/config";
+import { HYDRA_ADMIN_URL, activeConfig, isServiceInProfile, localUsersEnabled, GOOGLE_TEST_EMAIL, GOOGLE_TEST_SUBJECT_ID } from "../helpers/config";
 
 // Archetype definitions — the authoritative list of users to seed
 import { USER_ARCHETYPES, type UserArchetype } from "./archetypes";
@@ -176,6 +176,17 @@ async function seedClients(): Promise<ManifestOauthClients> {
 // ---------------------------------------------------------------------------
 
 /**
+ * Why TOTP enrolment failed, per archetype ref.
+ *
+ * The per-user seeders cannot fail the run themselves — `record()` and the
+ * strict-mode failure list live inside `seed()` — so they leave the cause here
+ * and the post-condition before the manifest write turns it into a recorded
+ * failure. Module state because the seeders are module-level and one process
+ * seeds one deployment.
+ */
+const totpFailures = new Map<string, string>();
+
+/**
  * Provision TOTP for a seeded user by driving a Kratos settings flow.
  *
  * Orchestrates: createSessionToken → initTotpSettingsFlow →
@@ -269,6 +280,10 @@ async function seedPasswordUser(ref: string, user: UserArchetype): Promise<Manif
       backupCode = result.backupCode;
       console.log(`  [seed] TOTP provisioned for ${ref}`);
     } catch (err) {
+      // Keep the CAUSE. The post-condition near the manifest write reports it
+      // verbatim; inventing a likely cause there sent the last reader chasing
+      // KRATOS_PUBLIC_URL when the deployment simply had totp disabled.
+      totpFailures.set(ref, err instanceof Error ? err.message : String(err));
       console.warn(`  ⚠ Failed to provision TOTP for ${ref}: ${err}`);
     }
   }
@@ -608,6 +623,7 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
               if (msg.includes("AAL2") || msg.includes("aal2") || msg.includes("already") || msg.includes("422") || msg.includes("400") || msg.includes("403")) {
                 console.log(`  [seed] TOTP already configured for ${ref} (cannot retrieve existing secret via API — manifest will have null totpSecret)`);
               } else {
+                totpFailures.set(ref, msg);
                 console.warn(`  ⚠ Failed to provision TOTP for ${ref} (backfill): ${err}`);
               }
             }
@@ -731,20 +747,26 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
   // enrolment drives a live login + settings flow and its failure was only ever
   // a console.warn, so `--fresh` reported success while writing
   // `totpSecret: null` — and every MFA scenario then died on "totpSecret is
-  // null in the manifest … re-seed", pointing the operator at the seeder
-  // instead of at whatever actually broke (on a real deployment: a
-  // KRATOS_PUBLIC_URL aimed at an ingress that fronts the login-ui BFF, which
-  // serves no native /self-service/login/api at all). Checking the manifest
-  // catches every route to a null secret, not just the one that warned.
+  // null in the manifest … re-seed", blaming the seeder for whatever actually
+  // broke. Checking the manifest catches every route to a null secret, not just
+  // the one that warned.
+  //
+  // Gated on the DECLARATION, not on the archetype alone: archetypes ask for
+  // TOTP unconditionally, while a deployment that does not offer the method
+  // renders a settings flow with no totp node at all — legitimately, and that
+  // is the `core` gate profile (mfa=off ⇒ methods_2fa: []). Failing there would
+  // break `make gate PROFILE=core`, which is not a deployment defect.
+  const totpDeclared = (activeConfig().methods_2fa ?? []).includes("totp");
   for (const [ref, archetype] of userRequirements) {
-    if (!archetype.totpConfigured || !localUsersEnabled()) continue;
+    if (!archetype.totpConfigured || !localUsersEnabled() || !totpDeclared) continue;
     const seeded = users.find((u) => u.ref === ref);
     if (seeded && seeded.totpSecret === null) {
       record(
         `provision TOTP for ${ref}`,
         new Error(
-          "archetype declares totpConfigured but the manifest carries no secret — " +
-          "KRATOS_PUBLIC_URL must serve kratos's own native API (/self-service/login/api)",
+          totpFailures.get(ref) ??
+            "the manifest carries no secret and enrolment reported no error — " +
+              "the archetype was neither enrolled nor skipped",
         ),
       );
     }
