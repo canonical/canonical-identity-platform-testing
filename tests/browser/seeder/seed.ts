@@ -335,9 +335,12 @@ async function seedGoogleUser(ref: string, user: UserArchetype): Promise<Manifes
     );
   }
 
+  // On charmed deployments the integrator registers `provider_id = "google_canonical"`;
+  // on compose/local it is `provider = "google"`. Match whichever is active.
+  const provider = (activeConfig().oidc_providers ?? []).find((p) => p.startsWith("google")) ?? "google";
   const identityId = await createIdentityWithOIDC({
     email: GOOGLE_TEST_EMAIL,
-    provider: "google",
+    provider,
     subject: GOOGLE_TEST_SUBJECT_ID,
   });
 

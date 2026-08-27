@@ -40,7 +40,10 @@ import { WebAuthnHelper } from "../helpers/webauthn";
 // Skip the entire file if Google credentials are not available
 test.describe("Google OIDC", () => {
   test.skip(!googleCredentialsAvailable(), "Google credentials not available (set GOOGLE_TEST_EMAIL, GOOGLE_TEST_PASSWORD, GOOGLE_TEST_TOTP_SECRET, GOOGLE_TEST_SUBJECT_ID)");
-  test.skip(!isOidcProviderInProfile("google"), "Google OIDC provider not in active profile");
+  test.skip(
+    !isOidcProviderInProfile("google") && !isOidcProviderInProfile("google_canonical"),
+    "Google OIDC provider not in active profile",
+  );
 
   // Set up a CDP-based virtual authenticator for WebAuthn ceremonies.
   // This is needed for the OIDC sequencing flow where the user must

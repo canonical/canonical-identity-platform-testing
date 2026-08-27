@@ -126,7 +126,12 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
   // 11. oidcProviders
   if (requires.oidcProviders && requires.oidcProviders.length > 0) {
     const missing = requires.oidcProviders.filter(
-      (p) => !(activeConfig.oidc_providers?.includes(p) ?? false)
+      (p) =>
+        !(
+          activeConfig.oidc_providers?.some(
+            (ap) => ap === p || ap.startsWith(`${p}_`) || ap.startsWith(`${p}-`),
+          ) ?? false
+        ),
     );
     if (missing.length > 0) {
       return {

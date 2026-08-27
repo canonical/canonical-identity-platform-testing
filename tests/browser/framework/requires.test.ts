@@ -122,6 +122,8 @@ test("oidcProviders is SUBSET semantics: required ⊆ available", () => {
   assert.equal(satisfies({ oidcProviders: ["dex", "google"] }, FULL).met, true);
   // Extra providers on the deployment never disqualify a scenario…
   assert.equal(satisfies({ oidcProviders: ["dex"] }, { ...FULL, oidc_providers: ["dex", "google", "okta"] }).met, true);
+  // Deployment provider IDs like google_canonical or dex_2 match the generic requirement family.
+  assert.equal(satisfies({ oidcProviders: ["google"] }, { ...FULL, oidc_providers: ["google_canonical"] }).met, true);
   // …but a missing one does, and the reason names exactly what is missing.
   const no = satisfies({ oidcProviders: ["dex", "google"] }, MINIMAL);
   assert.equal(no.met, false);
