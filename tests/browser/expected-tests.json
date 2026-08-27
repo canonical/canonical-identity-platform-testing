@@ -10,7 +10,7 @@
     "A value may be a number, or an array when a file's collection legitimately",
     "varies by profile — update the array deliberately, never to silence a run."
   ],
-  "total": [47, 48],
+  "total": [49, 50],
   "files": {
     "error.spec.ts": 3,
     "google-oidc.spec.ts": 3,
@@ -23,6 +23,7 @@
     "registration.spec.ts": 2,
     "resilience.spec.ts": 5,
     "session.spec.ts": 3,
+    "settings.spec.ts": 2,
     "tenant.spec.ts": 4,
     "use-backup-codes.spec.ts": 1,
     "verification.spec.ts": 3,
