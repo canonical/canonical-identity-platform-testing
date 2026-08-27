@@ -433,6 +433,10 @@ export async function runScenario(
     selectTenant: resolveTenantDisplayName(manifest, scenario.user.selectTenant),
     totpCodeWindow: scenario.totpCodeWindow,
     webauthn: extraCtx?.webauthn,
+    // What the settings restore pass submits (transitions.ts
+    // "reset-password → reset-password"): the pre-mutation truth, same snapshot
+    // the restore-password cleanup uses.
+    seededPassword: seededPassword ?? undefined,
   };
 
   // Populate TOTP secret from the manifest (seeded by the seeder)

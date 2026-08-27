@@ -62,6 +62,7 @@ export const TIER_A_FILES = new Set([
   "resilience.spec.ts",
   "registration.spec.ts",
   "session.spec.ts",
+  "settings.spec.ts",
   "tenant.spec.ts",
   "verification.spec.ts",
   "webauthn.spec.ts",

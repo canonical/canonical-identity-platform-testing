@@ -32,3 +32,7 @@ tests/browser/coverage/
 # Manifests rendered from *.yaml.tpl by `make render-manifests`; they carry
 # this cluster's node IP / ingress hostname, so they are never tracked.
 matrix/backends/juju/manifests/.rendered/
+
+# Out-of-band seed manifests are credential material (passwords, TOTP secrets)
+orange-manifest.json
+*-manifest.json

@@ -33,6 +33,7 @@ import { recoveryScenarios } from "../scenarios/recovery-scenarios";
 import { resilienceScenarios } from "../scenarios/resilience-scenarios";
 import { registrationScenarios } from "../scenarios/registration-scenarios";
 import { sessionScenarios } from "../scenarios/session-scenarios";
+import { settingsScenarios } from "../scenarios/settings-scenarios";
 import { tenantScenarios } from "../scenarios/tenant-scenarios";
 import { verificationScenarios } from "../scenarios/verification-scenarios";
 import { webauthnScenarios } from "../scenarios/webauthn-scenarios";
@@ -57,6 +58,7 @@ const TIER_A: [string, ScenarioSuite][] = [
   ["specs/resilience.spec.ts", resilienceScenarios],
   ["specs/registration.spec.ts", registrationScenarios],
   ["specs/session.spec.ts", sessionScenarios],
+  ["specs/settings.spec.ts", settingsScenarios],
   ["specs/tenant.spec.ts", tenantScenarios],
   ["specs/verification.spec.ts", verificationScenarios],
   ["specs/webauthn.spec.ts", webauthnScenarios],

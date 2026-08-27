@@ -76,6 +76,10 @@ export interface ActionContext {
   doubleSubmitConsumed?: boolean;
   /** New password for recovery/registration flows. */
   newPassword?: string;
+  /** The password the seeder gave this user, snapshotted by the runner before
+   *  any transition mutates `user.password` — what a settings restore pass
+   *  submits to leave a shared identity exactly as seeded. */
+  seededPassword?: string;
   /** Mailslurper message ids present before an email was triggered. */
   mailCursor?: MailCursor;
   /** Google test account email (for Google OIDC transitions). */
@@ -772,6 +776,132 @@ export const TRANSITION_TABLE: TransitionTable = {
       // mutating the ManifestUser is scoped to this test.
       ctx.newPassword = newPassword;
       user.password = newPassword;
+    },
+  },
+
+  // ── Settings pages (the authenticated self-service hub) ────────────────
+  //
+  // /ui/manage_details is login-ui's settings hub; its nav routes to
+  // manage_password (→ /ui/reset_password, heading "Change password"),
+  // manage_backup_codes (→ /ui/setup_backup_codes) and manage_secure
+  // (→ /ui/setup_secure). Every surface REUSES a URL the login/recovery
+  // journeys already own, so no new page states exist — only these
+  // transitions. All of them assume a live AAL2 session from an earlier
+  // phase; none needs an admin API, so the settings scenarios run on the
+  // live lane.
+
+  "start → manage-details": {
+    description:
+      "Open the settings hub with a live session (login-ui serves it directly; " +
+      "an earlier phase must have authenticated)",
+    action: async (page) => {
+      await page.goto(`${LOGIN_UI_URL}/ui/manage_details`);
+    },
+  },
+
+  "manage-details → reset-password": {
+    description: 'Open "Password" in the settings nav (lands on the Change password form)',
+    action: async (page) => {
+      await page.getByRole("link", { name: "Password", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Change password" })).toBeVisible();
+    },
+  },
+
+  // Success is a SELF-transition: the form stays on /ui/reset_password with a
+  // fresh flow id and a "Password was changed successfully" banner (observed
+  // 2026-08-27 on iam.orange). The weak-password rejection is asserted here
+  // too, as a prefix, because both outcomes live on the same state pair and
+  // the transition table holds one action per pair.
+  //
+  // First traversal: submit a weak password (must be rejected VISIBLY), then a
+  // new strong one; mutate user.password so later phases and the
+  // restore-password cleanup authenticate with what is now true.
+  // Second traversal (ctx.newPassword already set): submit the SEEDED password
+  // back — the scenario's own path restores the shared identity, so a
+  // completed walk leaves the deployment exactly as the seeder made it.
+  "reset-password → reset-password": {
+    description:
+      "Change the password from settings: weak value rejected visibly, then " +
+      "the real change (first pass) or the seeded-password restore (second pass)",
+    action: async (page, user, ctx) => {
+      const newField = page.getByLabel("New password", { exact: true });
+      const confirmField = page.getByLabel("Confirm New password");
+      const changeBtn = page.getByRole("button", { name: "Change password" });
+
+      // Policy floor: too short, no uppercase, no digit. The UI's rejection is
+      // DISABLING the submit (aria-disabled) — click-based probing would hang
+      // on actionability, so the disabled state IS the visible-rejection
+      // assertion. Kept inside the change scenario because a second
+      // "reset-password → reset-password" action cannot exist.
+      await newField.fill("abc");
+      await confirmField.fill("abc");
+      await expect(changeBtn).toBeDisabled();
+
+      const restoring = ctx.newPassword !== undefined;
+      if (restoring && !ctx.seededPassword) {
+        throw new Error("settings restore pass: ctx.seededPassword is unset — the runner must snapshot it");
+      }
+      const target = restoring ? ctx.seededPassword! : "Settings-New-Password-789!";
+      await newField.fill(target);
+      await confirmField.fill(target);
+      await expect(changeBtn).toBeEnabled();
+      await changeBtn.click();
+      await expect(page.getByText("Password was changed successfully")).toBeVisible();
+
+      ctx.newPassword = restoring ? undefined : target;
+      user.password = target;
+    },
+  },
+
+  "manage-details → setup-backup-codes": {
+    description: 'Open "Backup codes" in the settings nav',
+    action: async (page) => {
+      await page.getByRole("link", { name: "Backup codes", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Backup codes" })).toBeVisible();
+    },
+  },
+
+  // Also a self-transition: creating codes re-renders /ui/setup_backup_codes.
+  // The page has two entry shapes — "Create backup codes" when none exist,
+  // "View backup codes"/"Deactivate backup codes" when some do — and creation
+  // itself sometimes lands back on the collapsed shape, so the action drives
+  // whichever is present and finishes by HARVESTING one fresh code into
+  // ctx.backupCode. A later freshSession phase then signs in with it, which is
+  // the only assertion that the codes this page hands out are real.
+  "setup-backup-codes → setup-backup-codes": {
+    description: "Create (or regenerate) backup codes and capture one for a later login",
+    action: async (page, _user, ctx) => {
+      const viewBtn = page.getByRole("button", { name: "View backup codes" });
+      const createBtn = page.getByRole("button", { name: /^Create( new)? backup codes$/ });
+
+      // Two entry shapes: collapsed ("Create backup codes" / "View backup
+      // codes"+"Deactivate") — wait for the page to settle on either before
+      // branching, isVisible() does not wait.
+      await expect(createBtn.or(viewBtn).first()).toBeVisible();
+      if (await viewBtn.isVisible()) {
+        await viewBtn.click();
+      }
+      await createBtn.click();
+
+      // Post-create the page either lists the codes or collapses back to
+      // View/Deactivate — open the view if needed, then wait for the codes
+      // toolbar before harvesting.
+      await expect(page.getByRole("button", { name: "Deactivate backup codes" })).toBeVisible();
+      if (await viewBtn.isVisible().catch(() => false)) {
+        await viewBtn.click();
+      }
+      await expect(page.getByRole("button", { name: "Download" })).toBeVisible();
+
+      // Unused codes render as 8-char lowercase alphanumerics; consumed ones
+      // render as the literal "Used". Freshly created ⇒ all lines are codes.
+      const codes = (await page.locator("main").innerText())
+        .split("\n")
+        .map((l) => l.trim())
+        .filter((l) => /^[a-z0-9]{8}$/.test(l));
+      if (codes.length === 0) {
+        throw new Error("setup-backup-codes: created codes but none are visible to harvest");
+      }
+      ctx.backupCode = codes[0];
     },
   },
 

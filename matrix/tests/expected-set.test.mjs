@@ -96,6 +96,8 @@ const DEPLOYED_CORE_RUN = [
   "specs/resilience.spec.ts :: back-after-auth-terminal",
   "specs/session.spec.ts :: session-reuse-no-max-age",
   "specs/session.spec.ts :: forced-reauth-max-age-0",
+  "specs/settings.spec.ts :: settings-change-password",
+  "specs/settings.spec.ts :: settings-backup-codes-regenerate",
 ];
 
 for (const [row, expectedRun] of [

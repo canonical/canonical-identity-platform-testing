@@ -272,16 +272,17 @@ asserted by `make matrix-check`:
 |---|---|
 | `pd931-single-oidc-mt` | exactly **9** |
 | `tfdefault-oidc-only` | exactly **7** |
-| `deployed-core-local-mfa` | exactly **15** |
+| `deployed-core-local-mfa` | exactly **17** |
 
 The three sets pairwise **differ**, which is what makes the canaries
 discriminating rather than tautological: the first two are oidc-only shapes
 (`specs/oidc.spec.ts` plus the four `specs/oidc-error.spec.ts` scenarios that
 require nothing but hydra and login-ui), while the third is the local-user shape
-— no oidc contribution at all, the whole resilience suite, and
-recovery/verification/registration held out by `mail_api=false`. Re-derive any
-cell with `cd tests/browser && npx tsx scripts/expected-set.ts
-../../matrix/rows/<row>/capabilities.json`.
+— no oidc contribution at all, the whole resilience suite, the two
+`specs/settings.spec.ts` journeys (self-service password change and backup-code
+creation, both live-lane), and recovery/verification/registration held out by
+`mail_api=false`. Re-derive any cell with `cd tests/browser && npx tsx
+scripts/expected-set.ts ../../matrix/rows/<row>/capabilities.json`.
 
 Whether the seed rows run the full contract green on the charmed stack is a
 live measurement: a `make test-matrix` run establishes it, and this document

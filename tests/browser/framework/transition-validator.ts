@@ -29,7 +29,9 @@ import type { PageStateType } from "../helpers/page-state";
  */
 const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   // ── Flow start ────────────────────────────────────────────────────────
-  start: ["login-email", "oidc-callback", "tenant-selection", "reset-email", "verification", "register-email", "setup-passkey", "oidc-error-page", "oidc-callback-error"],
+  // `manage-details` from start = opening the settings hub with a live
+  // session from an earlier phase (settings scenarios).
+  start: ["login-email", "oidc-callback", "tenant-selection", "reset-email", "verification", "register-email", "setup-passkey", "oidc-error-page", "oidc-callback-error", "manage-details"],
 
   // ── Login UI states ────────────────────────────────────────────────────
   "login-email": ["login-password", "tenant-selection", "provider:dex:login", "provider:google:login", "oidc-callback", "reset-email", "register-email", "verification"],
@@ -39,13 +41,14 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   "login-backup-code-verify": ["oidc-callback", "login-backup-code-verify", "backup-code-regenerate"],
 
   // ── Setup states ──────────────────────────────────────────────────────
-  // `setup-backup-codes` is deliberately absent: no transition action drives
-  // the browser into it, so the framework cannot walk that journey. The
-  // backup-code enrolment path is covered by the hand-written
-  // `specs/use-backup-codes.spec.ts`.
   "setup-secure": ["setup-complete"],
   "setup-passkey": ["setup-complete", "login-webauthn-verify", "oidc-callback"],
   "setup-complete": ["oidc-callback"],
+  // Reached from the settings hub ("Backup codes" nav). The self-edge is
+  // creating/regenerating codes: the page re-renders in place (observed
+  // 2026-08-27 on iam.orange). First-login backup-code ENROLMENT still has no
+  // driving action and remains covered by specs/use-backup-codes.spec.ts.
+  "setup-backup-codes": ["setup-backup-codes"],
 
   // ── Recovery flow ─────────────────────────────────────────────────────
   // A recovery code only yields an AAL1 session. Because settings.required_aal
@@ -58,7 +61,9 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   "reset-email-code": ["reset-password", "login-totp-verify", "reset-email-code"],
   // The settings flow inherits return_to=/ui/login from the recovery flow, and
   // the session is already AAL2 by then, so login-ui bounces to ./manage_details.
-  "reset-password": ["manage-details"],
+  // The SELF-edge is the settings hub's own "Change password" form: success
+  // re-renders /ui/reset_password with a fresh flow id and a banner.
+  "reset-password": ["manage-details", "reset-password"],
 
   // ── Registration flow ────────────────────────────────────────────────
   // Kratos always appends the verification hook when verification is enabled,
@@ -103,7 +108,8 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   "oidc-callback-error": [],
   "error-page": [],
   "oidc-error-page": [],
-  "manage-details": [],
+  // The settings hub: recovery's terminal, and the settings scenarios' base.
+  "manage-details": ["reset-password", "setup-backup-codes", "setup-secure"],
 };
 
 // ---------------------------------------------------------------------------
