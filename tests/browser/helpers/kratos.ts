@@ -812,8 +812,27 @@ export async function removeTotpViaPublicApi(
     ? new URL(rawLocation, LOGIN_UI_URL)
     : null;
   const finalUrl = new URL(createRes.url(), LOGIN_UI_URL);
-  const flowId = redirectUrl?.searchParams.get("flow")
+  let flowId = redirectUrl?.searchParams.get("flow")
     ?? finalUrl.searchParams.get("flow");
+
+  // Kratos answers the browser endpoint with a 303 whose Location carries
+  // ?flow= — that is what the two lookups above parse. The login-ui BFF (the
+  // ONLY kratos surface a charmed ingress exposes) answers the same endpoint
+  // with the flow as a 200 JSON body: no redirect, no ?flow= anywhere. With
+  // redirect-only discovery this helper silently took the "not authenticated"
+  // no-op below on the urls lane, so remove-totp cleanup never ran there —
+  // first-login-mfa left its user enrolled and every rerun failed on
+  // setup-secure while reporting the cleanup as best-effort.
+  if (!flowId && createRes.ok()) {
+    try {
+      const body: unknown = await createRes.json();
+      if (body && typeof body === "object" && "id" in body && typeof body.id === "string") {
+        flowId = body.id;
+      }
+    } catch {
+      /* not JSON — fall through to the no-op */
+    }
+  }
 
   if (!flowId) {
     // If no settings flow was created (for example because the user is not

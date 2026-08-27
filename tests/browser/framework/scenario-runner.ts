@@ -545,8 +545,13 @@ export async function runScenario(
         }
       }
     } catch (err) {
-      // Cleanup best-effort: don't mask the original test failure.
-      console.warn(`Cleanup "${cleanup}" failed (non-fatal): ${err}`);
+      // Cleanup best-effort: don't mask the original test failure. But say
+      // what it costs — a silently skipped cleanup is why first-login-mfa
+      // failed every rerun for a day before anyone saw a message.
+      console.warn(
+        `Cleanup "${cleanup}" for "${scenario.id}" failed (non-fatal): ${err} — ` +
+        `the user's state is now ahead of the manifest, so the next run of this scenario will likely fail until a reseed`,
+      );
     }
   }
 }
