@@ -619,8 +619,20 @@ const CONSUMER_NAME = "matrix-oidc-consumer";
 
 function startConsumer(rowEnv) {
   sh("docker", ["rm", "-f", CONSUMER_NAME]);
+  // The consumer is a Go client in its OWN container: it inherits neither the
+  // host trust store nor NODE_EXTRA_CA_CERTS, and Go does not chase AIA. On a
+  // target whose ingress serves an incomplete chain (iam.orange: leaf only)
+  // every browser journey then completes and dies on the very last hop —
+  // `Post ".../oauth2/token": x509: certificate signed by unknown authority`.
+  // Hand the run's extra CAs to the container: SSL_CERT_FILE makes that file
+  // Go's entire root pool, so it must hold every anchor the consumer needs
+  // (for the incomplete-chain case: the missing intermediates, which is
+  // exactly what NODE_EXTRA_CA_CERTS carries per docs/testing-spec.md §9).
+  // Verification stays ON — this completes the chain, never skips it.
+  const extraCa = process.env.NODE_EXTRA_CA_CERTS;
   const run = sh("docker", [
     "run", "-d", "--rm", "--name", CONSUMER_NAME, "--network", "host",
+    ...(extraCa ? ["-v", `${path.resolve(extraCa)}:/extra-ca.pem:ro`, "--env", "SSL_CERT_FILE=/extra-ca.pem"] : []),
     "--entrypoint", "hydra", "ghcr.io/canonical/hydra:25.4.0",
     "perform", "authorization-code", "--no-open", "--no-shutdown", "--port", "4447",
     "--client-id", "browser-test-rp", "--client-secret", "browser-test-rp-secret",
