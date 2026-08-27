@@ -138,7 +138,7 @@ export function classifyOutcome(tests, expected) {
   for (const t of tests) {
     if (t.status !== "skipped" || TIER_A_FILES.has(t.file)) continue;
     if (!JUSTIFIED_SKIP.some((re) => re.test(t.reason))) {
-      failures.push(`unjustified tier-B skip: ${t.file} › ${t.title} — ${t.reason || "<no reason>"}`);
+      failures.push(`unjustified skip: ${t.file} › ${t.title} — ${t.reason || "<no reason>"}`);
     }
   }
 
@@ -765,7 +765,7 @@ async function runRow(rowName, backend) {
     return false;
   }
   const expected = JSON.parse(expectedRaw.stdout);
-  console.log(`── test (expecting ${expected.run.length} tier-A executions, ${expected.skip.length} declared skips)`);
+  console.log(`── test (expecting ${expected.run.length} scenario executions, ${expected.skip.length} declared skips)`);
 
   // 6. Single run, retries pinned to 0 by the config. Nightly detector: one
   //    run per row; the gate remains the flake hunter.

@@ -87,7 +87,7 @@ test("tier-B skips need a justified reason; real reason shapes pass", () => {
     expectedSet([]),
   );
   assert.equal(failures.length, 1);
-  assert.match(failures[0], /^unjustified tier-B skip: /);
+  assert.match(failures[0], /^unjustified skip: /);
 });
 
 test("JUSTIFIED_SKIP entries are all regexes (allowlist shape)", () => {
