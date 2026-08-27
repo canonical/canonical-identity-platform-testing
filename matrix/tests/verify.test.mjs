@@ -8,6 +8,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import * as http from "node:http";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 import { fetchJson, verifyAalBehavior, verifyHydraTokens, resetResults, recordedResults } from "../verify.mjs";
 import { derive } from "../lib.mjs";
@@ -111,6 +114,59 @@ test("token-hook probe warns instead of failing when the backend has no hydra ad
     ],
   );
   assert.ok(results.every((r) => /no HYDRA_ADMIN_URL/.test(r.detail)));
+});
+
+// ── Manifest-minted shape probe (no admin API) ──────────────────────────────
+//
+// The urls lane has no HYDRA_ADMIN_URL, but the seed manifest's svc client can
+// mint — so the access-token SHAPE stays verified there, while the token-hook
+// check (which needs a granted-but-unauthorized audience only the admin API
+// can register) warn-skips with a reason that names the discriminator.
+
+function withManifest(run) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "verify-manifest-"));
+  const file = path.join(dir, "manifest.json");
+  fs.writeFileSync(file, JSON.stringify({ oauthClients: { svc: { clientId: "browser-test-svc", clientSecret: "s3cret" } } }));
+  return run(file).finally(() => fs.rmSync(dir, { recursive: true, force: true }));
+}
+
+/** Public-endpoint-only hydra stand-in: no /admin routes at all. */
+function withPublicOnlyHydra(accessToken, run) {
+  const server = jsonServer((req, body, send) => {
+    if (req.url === "/oauth2/token" && body.includes("grant_type=client_credentials")) return send(200, { access_token: accessToken });
+    return send(404, {});
+  });
+  return serve(server, (url) => run({ ...deadUrls(), hydraAdmin: undefined, hydraPublic: url }));
+}
+
+const STUB_JWT = ["e30", Buffer.from(JSON.stringify({ sub: "browser-test-svc" })).toString("base64url"), "sig"].join(".");
+
+test("shape probe mints with the manifest's svc client when the admin API is absent", async () => {
+  const results = await withManifest((manifest) =>
+    withPublicOnlyHydra(STUB_JWT, (u) =>
+      probe(() => verifyHydraTokens(derive(dims({ hook_service: "absent" })), { access_token_format: "jwt" }, { ...u, manifest })),
+    ),
+  );
+  const shape = results.find((r) => r.check.startsWith("access-token shape"));
+  assert.equal(shape.ok, true, JSON.stringify(results));
+  assert.match(shape.detail, /manifest's svc client/);
+  // jwt + hook-less: the claim-surface witness still runs without introspection.
+  const groups = results.find((r) => r.check.startsWith("no groups claim"));
+  assert.ok(groups && groups.ok === true);
+  const hook = results.find((r) => r.check.startsWith("token hook"));
+  assert.deepEqual([hook.ok, hook.warn], [false, true]);
+  assert.match(hook.detail, /granted-but-unauthorized audience/);
+});
+
+test("manifest-minted shape probe FAILS (not warns) a wrong declaration", async () => {
+  const results = await withManifest((manifest) =>
+    withPublicOnlyHydra("ory_at_stub", (u) =>
+      probe(() => verifyHydraTokens(derive(dims()), { access_token_format: "jwt" }, { ...u, manifest })),
+    ),
+  );
+  const shape = results.find((r) => r.check.startsWith("access-token shape"));
+  assert.deepEqual([shape.ok, shape.warn], [false, false]);
+  assert.match(shape.detail, /minted token is opaque/);
 });
 
 // ── Token-hook decision table, against a stub hydra ─────────────────────────

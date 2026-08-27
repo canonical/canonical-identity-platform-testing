@@ -76,6 +76,12 @@ function resolveUrls(env = {}, backend = "compose") {
       "hook-service": pick("HOOK_SERVICE_URL", "http://localhost:8080"),
       "user-verification-service": pick("USER_VERIFICATION_URL", "http://localhost:8083"),
     },
+    // The seed manifest, when the operator names one. EXPLICIT only — no
+    // default path: the in-repo tests/browser/manifest.json is whatever stack
+    // was seeded last on this machine, and silently minting with another
+    // deployment's client is exactly the cross-stack confusion the consumer
+    // origin guard exists to refuse.
+    manifest: pick("MANIFEST", undefined),
   };
 }
 
@@ -614,19 +620,86 @@ async function tokenClaims(token, u) {
 //    /api/v0/authz API with a `hook-service:admin`-scoped token. That is
 //    seeder-owned provisioning against a service with no verified group-delete
 //    path, so it is deliberately not done here.
+/** The seeded service client from the manifest, when one is readable. */
+function manifestSvcClient(manifestPath) {
+  if (!manifestPath) return null;
+  try {
+    const svc = JSON.parse(fs.readFileSync(path.resolve(manifestPath), "utf8")).oauthClients?.svc;
+    return svc?.clientId && svc?.clientSecret ? svc : null;
+  } catch {
+    return null;
+  }
+}
+
+const tokenShape = (token) =>
+  token.startsWith("ory_at_") ? "opaque" : /^[\w-]+\.[\w-]+\.[\w-]+$/.test(token) ? "jwt" : `unrecognized (${token.slice(0, 12)}…)`;
+
 export async function verifyHydraTokens(v, caps, u) {
   const hookCheck = `token hook ${v.hook ? "wired" : "not wired"} (hook_service=${v.hook ? "present" : "absent"})`;
-  // Both halves of this probe need a throwaway client, and only the ADMIN API
-  // can register one. Without it there is nothing to mint with — same shape as
-  // the AAL probe's guard, and for the same reason: on the `urls` backend a
-  // missing admin API is the documented mode-5 reality (docs/testing-spec.md
-  // §9), not a drifted row, so it warn-skips instead of failing the row on a
-  // socket the operator never claimed to have.
-  const missing = !u.hydraAdmin ? "HYDRA_ADMIN_URL" : !u.hydraPublic ? "HYDRA_PUBLIC_URL" : null;
-  if (missing) {
-    const why = `skipped: no ${missing} — no throwaway client can be registered, so neither the access-token shape nor the token hook is observable`;
+  if (!u.hydraPublic) {
+    const why = "skipped: no HYDRA_PUBLIC_URL — nothing can mint a token";
     record("behavior", "access-token shape", false, why, { warn: true });
     record("behavior", hookCheck, false, why, { warn: true });
+    return;
+  }
+  // Without the ADMIN API no throwaway client can be registered. The two
+  // halves degrade differently:
+  //  - access-token SHAPE only needs to mint and look, and the seed manifest's
+  //    svc client (client_credentials) can do that — so with MANIFEST set the
+  //    shape stays verified on exactly the lane that lacks the admin API.
+  //  - the token-HOOK discriminator is a client with a granted-but-UNAUTHORIZED
+  //    audience, so that the hook is the only thing that can refuse the mint
+  //    (see the header comment). No seeded client carries such an audience —
+  //    granting one would let suite journeys mint tokens the hook must deny —
+  //    so registering the probe client is admin-only and the check warn-skips.
+  if (!u.hydraAdmin) {
+    const svc = manifestSvcClient(u.manifest);
+    if (!svc) {
+      const why =
+        "skipped: no HYDRA_ADMIN_URL — no throwaway client can be registered, and no seed manifest with an oauthClients.svc entry is available (MANIFEST=<path>) to mint with instead";
+      record("behavior", "access-token shape", false, why, { warn: true });
+      record("behavior", hookCheck, false, why, { warn: true });
+      return;
+    }
+    const res = await fetchJson(`${u.hydraPublic}/oauth2/token`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+        Authorization: `Basic ${Buffer.from(`${svc.clientId}:${svc.clientSecret}`).toString("base64")}`,
+      },
+      body: "grant_type=client_credentials",
+    });
+    const token = res.body?.access_token ?? "";
+    if (!token) {
+      record("behavior", "access-token shape", false, `mint with the manifest's svc client (${svc.clientId}) failed: HTTP ${res.status}${res.body?.error ? ` (${res.body.error})` : res.error ? ` (${res.error})` : ""}`);
+    } else {
+      const shape = tokenShape(token);
+      record(
+        "behavior",
+        `access-token shape ${caps.access_token_format}`,
+        shape === caps.access_token_format,
+        shape === caps.access_token_format ? `minted with the manifest's svc client (${svc.clientId})` : `minted token is ${shape} (manifest svc client)`,
+      );
+      // The absent-direction hook witness needs the claim surface; without the
+      // admin introspection API that is only readable on jwt tokens.
+      const claims = jwtClaims(token);
+      if (!v.hook && claims) {
+        const groups = readClaim(claims, "groups");
+        record(
+          "behavior",
+          "no groups claim (hook_service=absent)",
+          groups === undefined,
+          groups === undefined ? "" : `minted token carries groups=${JSON.stringify(groups)} with no hook-service deployed`,
+        );
+      }
+    }
+    record(
+      "behavior",
+      hookCheck,
+      false,
+      "skipped: the hook discriminator is a client with a granted-but-unauthorized audience — no seeded client carries one, and registering it needs HYDRA_ADMIN_URL",
+      { warn: true },
+    );
     return;
   }
   const dropClient = () => fetch(`${u.hydraAdmin}/admin/clients/${PROBE_CLIENT_ID}`, { method: "DELETE", signal: AbortSignal.timeout(5000) }).catch(() => {});
@@ -664,7 +737,7 @@ export async function verifyHydraTokens(v, caps, u) {
 
     const tokenRes = await mint("grant_type=client_credentials&scope=openid");
     const token = tokenRes.body?.access_token ?? "";
-    const shape = token.startsWith("ory_at_") ? "opaque" : /^[\w-]+\.[\w-]+\.[\w-]+$/.test(token) ? "jwt" : `unrecognized (${token.slice(0, 12)}…)`;
+    const shape = tokenShape(token);
     record(
       "behavior",
       `access-token shape ${caps.access_token_format}`,

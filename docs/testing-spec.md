@@ -786,7 +786,7 @@ Safety properties, all load-bearing:
 | Missing URL | Effect on the run |
 |---|---|
 | `KRATOS_ADMIN_URL` | seeding skipped loudly, live-lane subset |
-| `HYDRA_ADMIN_URL` | access-token shape + token-hook probes warn-skip (no throwaway client is registrable) |
+| `HYDRA_ADMIN_URL` | token-hook probe warn-skips (its discriminator is a granted-but-unauthorized audience only the admin API can register); access-token shape falls back to minting with the seed manifest's svc client when `MANIFEST` is set, and warn-skips without one |
 | `HYDRA_PUBLIC_URL` | the RP consumer is not started, so authorization-code journeys fail unless `OIDC_CONSUMER_URL` names an external one |
 | `KRATOS_PUBLIC_URL` | kratos flow-shape probes warn-skip |
 

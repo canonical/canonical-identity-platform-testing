@@ -286,27 +286,26 @@ export const model = {
         mail_api: false,
         services: ["kratos", "hydra", "login-ui"],
       },
-      // Values this row DECLARES but the target cannot be asked about through a
-      // public ingress. Recorded rather than silently assumed:
-      //  - verification=off: login-ui only began reporting verification state in
-      //    a later app-config revision (see below), and kratos's verification
-      //    endpoint is not exposed. mail_api=false gates every verification and
-      //    recovery journey off regardless, so the dim does not move the
-      //    executed set — it is chosen to match the charm default
+      // Values this row DECLARES but the target could not initially be asked
+      // about through a public ingress. Two have since become MEASURED:
+      //  - verification=off: chosen to match the charm default
       //    (canonical/kratos-operator@99da536 charmcraft.yaml:139-145
-      //    `enable_verification`, default false).
-      //  - access_token=jwt: matches the hydra charm default
-      //    (canonical/hydra-operator@f7e000b charmcraft.yaml:95-99
-      //    `jwt_access_tokens`, default true); unverifiable without an admin API
-      //    to register a probe client, and the preflight warn-skips it there.
-      //  - tenant_service=absent: `multi_tenancy_enabled` entered
-      //    /api/v0/app-config only in login-ui v0.27.0
-      //    (canonical/identity-platform-login-ui@973f960 pkg/status/handlers.go
-      //    `DeploymentInfo.MultiTenancyEnabled`; absent at @48a7049 = v0.26.0),
-      //    and this target predates it — see the version window below.
-      unobservable: ["verification", "access_token", "tenant_service"],
-      // The target runs login-ui v0.24.0-v0.25.0, pinned by two independent
-      // observations of its own responses:
+      //    `enable_verification`, default false); mail_api=false gates every
+      //    verification and recovery journey off regardless, so the dim does
+      //    not move the executed set. Still unverifiable from outside.
+      //  - access_token=jwt: MEASURED 2026-08-26 — with a seed manifest the
+      //    preflight mints client_credentials with the manifest's svc client
+      //    and the orange token is a decodable JWT (matrix/verify.mjs,
+      //    "minted with the manifest's svc client"). Also the hydra charm
+      //    default (canonical/hydra-operator@f7e000b charmcraft.yaml:95-99).
+      //  - tenant_service=absent: MEASURED after the 2026-08-26 login-ui
+      //    refresh — the target now reports multi_tenancy_enabled: false
+      //    (the key entered /api/v0/app-config in v0.27.0, @973f960).
+      unobservable: ["verification"],
+      // AT FIRST CONTACT (2026-08-26, before the same-day refresh) the target
+      // ran login-ui v0.24.0-v0.25.0, pinned by two independent observations of
+      // its own responses — kept because it is the audit trail for the
+      // identifier-first outage in upstreamFindings:
       //  - /api/v0/app-config carries `flags` but not `multi_tenancy_enabled`:
       //    `flags` arrived in v0.24.0 (present at @72d4b5b, absent at @b964996
       //    = v0.23.1) and `multi_tenancy_enabled` in v0.27.0 (@973f960) — so
@@ -325,7 +324,7 @@ export const model = {
       // (canonical/kratos-operator@99da536 charmcraft.yaml:104-206). The 404s
       // are the BFF's route table, which is why the preflight must not read
       // kratos flow config off an ingress that fronts it.
-      loginUiVersion: "v0.24.0-v0.25.0",
+      loginUiVersion: "v0.24.0-v0.25.0 at first contact; >= v0.27.0 since the 2026-08-26 refresh (multi_tenancy_enabled present, registration route present, identifier-first login works)",
     },
   ],
 
