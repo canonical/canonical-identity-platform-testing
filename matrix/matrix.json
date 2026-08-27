@@ -45,7 +45,7 @@
     "validRows": 448,
     "achievablePairs": 157,
     "coveredByPinned": 68,
-    "coveredBySeeds": 43,
+    "coveredBySeeds": 35,
     "generatedRows": 5,
     "totalRows": 11
   },
@@ -160,7 +160,7 @@
         "mfa": "enforced",
         "verification": "off",
         "webauthn": "none",
-        "providers": "0",
+        "providers": "1",
         "tenant_service": "absent",
         "hook_service": "absent",
         "user_verification": "absent",
@@ -172,9 +172,12 @@
           "kratos",
           "hydra",
           "login-ui"
+        ],
+        "oidc_providers": [
+          "google_canonical"
         ]
       },
-      "newPairs": 10
+      "newPairs": 2
     },
     {
       "name": "mx-l0m0v0wnp2t1h1u1ao",
@@ -193,7 +196,7 @@
       "newPairs": 26
     },
     {
-      "name": "mx-l1m1v1wnp0t1h1u0ao",
+      "name": "mx-l1m1v1wnp0t0h1u0ao",
       "kind": "generated",
       "dims": {
         "local_idp": "on",
@@ -201,60 +204,60 @@
         "verification": "on",
         "webauthn": "none",
         "providers": "0",
-        "tenant_service": "present",
+        "tenant_service": "absent",
         "hook_service": "present",
         "user_verification": "absent",
         "access_token": "opaque"
       },
-      "newPairs": 10
+      "newPairs": 15
     },
     {
-      "name": "mx-l1m0v1wsp1t0h0u1ao",
+      "name": "mx-l1m0v0wnp0t1h0u1aj",
+      "kind": "generated",
+      "dims": {
+        "local_idp": "on",
+        "mfa": "off",
+        "verification": "off",
+        "webauthn": "none",
+        "providers": "0",
+        "tenant_service": "present",
+        "hook_service": "absent",
+        "user_verification": "present",
+        "access_token": "jwt"
+      },
+      "newPairs": 7
+    },
+    {
+      "name": "mx-l1m0v1wsp2t1h0u0ao",
       "kind": "generated",
       "dims": {
         "local_idp": "on",
         "mfa": "off",
         "verification": "on",
         "webauthn": "sequencing",
-        "providers": "1",
-        "tenant_service": "absent",
+        "providers": "2",
+        "tenant_service": "present",
         "hook_service": "absent",
-        "user_verification": "present",
+        "user_verification": "absent",
         "access_token": "opaque"
       },
-      "newPairs": 6
+      "newPairs": 5
     },
     {
-      "name": "mx-l1m1v1wnp2t1h0u0aj",
+      "name": "mx-l1m1v1wnp1t1h1u1ao",
       "kind": "generated",
       "dims": {
         "local_idp": "on",
         "mfa": "enforced",
         "verification": "on",
         "webauthn": "none",
-        "providers": "2",
-        "tenant_service": "present",
-        "hook_service": "absent",
-        "user_verification": "absent",
-        "access_token": "jwt"
-      },
-      "newPairs": 2
-    },
-    {
-      "name": "mx-l1m0v1wnp0t1h1u1aj",
-      "kind": "generated",
-      "dims": {
-        "local_idp": "on",
-        "mfa": "off",
-        "verification": "on",
-        "webauthn": "none",
-        "providers": "0",
+        "providers": "1",
         "tenant_service": "present",
         "hook_service": "present",
         "user_verification": "present",
-        "access_token": "jwt"
+        "access_token": "opaque"
       },
-      "newPairs": 2
+      "newPairs": 1
     }
   ]
 }

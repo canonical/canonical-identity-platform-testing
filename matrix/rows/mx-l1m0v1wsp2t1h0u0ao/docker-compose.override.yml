@@ -1,6 +1,6 @@
-# Matrix row: mx-l1m0v1wsp1t0h0u1ao (generated) — GENERATED, DO NOT EDIT.
+# Matrix row: mx-l1m0v1wsp2t1h0u0ao (generated) — GENERATED, DO NOT EDIT.
 # Source of truth: matrix/config-model.mjs; regenerate with `make matrix-generate`.
-# local_idp=on mfa=off verification=on webauthn=sequencing providers=1 tenant_service=absent hook_service=absent user_verification=present access_token=opaque
+# local_idp=on mfa=off verification=on webauthn=sequencing providers=2 tenant_service=present hook_service=absent user_verification=absent access_token=opaque
 
 services:
   kratos:
@@ -15,21 +15,23 @@ services:
       - SELFSERVICE_FLOWS_RECOVERY_ENABLED=true
       - SELFSERVICE_FLOWS_VERIFICATION_ENABLED=true
       - SESSION_WHOAMI_REQUIRED_AAL=highest_available
-    command: exec kratos serve -c /etc/config/kratos/kratos.yml -c /etc/config/kratos/kratos.dex.yml --dev --watch-courier
+    command: exec kratos serve -c /etc/config/kratos/kratos.yml -c /etc/config/kratos/kratos.google.yml --dev --watch-courier
 
   login-ui:
     environment:
       - MFA_ENABLED=false
       - OIDC_WEBAUTHN_SEQUENCING_ENABLED=true
       - VERIFICATION_ENABLED=true
+      - MULTI_TENANCY_ENABLED=true
+      - TENANT_SERVICE_GRPC_ADDRESS=tenant-service:50051
 
   hydra:
     environment:
       - STRATEGIES_ACCESS_TOKEN=opaque
 
-  tenant-service:
+  hook-service:
     scale: 0
 
-  hook-service:
+  user-verification-service:
     scale: 0
 

@@ -7,7 +7,8 @@
   "flags": [
     "password",
     "totp",
-    "backup_codes"
+    "backup_codes",
+    "account_linking"
   ],
   "services": [
     "kratos",
@@ -16,10 +17,12 @@
     "dex",
     "openfga",
     "tenant-service",
-    "hook-service"
+    "hook-service",
+    "user-verification-service"
   ],
   "methods_1fa": [
-    "password"
+    "password",
+    "oidc"
   ],
   "methods_2fa": [
     "totp",
@@ -27,11 +30,13 @@
   ],
   "mfa_enforced": true,
   "webauthn_enabled": false,
-  "oidc_enabled": false,
+  "oidc_enabled": true,
   "local_users_enabled": true,
   "registration_enabled": true,
-  "account_linking_enabled": false,
-  "oidc_providers": [],
+  "account_linking_enabled": true,
+  "oidc_providers": [
+    "dex"
+  ],
   "verification_enabled": true,
   "access_token_format": "opaque",
   "mail_api": true

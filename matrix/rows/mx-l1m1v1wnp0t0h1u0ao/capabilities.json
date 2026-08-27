@@ -1,14 +1,13 @@
 {
-  "oidc_webauthn_sequencing_enabled": true,
+  "oidc_webauthn_sequencing_enabled": false,
   "base_url": "http://localhost",
   "identifier_first_enabled": true,
   "multi_tenancy_enabled": false,
   "support_email": "",
   "flags": [
     "password",
-    "webauthn",
-    "backup_codes",
-    "account_linking"
+    "totp",
+    "backup_codes"
   ],
   "services": [
     "kratos",
@@ -16,25 +15,22 @@
     "login-ui",
     "dex",
     "openfga",
-    "user-verification-service"
+    "hook-service"
   ],
   "methods_1fa": [
-    "password",
-    "oidc"
+    "password"
   ],
   "methods_2fa": [
-    "backup_codes",
-    "webauthn"
+    "totp",
+    "backup_codes"
   ],
-  "mfa_enforced": false,
-  "webauthn_enabled": true,
-  "oidc_enabled": true,
+  "mfa_enforced": true,
+  "webauthn_enabled": false,
+  "oidc_enabled": false,
   "local_users_enabled": true,
   "registration_enabled": true,
-  "account_linking_enabled": true,
-  "oidc_providers": [
-    "dex"
-  ],
+  "account_linking_enabled": false,
+  "oidc_providers": [],
   "verification_enabled": true,
   "access_token_format": "opaque",
   "mail_api": true
