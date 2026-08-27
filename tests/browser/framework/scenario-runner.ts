@@ -379,7 +379,15 @@ async function assertTokenClaims(
 export async function runScenario(
   page: Page,
   scenario: Scenario,
-  extraCtx?: { webauthn?: WebAuthnHelper },
+  extraCtx?: {
+    webauthn?: WebAuthnHelper;
+    /** Scenario-owned pre-walk work (e.g. registration's delete-before-recreate).
+     *  Runs AFTER the lane and satisfies() gates and the manifest read — spec
+     *  code placed before runScenario() runs on scenarios the declaration
+     *  excludes, which turns their skips into failures the moment a
+     *  prerequisite (manifest, admin API) is missing on the lane. */
+    prepare?: (manifest: Manifest) => Promise<void>;
+  },
 ): Promise<void> {
   const lane = getExecutionLane();
   const scenarioLanes = scenario.lanes ?? ["live", "internal"];
@@ -405,6 +413,10 @@ export async function runScenario(
   // every lane/capability skip on an unseeded deployment into a hard
   // "Manifest file not found".
   const manifest = readManifest();
+
+  if (extraCtx?.prepare) {
+    await extraCtx.prepare(manifest);
+  }
 
   // Look up the user in the manifest
   const user = findUserByRef(manifest, scenario.user.ref);
