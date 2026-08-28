@@ -283,8 +283,8 @@ alone. `scripts/seed-in-cluster.sh` is that transport — it bootstraps a seedin
 host inside the deployment and then delegates to `scripts/seed-remote.sh`,
 which still owns every prerequisite probe.
 
-Run it on a node of the deployment's k8s cluster (anything with kubectl access
-to the namespace):
+Run it from a checkout on a node of the deployment's k8s cluster (anything with
+kubectl access to the namespace):
 
 ```bash
 # Probes only. No identity, no client, no host package touched.
@@ -319,18 +319,21 @@ service: juju's generated service publishes only the ports the charm declares
 and the admin port is not always among them, while a pod IP always carries
 every port its container listens on.
 
+**The pod runs your checkout, not a clone of it.** The working tree is streamed
+in over `kubectl exec … tar -xzf -`, so the pod needs no git, no pushed ref and
+no egress: `tests/browser/node_modules` rides along when it exists here, and
+`npm install` inside the pod is then a proven no-op — it makes no registry call
+at all on a complete tree. Two paths are excluded because they are secrets, not
+because they are large: `*.tfstate*` (the juju root manages `juju_secret`, and
+terraform stores secret values in cleartext) and `tests/browser/manifest.json`
+(a previous seed's passwords and TOTP secrets).
+
+So a node with no egress needs nothing special — `scp` your checkout to it
+(`node_modules` included) and run from there.
+
 Neither mode guesses the identity schema — it reads `/schemas` off kratos and
 picks `default` when served, else the single non-admin schema, else refuses and
 names what it saw (`KRATOS_IDENTITY_SCHEMA_ID` overrides).
-
-**No egress on the seeding host.** Build a bundle where there *is* egress and
-ship it; with `tests/browser/node_modules` inside, npm never runs online:
-
-```bash
-tar czf seed-bundle.tgz --exclude=.git -C <repo> .     # on a host with egress
-scp seed-bundle.tgz <node>:                            # then, on the node:
-scripts/seed-in-cluster.sh --env teal --bundle ~/seed-bundle.tgz
-```
 
 ### What seeding a real deployment leaves behind
 

@@ -2,23 +2,25 @@
 # Copyright 2026 Canonical Ltd.
 # SPDX-License-Identifier: AGPL-3.0
 #
-# Bootstrap a SEEDING HOST inside a charmed k8s deployment, then hand off to
-# scripts/seed-remote.sh (which owns the prerequisite probes and the seeder
-# invocation — this script owns only the transport and the toolchain).
+# Seed a charmed deployment from INSIDE its cluster, then hand off to
+# scripts/seed-remote.sh (which owns every prerequisite probe and the seeder
+# invocation — this script owns only the transport).
 #
-# It exists because the admin APIs of a charmed deployment are not published:
-# kratos's 4434 and hydra's 4445 are reachable only from inside the cluster, so
-# the seeding half of the `urls` backend (docs/testing-spec.md §9) has to run
-# from a node or a pod. Two modes, same contract:
+# It exists because a charmed deployment publishes no admin ports: kratos's
+# 4434 and hydra's 4445 are reachable on the pod network alone, so the seeding
+# half of the `urls` backend (docs/testing-spec.md §9) has to run from a node or
+# a pod. Two modes:
 #
-#   --mode pod  (default)   run in a throwaway pod in the deployment's namespace
-#                           (node:22 image), talking to the POD IPs directly.
-#                           Leaves NOTHING on the node — the pod is deleted on
-#                           exit; needs the node to be able to pull node:22.
-#   --mode node             run here, on a cluster node: fetch the repo,
-#                           `kubectl port-forward` to the kratos and hydra pods,
-#                           seed over 127.0.0.1. Needs node >= 20 already on the
-#                           host; installing it is opt-in (--install-toolchain),
+#   --mode pod  (default)   run in a throwaway pod in the deployment's own
+#                           namespace (node:22 image). THIS CHECKOUT is streamed
+#                           into it, so the pod runs the code you are looking
+#                           at, needs no git and — when tests/browser/
+#                           node_modules is present here — no npm registry
+#                           either. Deleted on exit; nothing lands on the node.
+#   --mode node             run here: `kubectl port-forward` to the kratos and
+#                           hydra pods and seed over 127.0.0.1, straight out of
+#                           this checkout. Needs node >= 20 already on the host;
+#                           installing it is opt-in (--install-toolchain),
 #                           because a snap on a production node outlives the run
 #                           and `--check` must not leave a trace either.
 #
@@ -26,7 +28,7 @@
 # only the ports the charm declares, and the admin port is not among them on
 # every revision. A pod IP always carries every port its container listens on.
 #
-# Usage (on a node of the deployment's k8s cluster, with kubectl access):
+# Usage (from a checkout on a node of the deployment's k8s cluster):
 #
 #   scripts/seed-in-cluster.sh --env teal [--check | --purge | --incremental]
 #
@@ -36,11 +38,6 @@
 #   --row <row>        matrix row whose capabilities.json declares the target
 #                      (deployed-core-local-mfa — the charmed-core shape)
 #   --mode pod|node    where the seeder runs (pod)
-#   --ref <git-ref>    ref to fetch when cloning (feat/orange-urls-lane)
-#   --bundle <tgz>     offline: a tarball of this repo (`tar czf b.tgz
-#                      --exclude=.git -C <repo> .`) instead of a git clone. Ship
-#                      tests/browser/node_modules in it and npm never has to
-#                      reach a registry.
 #   --out <path>       where to write the manifest on THIS host
 #                      (./manifest.<env>.json, mode 0600)
 #   --install-toolchain  node mode only: permit `snap install node` (or apt) on
@@ -56,13 +53,12 @@
 
 set -euo pipefail
 
+REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
 ENVIRONMENT="teal"
 NAMESPACE=""
 ROW="deployed-core-local-mfa"
 MODE="pod"
-REF="feat/orange-urls-lane"
-REPO_URL="https://github.com/canonical/canonical-identity-platform-testing.git"
-BUNDLE=""
 OUT=""
 SEED_ARGS=()
 POD_NAME="iam-seeder"
@@ -74,13 +70,10 @@ while [[ $# -gt 0 ]]; do
     --namespace) NAMESPACE="${2:?--namespace needs a value}"; shift ;;
     --row) ROW="${2:?--row needs a value}"; shift ;;
     --mode) MODE="${2:?--mode needs a value}"; shift ;;
-    --ref) REF="${2:?--ref needs a value}"; shift ;;
-    --repo) REPO_URL="${2:?--repo needs a value}"; shift ;;
-    --bundle) BUNDLE="${2:?--bundle needs a value}"; shift ;;
     --out) OUT="${2:?--out needs a value}"; shift ;;
     --install-toolchain) INSTALL_TOOLCHAIN=1 ;;
     --check | --fresh | --incremental | --purge) SEED_ARGS+=("$1") ;;
-    -h | --help) sed -n '5,55p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h | --help) sed -n '5,52p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -99,8 +92,14 @@ PF_PIDS=()
 
 fail() { echo "✗ $*" >&2; exit 1; }
 
+[[ -x "$REPO/scripts/seed-remote.sh" ]] \
+  || fail "$REPO does not look like a checkout of this repo (no executable scripts/seed-remote.sh)"
+[[ -f "$REPO/matrix/rows/$ROW/capabilities.json" ]] \
+  || fail "no such materialized row: $ROW (see matrix/matrix.json)"
+
 echo "── plan"
 echo "  ${MODE} mode, row $ROW, seeder ${SEED_ARGS[*]}, namespace $NAMESPACE"
+echo "  checkout $REPO"
 
 # ── kubectl ────────────────────────────────────────────────────────────────
 # Canonical k8s ships the client as a snap subcommand, and on a control node
@@ -136,30 +135,22 @@ HYDRA_POD="$(resolve_pod hydra)"
 echo "  ✓ kratos pod     $KRATOS_POD"
 echo "  ✓ hydra pod      $HYDRA_POD"
 
-# ── in-pod / on-node bootstrap, shared body ────────────────────────────────
-# One text, two hosts: it is the same sequence either way, and duplicating it
-# is how the two modes drift apart.
-bootstrap_body() {
-  cat <<'BOOTSTRAP'
+# ── the seeding step, identical on both hosts ──────────────────────────────
+# Everything host-specific is an env var, so this text is the one definition of
+# what "seed" means and the two modes cannot drift apart.
+seed_body() {
+  cat <<'SEED'
 set -euo pipefail
-: "${WORK:?}" "${SEED_ARGS:?}" "${ROW:?}"
-mkdir -p "$WORK/repo"
-if [[ -n "${BUNDLE_PATH:-}" ]]; then
-  tar -xzf "$BUNDLE_PATH" -C "$WORK/repo"
-  # A complete vendored tree must not be "topped up" from a registry the host
-  # cannot reach; an incomplete one must fail loudly rather than hang.
-  if [[ -d "$WORK/repo/tests/browser/node_modules" ]]; then export npm_config_offline=true; fi
-else
-  if [[ ! -d "$WORK/repo/.git" ]]; then
-    git clone --depth 1 --branch "$GIT_REF" "$GIT_REPO" "$WORK/repo"
-  fi
-fi
+: "${REPO_DIR:?}" "${SEED_ARGS:?}" "${ROW:?}"
+
+# `npm install` inside seed-remote.sh is a no-op on a complete node_modules and
+# never contacts a registry; audit and fund notices are the only calls that
+# would, and they are not worth a failure on an egress-less host.
 export npm_config_audit=false npm_config_fund=false
 
 # The identity schema a charmed deployment serves is NOT `default`, and an
-# unknown schema id is a 400 per identity. Ask the deployment. Resolved here,
-# not on the calling host: this is the first point at which node's fetch (and
-# a route to kratos) both exist, so there is one implementation for both modes.
+# unknown schema id is a 400 per identity. Ask the deployment. Resolved here so
+# that both modes resolve it the same way, against the same kratos they seed.
 if [[ -z "${KRATOS_IDENTITY_SCHEMA_ID:-}" ]]; then
   KRATOS_IDENTITY_SCHEMA_ID="$(node -e '
     fetch(process.argv[1] + "/schemas", { signal: AbortSignal.timeout(10000) })
@@ -180,48 +171,36 @@ if [[ -z "${KRATOS_IDENTITY_SCHEMA_ID:-}" ]]; then
   export KRATOS_IDENTITY_SCHEMA_ID
 fi
 
-exec "$WORK/repo/scripts/seed-remote.sh" $SEED_ARGS --row "$ROW"
-BOOTSTRAP
+exec "$REPO_DIR/scripts/seed-remote.sh" $SEED_ARGS --row "$ROW"
+SEED
 }
 
 # ── mode: node ─────────────────────────────────────────────────────────────
 run_on_node() {
   local sudo=""; [[ "$(id -u)" == 0 ]] || sudo="sudo"
 
-  # Nothing here is installed without --install-toolchain. A snap on a
-  # production k8s node outlives the run, so it is a decision the operator
-  # takes explicitly — and it is what keeps `--check` traceless on the host as
-  # well as on the deployment.
+  # Nothing is installed without --install-toolchain. A snap on a production
+  # k8s node outlives the run, so it is a decision the operator takes
+  # explicitly — and it is what keeps `--check` traceless on the host as well
+  # as on the deployment.
   echo "── toolchain"
-  local missing=()
-  command -v git >/dev/null 2>&1 || missing+=("git")
-
   local major=0
   if command -v node >/dev/null 2>&1; then
     major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
   fi
-  { [[ "$major" -ge 20 ]] && command -v npm >/dev/null 2>&1; } || missing+=("node>=20+npm")
-
-  if [[ ${#missing[@]} -gt 0 ]]; then
-    [[ "$INSTALL_TOOLCHAIN" == 1 ]] || fail "this host is missing ${missing[*]} and node mode needs it locally.
+  if [[ "$major" -lt 20 ]] || ! command -v npm >/dev/null 2>&1; then
+    [[ "$INSTALL_TOOLCHAIN" == 1 ]] || fail "node >= 20 with npm is not on this host, and node mode runs the seeder here.
     Pick one, in this order of preference:
       --mode pod                 seed from a throwaway pod instead; installs nothing here
       --install-toolchain        permit snap/apt to install it on THIS node (persists)
-    (node $( [[ $major == 0 ]] && echo absent || echo "v$major" ) — the seeder and every probe run on node's fetch)"
-
-    if [[ " ${missing[*]} " == *" git "* ]]; then
-      $sudo apt-get install -y -q git || fail "apt-get install git failed"
-    fi
-    if [[ " ${missing[*]} " == *" node>=20+npm "* ]]; then
-      # snap first: it is the only channel on these nodes that carries a current
-      # node, and snapd already has the egress proxy configured.
-      $sudo snap install node --classic --channel=22 \
-        || $sudo apt-get install -y -q nodejs npm \
-        || fail "could not install node >= 20 (tried: snap install node --classic --channel=22, apt-get install nodejs npm)"
-    fi
+    (found: $( [[ "$major" == 0 ]] && echo "no node" || echo "node v$major" ) — the seeder and every probe run on node's fetch)"
+    # snap first: it is the only channel on these nodes that carries a current
+    # node, and snapd already has the egress proxy configured.
+    $sudo snap install node --classic --channel=22 \
+      || $sudo apt-get install -y -q nodejs npm \
+      || fail "could not install node >= 20 (tried: snap install node --classic --channel=22, apt-get install nodejs npm)"
     hash -r
   fi
-  echo "  ✓ git            $(git --version)"
   echo "  ✓ node           $(node -v) / npm $(npm -v)"
 
   WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/iam-seed.XXXXXX")"
@@ -251,16 +230,15 @@ run_on_node() {
   done
 
   local manifest="$WORKDIR/manifest.json"
-  WORK="$WORKDIR" SEED_ARGS="${SEED_ARGS[*]}" ROW="$ROW" \
-  GIT_REPO="$REPO_URL" GIT_REF="$REF" BUNDLE_PATH="$BUNDLE" \
+  REPO_DIR="$REPO" SEED_ARGS="${SEED_ARGS[*]}" ROW="$ROW" \
   KRATOS_ADMIN_URL="http://127.0.0.1:4434" \
   KRATOS_PUBLIC_URL="http://127.0.0.1:4433" \
   HYDRA_ADMIN_URL="http://127.0.0.1:4445" \
   KRATOS_IDENTITY_SCHEMA_ID="${KRATOS_IDENTITY_SCHEMA_ID:-}" \
   MANIFEST="$manifest" \
-    bash -c "$(bootstrap_body)"
+    bash -c "$(seed_body)"
 
-  collect "$manifest" "cp"
+  collect "$manifest" "local"
 }
 
 # ── mode: pod ──────────────────────────────────────────────────────────────
@@ -316,27 +294,40 @@ POD
     || { kube -n "$NAMESPACE" describe pod "$POD_NAME" >&2; fail "the seeder pod never became Ready (image pull needs the node's egress proxy)"; }
   echo "  ✓ pod            $POD_NAME ready"
 
-  local bundle_in_pod=""
-  if [[ -n "$BUNDLE" ]]; then
-    kube -n "$NAMESPACE" cp "$BUNDLE" "$POD_NAME:/work/bundle.tgz" || fail "could not copy $BUNDLE into the pod"
-    bundle_in_pod="/work/bundle.tgz"
-  fi
+  # Stream THIS checkout in. Not a git clone in the pod: the pod would then need
+  # git, egress and a pushed ref, and it would run something other than the code
+  # in front of you. node_modules rides along when present, which is what makes
+  # the pod's `npm install` a no-op instead of a registry round trip.
+  #
+  # The excludes are not tidiness. terraform.tfstate is secret-bearing by
+  # construction and manifest.json is a previous seed's credentials; neither
+  # belongs in a container image layer or a pod's filesystem.
+  echo "── transfer"
+  kube -n "$NAMESPACE" exec "$POD_NAME" -- mkdir -p /work/repo
+  tar -C "$REPO" -czf - \
+    --exclude=./.git \
+    --exclude='*.tfstate*' \
+    --exclude=./matrix/backends/juju/root/local.auto.tfvars \
+    --exclude=./tests/browser/manifest.json \
+    --exclude='./tests/browser/test-results*' \
+    . | kube -n "$NAMESPACE" exec -i "$POD_NAME" -- tar -xzf - -C /work/repo \
+    || fail "could not stream the checkout into the pod"
+  kube -n "$NAMESPACE" exec "$POD_NAME" -- test -x /work/repo/scripts/seed-remote.sh \
+    || fail "the transfer landed but /work/repo/scripts/seed-remote.sh is not executable in the pod"
+  echo "  ✓ checkout       /work/repo$([[ -d "$REPO/tests/browser/node_modules" ]] && echo " (with node_modules — no npm registry needed)")"
 
   kube -n "$NAMESPACE" exec -i "$POD_NAME" -- env \
-    WORK=/work \
+    REPO_DIR=/work/repo \
     SEED_ARGS="${SEED_ARGS[*]}" \
     ROW="$ROW" \
-    GIT_REPO="$REPO_URL" \
-    GIT_REF="$REF" \
-    BUNDLE_PATH="$bundle_in_pod" \
     KRATOS_ADMIN_URL="http://$kratos_ip:4434" \
     KRATOS_PUBLIC_URL="http://$kratos_ip:4433" \
     HYDRA_ADMIN_URL="http://$hydra_ip:4445" \
     KRATOS_IDENTITY_SCHEMA_ID="${KRATOS_IDENTITY_SCHEMA_ID:-}" \
     MANIFEST=/work/manifest.json \
-    bash -s <<<"$(bootstrap_body)"
+    bash -s <<<"$(seed_body)"
 
-  collect "/work/manifest.json" "kubecp"
+  collect "/work/manifest.json" "pod"
 }
 
 # ── manifest collection ────────────────────────────────────────────────────
@@ -348,9 +339,8 @@ collect() {
     *" --check "* | *" --purge "*) return 0 ;;
   esac
   install -m 600 /dev/null "$OUT"
-  if [[ "$how" == "kubecp" ]]; then
-    kube -n "$NAMESPACE" cp "$POD_NAME:$src" "$OUT" || fail "could not copy the manifest out of the pod"
-    chmod 600 "$OUT"
+  if [[ "$how" == "pod" ]]; then
+    kube -n "$NAMESPACE" exec "$POD_NAME" -- cat "$src" >"$OUT" || fail "could not read the manifest out of the pod"
   else
     cat "$src" >"$OUT"
   fi
@@ -376,7 +366,6 @@ collect() {
   delete exactly what was seeded.
 EOF
 }
-
 
 case "$MODE" in
   node) run_on_node ;;
