@@ -273,3 +273,71 @@ for testing (what a browser gets). Leaving `KRATOS_ADMIN_URL` unset in step 2 is
 deliberate — it is what selects the live lane (11 tier-A executions on this row)
 and keeps the run incapable of mutating the deployment.
 
+
+### Seeding from inside the cluster (`scripts/seed-in-cluster.sh`)
+
+Step 1 above assumes something already reaches the admin APIs. On a charmed
+deployment nothing outside the cluster does: the ingress publishes only the
+public surfaces, so kratos's 4434 and hydra's 4445 exist on the pod network
+alone. `scripts/seed-in-cluster.sh` is that transport — it bootstraps a seeding
+host inside the deployment and then delegates to `scripts/seed-remote.sh`,
+which still owns every prerequisite probe.
+
+Run it on a node of the deployment's k8s cluster (anything with kubectl access
+to the namespace):
+
+```bash
+# Probes only, zero mutation — run this first.
+scripts/seed-in-cluster.sh --env teal --check
+
+# Seed. Writes ./manifest.teal.json, 0600.
+scripts/seed-in-cluster.sh --env teal --fresh
+
+# Afterwards, from the same host.
+scripts/seed-in-cluster.sh --env teal --purge
+```
+
+`--env <colour>` is the only required knowledge: the namespace defaults to
+`<colour>-iam` (juju names the namespace after the model) and the handoff text
+to `iam.<colour>.canonical.com`. `--row` defaults to `deployed-core-local-mfa`,
+the charmed-core shape.
+
+Two modes, because the two hosts fail differently:
+
+|Mode|What it needs|What it touches|
+|---|---|---|
+|`--mode node` (default)|node ≥ 20 installable via snap/apt, `kubectl port-forward`|installs node+npm on the node|
+|`--mode pod`|the cluster can pull `node:22-bookworm`|one throwaway pod in the namespace, deleted on exit|
+
+Pod mode talks to the kratos and hydra **pod IPs**, not the `kratos` ClusterIP
+service: juju's generated service publishes only the ports the charm declares
+and the admin port is not always among them, while a pod IP always carries
+every port its container listens on.
+
+Neither mode guesses the identity schema — it reads `/schemas` off kratos and
+picks `default` when served, else the single non-admin schema, else refuses and
+names what it saw (`KRATOS_IDENTITY_SCHEMA_ID` overrides).
+
+**No egress on the seeding host.** Build a bundle where there *is* egress and
+ship it; with `tests/browser/node_modules` inside, npm never runs online:
+
+```bash
+tar czf seed-bundle.tgz --exclude=.git -C <repo> .     # on a host with egress
+scp seed-bundle.tgz <node>:                            # then, on the node:
+scripts/seed-in-cluster.sh --env teal --bundle ~/seed-bundle.tgz
+```
+
+### What seeding a real deployment leaves behind
+
+Both halves are scoped by `seeder/ownership.ts`, but "scoped" is not "nothing":
+
+- **~15 identities** in `@test.example`, each with a password and most with a
+  TOTP secret (`seeder/archetypes.ts` is the exact list). `--purge` deletes them.
+- **3 Hydra OAuth2 clients** — `browser-test-rp`, `browser-test-svc`,
+  `browser-test-hooks` (`seeder/clients.ts`). `--purge` does **not** delete
+  these: they are upserted by fixed id, carry no user data, and a deployment may
+  still be serving them. Remove them by hand when you want them gone:
+  `DELETE /admin/clients/browser-test-rp` and the other two.
+- The **manifest** on the seeding host: seeded passwords and TOTP secrets, 0600.
+  Move it off and `shred -u` the copy.
+
