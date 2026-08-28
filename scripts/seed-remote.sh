@@ -119,8 +119,30 @@ echo "  ✓ hydra admin   $HYDRA_ADMIN_URL"
 # login-ui BFF, whose route table has no native endpoints), while a 5xx means it
 # IS kratos and kratos cannot create a login flow — a deployment fault the
 # seeder can neither route around nor fix.
+# The restart hint is copy-pasteable when the caller knows the cluster
+# (scripts/seed-in-cluster.sh exports it); generic otherwise.
+restart_hint="${KRATOS_RESTART_HINT:-kubectl -n <ns> exec <kratos-pod> -c kratos -- pebble restart kratos}"
+
 if ! flow_type="$(json "$KRATOS_PUBLIC_URL/self-service/login/api" 'body.type')" || [[ "$flow_type" != "api" ]]; then
   case "$flow_type" in
+    *nid_fk*)
+      # Observed on teal 2026-08-28. Worth a name of its own: the SQLSTATE points
+      # at a flow table, the cause is process state, and the fix is a restart —
+      # nothing a seeder, a payload or a URL can influence.
+      fail "kratos is running with a network id its database no longer contains:
+      GET /self-service/login/api -> $flow_type
+    kratos resolves its nid ONCE, at startup: networkx.Determine() takes the
+    oldest row of the \`networks\` table and caches it on the persister
+    (ory/kratos@64e04ac oryx/networkx/manager.go:41-55, called from
+    driver/registry_default.go:698-704 — the exact build this deployment runs).
+    If that row disappears while the process keeps running — a restored,
+    re-created or re-migrated database — every insert into a table carrying the
+    nid foreign key fails, so every login flow AND every browser login on this
+    deployment fails with it.
+    RESTART THE WORKLOAD; there is nothing to fix on this side:
+      $restart_hint
+    Then re-run this. If it comes straight back, something is still rewriting
+    the database underneath kratos." ;;
     "HTTP 5"*)
       fail "kratos IS at $KRATOS_PUBLIC_URL and cannot create a login flow:
       GET /self-service/login/api -> $flow_type

@@ -263,6 +263,7 @@ run_on_node() {
     KRATOS_PUBLIC_URL="http://127.0.0.1:4433" \
     HYDRA_ADMIN_URL="http://127.0.0.1:4445" \
     KRATOS_IDENTITY_SCHEMA_ID="${KRATOS_IDENTITY_SCHEMA_ID:-}" \
+    KRATOS_RESTART_HINT="${KUBECTL[*]} -n $NAMESPACE exec $KRATOS_POD -c kratos -- pebble restart kratos" \
     MANIFEST="$manifest" \
       bash -c "$(seed_body)"; then
     diagnose_kratos
@@ -420,6 +421,7 @@ POD
     KRATOS_PUBLIC_URL="http://$kratos_ip:4433" \
     HYDRA_ADMIN_URL="http://$hydra_ip:4445" \
     KRATOS_IDENTITY_SCHEMA_ID="${KRATOS_IDENTITY_SCHEMA_ID:-}" \
+    KRATOS_RESTART_HINT="${KUBECTL[*]} -n $NAMESPACE exec $KRATOS_POD -c kratos -- pebble restart kratos" \
     MANIFEST=/work/manifest.json \
     bash -s <<<"$(seed_body)"; then
     diagnose_kratos
