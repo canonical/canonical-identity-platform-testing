@@ -179,6 +179,30 @@ exec "$REPO_DIR/scripts/seed-remote.sh" $SEED_ARGS --row "$ROW"
 SEED
 }
 
+# ── what kratos itself says, when the seed step fails ──────────────────────
+# The HTTP body says what kratos answered; only the workload log says why. And
+# the log is unreadable raw: kratos logs every /health/ready at info, two
+# probers hit it continuously, and 60 lines of tail contain nothing else. Nor
+# can an operator just curl the failing endpoint from inside the pod — the rock
+# ships neither curl nor wget. So the script that HAS kubectl does both.
+diagnose_kratos() {
+  echo >&2
+  echo "── kratos, at the moment it refused" >&2
+  local ver
+  # The image is pinned by digest (oci-image@sha256:…), so the tag tells you
+  # nothing about the version. The binary does, and it is the one fact that
+  # decides a workload/schema skew.
+  ver="$(kube -n "$NAMESPACE" exec "$KRATOS_POD" -c kratos -- kratos version 2>/dev/null | tr '\n' ' ' || true)"
+  echo "  version: ${ver:-unavailable (kratos binary not on PATH in the container)}" >&2
+  echo "  last error/warn lines (health-check noise filtered):" >&2
+  kube -n "$NAMESPACE" logs "$KRATOS_POD" -c kratos --tail=1000 2>/dev/null \
+    | grep -v '/health/' \
+    | grep -Ei '"level":"(error|warn)"|panic|SQLSTATE|migrat' \
+    | tail -12 \
+    | sed 's/^/    /' >&2 \
+    || echo "    (none in the last 1000 lines — the failure may not be logged as an error)" >&2
+}
+
 # ── mode: node ─────────────────────────────────────────────────────────────
 run_on_node() {
   local sudo=""; [[ "$(id -u)" == 0 ]] || sudo="sudo"
@@ -234,13 +258,16 @@ run_on_node() {
   done
 
   local manifest="$WORKDIR/manifest.json"
-  REPO_DIR="$REPO" SEED_ARGS="${SEED_ARGS[*]}" ROW="$ROW" \
-  KRATOS_ADMIN_URL="http://127.0.0.1:4434" \
-  KRATOS_PUBLIC_URL="http://127.0.0.1:4433" \
-  HYDRA_ADMIN_URL="http://127.0.0.1:4445" \
-  KRATOS_IDENTITY_SCHEMA_ID="${KRATOS_IDENTITY_SCHEMA_ID:-}" \
-  MANIFEST="$manifest" \
-    bash -c "$(seed_body)"
+  if ! REPO_DIR="$REPO" SEED_ARGS="${SEED_ARGS[*]}" ROW="$ROW" \
+    KRATOS_ADMIN_URL="http://127.0.0.1:4434" \
+    KRATOS_PUBLIC_URL="http://127.0.0.1:4433" \
+    HYDRA_ADMIN_URL="http://127.0.0.1:4445" \
+    KRATOS_IDENTITY_SCHEMA_ID="${KRATOS_IDENTITY_SCHEMA_ID:-}" \
+    MANIFEST="$manifest" \
+      bash -c "$(seed_body)"; then
+    diagnose_kratos
+    exit 1
+  fi
 
   collect "$manifest" "local"
 }
@@ -385,7 +412,7 @@ POD
     echo "  ✓ npm registry   reachable from the pod"
   fi
 
-  kube -n "$NAMESPACE" exec -i "$POD_NAME" -- env \
+  if ! kube -n "$NAMESPACE" exec -i "$POD_NAME" -- env \
     REPO_DIR=/work/repo \
     SEED_ARGS="${SEED_ARGS[*]}" \
     ROW="$ROW" \
@@ -394,7 +421,10 @@ POD
     HYDRA_ADMIN_URL="http://$hydra_ip:4445" \
     KRATOS_IDENTITY_SCHEMA_ID="${KRATOS_IDENTITY_SCHEMA_ID:-}" \
     MANIFEST=/work/manifest.json \
-    bash -s <<<"$(seed_body)"
+    bash -s <<<"$(seed_body)"; then
+    diagnose_kratos
+    exit 1
+  fi
 
   collect "/work/manifest.json" "pod"
 }
