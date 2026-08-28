@@ -38,6 +38,9 @@
 #   --row <row>        matrix row whose capabilities.json declares the target
 #                      (deployed-core-local-mfa — the charmed-core shape)
 #   --mode pod|node    where the seeder runs (pod)
+#   --proxy <url>      egress proxy for the pod's npm. Discovered from the
+#                      node's own snapd/containerd/apt drop-ins when unset; a
+#                      pod is NOT covered by the node's transparent proxy.
 #   --out <path>       where to write the manifest on THIS host
 #                      (./manifest.<env>.json, mode 0600)
 #   --install-toolchain  node mode only: permit `snap install node` (or apt) on
@@ -70,10 +73,11 @@ while [[ $# -gt 0 ]]; do
     --namespace) NAMESPACE="${2:?--namespace needs a value}"; shift ;;
     --row) ROW="${2:?--row needs a value}"; shift ;;
     --mode) MODE="${2:?--mode needs a value}"; shift ;;
+    --proxy) PROXY="${2:?--proxy needs a value}"; PROXY_FROM="--proxy"; shift ;;
     --out) OUT="${2:?--out needs a value}"; shift ;;
     --install-toolchain) INSTALL_TOOLCHAIN=1 ;;
     --check | --fresh | --incremental | --purge) SEED_ARGS+=("$1") ;;
-    -h | --help) sed -n '5,52p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h | --help) sed -n '5,54p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -241,6 +245,32 @@ run_on_node() {
   collect "$manifest" "local"
 }
 
+# ── egress proxy ───────────────────────────────────────────────────────────
+# A pod is NOT covered by the node's transparent proxy: the nftables DNAT that
+# gives the host its egress excludes the pod CIDR, so a pod reaching
+# registry.npmjs.org just times out (measured on teal). npm therefore needs the
+# proxy passed in explicitly. Discovered from the node rather than hardcoded —
+# every prodstack environment has its own egress host, and the node already
+# states its own in the drop-ins cloud-init wrote.
+discover_proxy() {
+  local v f
+  [[ -n "${PROXY:-}" ]] && return 0
+  for v in HTTPS_PROXY https_proxy HTTP_PROXY http_proxy; do
+    [[ -n "${!v:-}" ]] && { PROXY="${!v}"; PROXY_FROM="\$$v"; return 0; }
+  done
+  for f in /etc/systemd/system/snapd.service.d/http-proxy.conf \
+           /etc/systemd/system/snap.k8s.containerd.service.d/http-proxy.conf; do
+    [[ -r "$f" ]] || continue
+    PROXY="$(sed -n 's/^Environment="\?HTTPS\?_PROXY=\([^"]*\)"\?.*/\1/p' "$f" | head -1)"
+    [[ -n "$PROXY" ]] && { PROXY_FROM="$f"; return 0; }
+  done
+  if [[ -r /etc/apt/apt.conf.d/99proxy ]]; then
+    PROXY="$(sed -n 's/.*Proxy *"\([^"]*\)".*/\1/p' /etc/apt/apt.conf.d/99proxy | head -1)"
+    [[ -n "$PROXY" ]] && { PROXY_FROM="/etc/apt/apt.conf.d/99proxy"; return 0; }
+  fi
+  return 0
+}
+
 # ── mode: pod ──────────────────────────────────────────────────────────────
 run_in_pod() {
   local kratos_ip hydra_ip
@@ -248,6 +278,28 @@ run_in_pod() {
   hydra_ip="$(kube -n "$NAMESPACE" get pod "$HYDRA_POD" -o jsonpath='{.status.podIP}')"
   [[ -n "$kratos_ip" && -n "$hydra_ip" ]] || fail "could not read pod IPs for $KRATOS_POD / $HYDRA_POD"
   echo "  ✓ pod IPs        kratos=$kratos_ip hydra=$hydra_ip"
+
+  # The pod needs the registry only when this checkout has no node_modules to
+  # ride along. Resolve the proxy before the pod exists, so it can be baked into
+  # the spec rather than exported per exec (npm reads it from the environment,
+  # and `npm install` runs deep inside seed-remote.sh).
+  local vendored=0
+  [[ -d "$REPO/tests/browser/node_modules" ]] && vendored=1
+  discover_proxy
+  local pod_env=""
+  if [[ -n "${PROXY:-}" ]]; then
+    # NO_PROXY keeps the in-cluster targets off the proxy. node's fetch ignores
+    # these variables, but npm and anything else in the pod does not.
+    local no_proxy="localhost,127.0.0.1,.svc,.svc.cluster.local,$kratos_ip,$hydra_ip"
+    pod_env="$(printf '        - { name: %s, value: "%s" }\n' \
+      HTTP_PROXY "$PROXY" HTTPS_PROXY "$PROXY" http_proxy "$PROXY" https_proxy "$PROXY" \
+      NO_PROXY "$no_proxy" no_proxy "$no_proxy")"
+    echo "  ✓ egress proxy   $PROXY (from ${PROXY_FROM:-?})"
+  elif [[ "$vendored" == 0 ]]; then
+    echo "  ⚠ no egress proxy discovered, and this checkout has no" >&2
+    echo "    tests/browser/node_modules — the pod will have to reach the npm" >&2
+    echo "    registry directly. Pass --proxy <url> if that times out." >&2
+  fi
 
   cleanup() { kube -n "$NAMESPACE" delete pod "$POD_NAME" --now --ignore-not-found >/dev/null 2>&1 || true; }
   trap cleanup EXIT
@@ -278,6 +330,7 @@ spec:
       command: ["sleep", "infinity"]
       env:
         - { name: HOME, value: /work }
+$pod_env
       volumeMounts:
         - { name: work, mountPath: /work }
       resources:
@@ -314,7 +367,23 @@ POD
     || fail "could not stream the checkout into the pod"
   kube -n "$NAMESPACE" exec "$POD_NAME" -- test -x /work/repo/scripts/seed-remote.sh \
     || fail "the transfer landed but /work/repo/scripts/seed-remote.sh is not executable in the pod"
-  echo "  ✓ checkout       /work/repo$([[ -d "$REPO/tests/browser/node_modules" ]] && echo " (with node_modules — no npm registry needed)")"
+  if [[ "$vendored" == 1 ]]; then
+    echo "  ✓ checkout       /work/repo (with node_modules — no npm registry needed)"
+  else
+    # This checkout carries no node_modules, so seed-remote.sh will install from
+    # the registry. PROVE the pod can reach it here: the alternative is what
+    # teal did — a green --check, then ETIMEDOUT eleven steps later, after the
+    # cleanup phase of --fresh had already deleted identities.
+    echo "  ✓ checkout       /work/repo (no node_modules — npm will install in the pod)"
+    kube -n "$NAMESPACE" exec "$POD_NAME" -- npm ping >/dev/null 2>&1 \
+      || fail "the pod cannot reach the npm registry$( [[ -n "${PROXY:-}" ]] && echo " through $PROXY" ).
+    A pod is not covered by the node's transparent proxy, so one of these has to hold:
+      --proxy <url>              pass the egress proxy explicitly
+      ship node_modules          run \`npm install\` in tests/browser on a host with
+                                 egress and scp the checkout here; it rides along
+                                 in the transfer and npm then makes no call at all"
+    echo "  ✓ npm registry   reachable from the pod"
+  fi
 
   kube -n "$NAMESPACE" exec -i "$POD_NAME" -- env \
     REPO_DIR=/work/repo \

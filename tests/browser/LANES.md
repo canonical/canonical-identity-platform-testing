@@ -328,8 +328,23 @@ because they are large: `*.tfstate*` (the juju root manages `juju_secret`, and
 terraform stores secret values in cleartext) and `tests/browser/manifest.json`
 (a previous seed's passwords and TOTP secrets).
 
-So a node with no egress needs nothing special — `scp` your checkout to it
-(`node_modules` included) and run from there.
+**A pod is not covered by the node's transparent proxy.** On prodstack the
+nftables DNAT that gives a node its egress excludes the pod CIDR, so a pod
+reaching `registry.npmjs.org` simply times out (measured on teal). Two ways out,
+and the script takes both:
+
+- it discovers the node's own egress proxy — `$HTTPS_PROXY`, else the
+  `snapd`/`snap.k8s.containerd` drop-ins cloud-init wrote, else
+  `/etc/apt/apt.conf.d/99proxy` — and bakes it into the pod's environment.
+  `--proxy <url>` overrides;
+- and when the checkout carries no `node_modules`, it **proves** the pod can
+  reach the registry (`npm ping`) before seeding. That check exists because the
+  alternative was observed: a green `--check`, then `ETIMEDOUT` from `npm
+  install` *after* `--fresh` had already deleted the previous identities.
+
+A node with no egress at all needs nothing special — run `npm install` in
+`tests/browser` where there *is* egress, `scp` the whole checkout over, and the
+pod makes no network call beyond the cluster.
 
 Neither mode guesses the identity schema — it reads `/schemas` off kratos and
 picks `default` when served, else the single non-admin schema, else refuses and
