@@ -77,12 +77,20 @@ export MANIFEST
 # `json <url> <expr>` prints a field of a JSON response, or the transport error.
 # node, not curl+jq: node is already required (make dev-check) and it honours
 # NODE_EXTRA_CA_CERTS, so a TLS problem here reads the same as in the seeder.
+#
+# The BODY is part of the answer on a non-2xx, not noise: teal's kratos answered
+# 500 here and the bare "HTTP 500" sent the diagnosis down the wrong path for a
+# whole round trip. Truncated, whitespace-collapsed, but present.
 json() {
   node -e '
     const [url, expr] = process.argv.slice(1);
     fetch(url, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(10000) })
       .then(async (r) => {
-        if (!r.ok) { console.log(`HTTP ${r.status}`); process.exit(3); }
+        if (!r.ok) {
+          const text = await r.text().catch(() => "");
+          console.log(`HTTP ${r.status} ${text.replace(/\s+/g, " ").slice(0, 400)}`.trim());
+          process.exit(3);
+        }
         const body = await r.json();
         console.log(String(eval(expr)));
       })
@@ -95,21 +103,42 @@ echo "── prerequisites"
 # 1. Admin APIs answer. Checked first: a half-seeded deployment is the worst
 #    outcome, and both of these fail instantly when they fail at all.
 json "$KRATOS_ADMIN_URL/admin/identities?per_page=1" 'Array.isArray(body) ? "ok" : "unexpected body"' >/dev/null \
-  || fail "KRATOS_ADMIN_URL does not serve the kratos admin API: $(json "$KRATOS_ADMIN_URL/admin/identities?per_page=1" '"see above"' || true)"
+  || fail "KRATOS_ADMIN_URL does not serve the kratos admin API:
+      GET $KRATOS_ADMIN_URL/admin/identities -> $(json "$KRATOS_ADMIN_URL/admin/identities?per_page=1" '"unexpected body"' || true)"
 echo "  ✓ kratos admin  $KRATOS_ADMIN_URL"
 
 json "$HYDRA_ADMIN_URL/admin/clients?page_size=1" 'Array.isArray(body) ? "ok" : "unexpected body"' >/dev/null \
-  || fail "HYDRA_ADMIN_URL does not serve the hydra admin API"
+  || fail "HYDRA_ADMIN_URL does not serve the hydra admin API:
+      GET $HYDRA_ADMIN_URL/admin/clients -> $(json "$HYDRA_ADMIN_URL/admin/clients?page_size=1" '"unexpected body"' || true)"
 echo "  ✓ hydra admin   $HYDRA_ADMIN_URL"
 
 # 2. THE load-bearing check: kratos's own native API, not the ingress/BFF.
+#
+# Two failures, opposite meanings, and collapsing them cost a round trip on
+# teal: a 404/HTML answer means this URL is NOT kratos (an ingress fronting the
+# login-ui BFF, whose route table has no native endpoints), while a 5xx means it
+# IS kratos and kratos cannot create a login flow — a deployment fault the
+# seeder can neither route around nor fix.
 if ! flow_type="$(json "$KRATOS_PUBLIC_URL/self-service/login/api" 'body.type')" || [[ "$flow_type" != "api" ]]; then
-  fail "KRATOS_PUBLIC_URL=$KRATOS_PUBLIC_URL does not serve kratos's native API
+  case "$flow_type" in
+    "HTTP 5"*)
+      fail "kratos IS at $KRATOS_PUBLIC_URL and cannot create a login flow:
+      GET /self-service/login/api -> $flow_type
+    This is kratos's own port answering, so the URL is right and the deployment
+    is broken: creating a login flow is the most basic thing kratos does, and
+    every browser login on this deployment is failing the same way. Read its
+    reason from the workload, not from here:
+      kubectl -n <ns> logs kratos-0 -c kratos --tail=50
+    A schema/workload skew reports as a column error (see the identity-write
+    probe below); a config fault reports at flow persistence or validation." ;;
+    *)
+      fail "KRATOS_PUBLIC_URL=$KRATOS_PUBLIC_URL does not serve kratos's native API
       GET /self-service/login/api -> ${flow_type:-unreachable}
     An ingress that fronts the login-ui BFF answers exactly this (bare 404). TOTP
     enrolment needs the native flow, so seeding through it would write
     totpSecret: null. Point this at kratos itself — port-forward :4433, or the
-    in-cluster service address."
+    in-cluster service address." ;;
+  esac
 fi
 echo "  ✓ kratos public $KRATOS_PUBLIC_URL (native API confirmed)"
 
