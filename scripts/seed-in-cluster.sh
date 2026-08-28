@@ -43,11 +43,11 @@
 #                      pod is NOT covered by the node's transparent proxy.
 #   --out <path>       where to write the manifest on THIS host
 #                      (./manifest.<env>.json, mode 0600)
-#   --install-toolchain  node mode only: permit `snap install node` (or apt) on
-#                      THIS host when node >= 20 is absent. Off by default.
-#   --check            prerequisite probes only. Mutates no identity, no client
-#                      and no host package; pod mode still creates and deletes
-#                      its own pod, which is the only object it touches.
+#   --check            prerequisite probes only: creates and deletes exactly one
+#                      throwaway @test.example identity (the only proof that the
+#                      deployment can store one) and touches nothing else — no
+#                      seeded user, no OAuth client, no host package. Pod mode
+#                      also creates and deletes its own pod.
 #   --fresh|--incremental|--purge   seeder mode (--fresh)
 #
 # The manifest it produces is credential material: seeded passwords and TOTP
@@ -77,7 +77,7 @@ while [[ $# -gt 0 ]]; do
     --out) OUT="${2:?--out needs a value}"; shift ;;
     --install-toolchain) INSTALL_TOOLCHAIN=1 ;;
     --check | --fresh | --incremental | --purge) SEED_ARGS+=("$1") ;;
-    -h | --help) sed -n '5,54p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h | --help) sed -n '5,56p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift

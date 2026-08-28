@@ -20,6 +20,10 @@
 #   * MANIFEST must be set: the manifest carries passwords and TOTP secrets, so
 #     for a real deployment it is credential material and does not belong at the
 #     in-repo default path.
+#   * the deployment must be ABLE to store an identity. A served schema id is
+#     not that proof: teal answered /schemas correctly and then 500'd every
+#     create out of kratos's own INSERT (a workload/database version skew), one
+#     step after --fresh had begun deleting. The probe below writes one.
 #
 # Usage:
 #   KRATOS_ADMIN_URL=…  KRATOS_PUBLIC_URL=…  HYDRA_ADMIN_URL=… \
@@ -27,7 +31,9 @@
 #   MANIFEST=/secure/orange-manifest.json \
 #     scripts/seed-remote.sh [--check] [--purge|--incremental] [--row <name>]
 #
-#   --check   run every prerequisite probe and stop. Zero mutation.
+#   --check   run every prerequisite probe and stop. Creates and deletes exactly
+#             one throwaway @test.example identity — the only way to prove the
+#             deployment accepts one — and mutates nothing else.
 #   --row     matrix row whose capabilities.json declares the deployment
 #             (default: deployed-core-local-mfa)
 #
@@ -120,6 +126,61 @@ case ",$schemas," in
 esac
 export KRATOS_IDENTITY_SCHEMA_ID="$schema"
 echo "  ✓ identity schema $schema (served: $schemas)"
+
+# 4. The deployment can actually ACCEPT an identity of that schema, credentials
+#    and all. Reading /schemas proves the id exists; it does not prove the write
+#    path works, and on teal it did not: every create returned a 500 from
+#    kratos's own INSERT. Without this probe that surfaces one step too late —
+#    after --fresh has already deleted the previous seed. One throwaway identity
+#    in the reserved @test.example namespace, created and deleted here.
+write_probe="$(node -e '
+  const [admin, schema] = process.argv.slice(1);
+  const email = `preflight-${Date.now().toString(36)}@test.example`;
+  // The payload the seeder itself uses (helpers/kratos.ts createIdentity): a
+  // traits-only probe would miss exactly the credential-identifier write that
+  // fails on a schema/workload version skew.
+  const body = {
+    schema_id: schema,
+    credentials: { password: { config: { password: "Preflight-Probe-9!" } } },
+    traits: { email, name: "Preflight", surname: "Probe" },
+  };
+  (async () => {
+    const res = await fetch(`${admin}/admin/identities`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+      signal: AbortSignal.timeout(20000),
+    });
+    const text = await res.text();
+    if (!res.ok) {
+      console.log(`HTTP ${res.status} ${text.replace(/\s+/g, " ").slice(0, 500)}`);
+      process.exit(3);
+    }
+    const id = JSON.parse(text).id;
+    const del = await fetch(`${admin}/admin/identities/${id}`, { method: "DELETE", signal: AbortSignal.timeout(20000) });
+    console.log(del.ok || del.status === 404 ? "ok" : `LEFTOVER ${id} (DELETE returned ${del.status})`);
+  })().catch((e) => { console.log(e.cause?.message ?? e.message); process.exit(3); });
+' "$KRATOS_ADMIN_URL" "$schema")" || {
+  hint=""
+  case "$write_probe" in
+    *identity_credential_identifiers*)
+      hint="
+    That NOT NULL violation is a VERSION SKEW in the deployment, not a payload
+    problem: identity_credential_identifiers.identity_id is added and made NOT
+    NULL by ory/kratos@6bf18bf87e02a25bd1f87bb40af71f8439a6c0c5 (present in
+    v26.2.0, absent in v25.4.0), and kratos only populates it from that version
+    on — v25.4.0's CredentialIdentifier struct has no such field. So this
+    database was migrated by kratos >= v26 while the kratos WRITING identities
+    is <= v25. Fix the deployment (align the workload with the migrated schema);
+    no seeder payload can supply a column the writer never mentions." ;;
+  esac
+  fail "this deployment refuses to create an identity, so the seeder would fail on every user:
+      POST $KRATOS_ADMIN_URL/admin/identities (schema $schema) -> $write_probe$hint"
+}
+case "$write_probe" in
+  LEFTOVER*) echo "  ⚠ write probe    $write_probe — delete it by hand" >&2 ;;
+  *) echo "  ✓ write probe   one identity created and deleted (schema $schema)" ;;
+esac
 
 echo "  ✓ row $ROW -> $CAPS"
 echo "  ✓ manifest       $MANIFEST"
