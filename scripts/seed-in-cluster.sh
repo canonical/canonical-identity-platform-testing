@@ -11,13 +11,16 @@
 # the seeding half of the `urls` backend (docs/testing-spec.md §9) has to run
 # from a node or a pod. Two modes, same contract:
 #
-#   --mode node  (default)  run here, on a cluster node: install node+npm, fetch
-#                           the repo, `kubectl port-forward` to the kratos and
-#                           hydra pods, seed over 127.0.0.1. Touches the node.
-#   --mode pod              run in a throwaway pod in the deployment's namespace
+#   --mode pod  (default)   run in a throwaway pod in the deployment's namespace
 #                           (node:22 image), talking to the POD IPs directly.
-#                           Touches nothing on the node but the pod; needs the
-#                           node to be able to pull node:22.
+#                           Leaves NOTHING on the node — the pod is deleted on
+#                           exit; needs the node to be able to pull node:22.
+#   --mode node             run here, on a cluster node: fetch the repo,
+#                           `kubectl port-forward` to the kratos and hydra pods,
+#                           seed over 127.0.0.1. Needs node >= 20 already on the
+#                           host; installing it is opt-in (--install-toolchain),
+#                           because a snap on a production node outlives the run
+#                           and `--check` must not leave a trace either.
 #
 # Pod IPs, not the `kratos` ClusterIP service: juju's generated service exposes
 # only the ports the charm declares, and the admin port is not among them on
@@ -32,7 +35,7 @@
 #   --namespace <ns>   override the namespace
 #   --row <row>        matrix row whose capabilities.json declares the target
 #                      (deployed-core-local-mfa — the charmed-core shape)
-#   --mode node|pod    where the seeder runs (node)
+#   --mode pod|node    where the seeder runs (pod)
 #   --ref <git-ref>    ref to fetch when cloning (feat/orange-urls-lane)
 #   --bundle <tgz>     offline: a tarball of this repo (`tar czf b.tgz
 #                      --exclude=.git -C <repo> .`) instead of a git clone. Ship
@@ -40,7 +43,11 @@
 #                      reach a registry.
 #   --out <path>       where to write the manifest on THIS host
 #                      (./manifest.<env>.json, mode 0600)
-#   --check            prerequisite probes only, zero mutation
+#   --install-toolchain  node mode only: permit `snap install node` (or apt) on
+#                      THIS host when node >= 20 is absent. Off by default.
+#   --check            prerequisite probes only. Mutates no identity, no client
+#                      and no host package; pod mode still creates and deletes
+#                      its own pod, which is the only object it touches.
 #   --fresh|--incremental|--purge   seeder mode (--fresh)
 #
 # The manifest it produces is credential material: seeded passwords and TOTP
@@ -52,13 +59,14 @@ set -euo pipefail
 ENVIRONMENT="teal"
 NAMESPACE=""
 ROW="deployed-core-local-mfa"
-MODE="node"
+MODE="pod"
 REF="feat/orange-urls-lane"
 REPO_URL="https://github.com/canonical/canonical-identity-platform-testing.git"
 BUNDLE=""
 OUT=""
 SEED_ARGS=()
 POD_NAME="iam-seeder"
+INSTALL_TOOLCHAIN=0
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -70,8 +78,9 @@ while [[ $# -gt 0 ]]; do
     --repo) REPO_URL="${2:?--repo needs a value}"; shift ;;
     --bundle) BUNDLE="${2:?--bundle needs a value}"; shift ;;
     --out) OUT="${2:?--out needs a value}"; shift ;;
+    --install-toolchain) INSTALL_TOOLCHAIN=1 ;;
     --check | --fresh | --incremental | --purge) SEED_ARGS+=("$1") ;;
-    -h | --help) sed -n '5,50p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h | --help) sed -n '5,55p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -179,24 +188,40 @@ BOOTSTRAP
 run_on_node() {
   local sudo=""; [[ "$(id -u)" == 0 ]] || sudo="sudo"
 
+  # Nothing here is installed without --install-toolchain. A snap on a
+  # production k8s node outlives the run, so it is a decision the operator
+  # takes explicitly — and it is what keeps `--check` traceless on the host as
+  # well as on the deployment.
   echo "── toolchain"
-  if ! command -v git >/dev/null 2>&1; then
-    $sudo apt-get install -y -q git || fail "git is absent and apt-get install git failed"
-  fi
-  echo "  ✓ git            $(git --version)"
+  local missing=()
+  command -v git >/dev/null 2>&1 || missing+=("git")
 
   local major=0
   if command -v node >/dev/null 2>&1; then
     major="$(node -p 'process.versions.node.split(".")[0]' 2>/dev/null || echo 0)"
   fi
-  if [[ "$major" -lt 20 ]] || ! command -v npm >/dev/null 2>&1; then
-    # snap first: it is the only channel on these nodes that carries a current
-    # node, and snapd already has the egress proxy configured.
-    $sudo snap install node --classic --channel=22 \
-      || $sudo apt-get install -y -q nodejs npm \
-      || fail "could not install node >= 20 (tried: snap install node --classic --channel=22, apt-get install nodejs npm)"
+  { [[ "$major" -ge 20 ]] && command -v npm >/dev/null 2>&1; } || missing+=("node>=20+npm")
+
+  if [[ ${#missing[@]} -gt 0 ]]; then
+    [[ "$INSTALL_TOOLCHAIN" == 1 ]] || fail "this host is missing ${missing[*]} and node mode needs it locally.
+    Pick one, in this order of preference:
+      --mode pod                 seed from a throwaway pod instead; installs nothing here
+      --install-toolchain        permit snap/apt to install it on THIS node (persists)
+    (node $( [[ $major == 0 ]] && echo absent || echo "v$major" ) — the seeder and every probe run on node's fetch)"
+
+    if [[ " ${missing[*]} " == *" git "* ]]; then
+      $sudo apt-get install -y -q git || fail "apt-get install git failed"
+    fi
+    if [[ " ${missing[*]} " == *" node>=20+npm "* ]]; then
+      # snap first: it is the only channel on these nodes that carries a current
+      # node, and snapd already has the egress proxy configured.
+      $sudo snap install node --classic --channel=22 \
+        || $sudo apt-get install -y -q nodejs npm \
+        || fail "could not install node >= 20 (tried: snap install node --classic --channel=22, apt-get install nodejs npm)"
+    fi
     hash -r
   fi
+  echo "  ✓ git            $(git --version)"
   echo "  ✓ node           $(node -v) / npm $(npm -v)"
 
   WORKDIR="$(mktemp -d "${TMPDIR:-/tmp}/iam-seed.XXXXXX")"

@@ -287,7 +287,7 @@ Run it on a node of the deployment's k8s cluster (anything with kubectl access
 to the namespace):
 
 ```bash
-# Probes only, zero mutation — run this first.
+# Probes only. No identity, no client, no host package touched.
 scripts/seed-in-cluster.sh --env teal --check
 
 # Seed. Writes ./manifest.teal.json, 0600.
@@ -302,12 +302,17 @@ scripts/seed-in-cluster.sh --env teal --purge
 to `iam.<colour>.canonical.com`. `--row` defaults to `deployed-core-local-mfa`,
 the charmed-core shape.
 
-Two modes, because the two hosts fail differently:
+Two modes, and the default is the one that leaves nothing behind:
 
 |Mode|What it needs|What it touches|
 |---|---|---|
-|`--mode node` (default)|node ≥ 20 installable via snap/apt, `kubectl port-forward`|installs node+npm on the node|
-|`--mode pod`|the cluster can pull `node:22-bookworm`|one throwaway pod in the namespace, deleted on exit|
+|`--mode pod` (default)|the cluster can pull `node:22-bookworm`|one throwaway pod in the namespace, deleted on exit — nothing on the node|
+|`--mode node`|node ≥ 20 **already on the host**, `kubectl port-forward`|nothing, unless you pass `--install-toolchain`|
+
+A snap on a production k8s node outlives the run, so node mode never installs
+one implicitly: without `--install-toolchain` it aborts naming both remedies.
+That is also what makes `--check` traceless on the *host* and not merely on the
+deployment — pod mode's own pod is the single object either mode creates.
 
 Pod mode talks to the kratos and hydra **pod IPs**, not the `kratos` ClusterIP
 service: juju's generated service publishes only the ports the charm declares
