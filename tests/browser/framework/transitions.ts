@@ -467,11 +467,19 @@ export const TRANSITION_TABLE: TransitionTable = {
   },
 
   // Error self-transition (R-2 pattern): a user code hydra never issued.
-  // login-ui's BFF answers its NOT_FOUND_ERROR_DESC ("invalid, expired or
-  // already used") but the page collapses it to a generic "Something went
-  // wrong, please try again" (observed 2026-08-31, login-ui:stable — the
-  // S-8 message-collapse class; registered in config-model upstreamFindings).
-  // The runner's expectError assertion needs only a visible, non-empty error.
+  // Observed 2026-08-31 on login-ui:stable: PUT /api/device answers a raw
+  // HTTP 500 "Failed to accept user code" (the BFF's precise
+  // NOT_FOUND_ERROR_DESC never reaches the wire) and the page renders a
+  // generic "Something went wrong, please try again" — the S-8
+  // status/message-collapse class, registered in config-model
+  // upstreamFindings. The runner's expectError assertion needs only a
+  // visible, non-empty error.
+  //
+  // Determinism, measured same day: NO rate limiting or lockout exists on
+  // user-code attempts (6 wrong codes on one device_challenge and 4 across
+  // fresh flows all answer identically in ~12ms), so repeated runs cannot
+  // race a limiter. RFC 8628 §5.2 recommends one — if a limiter ever lands
+  // upstream, re-measure this transition before trusting the gate.
   "device-code → device-code": {
     description: "Submit a user code hydra never issued (error — stays on the device page)",
     action: async (page) => {
