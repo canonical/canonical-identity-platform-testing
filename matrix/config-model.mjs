@@ -286,6 +286,13 @@ export const model = {
         mail_api: false,
         services: ["kratos", "hydra", "login-ui"],
         oidc_providers: ["google_canonical"],
+        // MEASURED 2026-08-27 and re-confirmed 2026-08-31 (green run): this
+        // target renders the backup-code regeneration prompt after EVERY
+        // backup-code sign-in (fresh 12 codes, burn 1 → prompt), unlike the
+        // v0.28.0 workload the compose/juju stacks run (prompt only at ≤3
+        // unused). Gates the prompt-terminal scenario variant
+        // (requires.backupCodePromptOnUse).
+        backup_code_prompt_on_use: true,
       },
       // Values this row DECLARES but the target could not initially be asked
       // about through a public ingress. Two have since become MEASURED:

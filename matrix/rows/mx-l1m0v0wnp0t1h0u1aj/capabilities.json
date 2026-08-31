@@ -29,5 +29,6 @@
   "oidc_providers": [],
   "verification_enabled": false,
   "access_token_format": "jwt",
-  "mail_api": true
+  "mail_api": true,
+  "backup_code_prompt_on_use": false
 }

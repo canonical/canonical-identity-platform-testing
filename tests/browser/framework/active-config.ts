@@ -36,6 +36,11 @@ export interface ActiveConfig {
    * capabilities file verbatim — a mail-less target declares false.
    */
   mail_api?: boolean;
+  /** login-ui version fork: true = the regeneration prompt renders after
+   *  EVERY backup-code sign-in (iam.orange, ≥ v0.27); false/absent = only
+   *  when ≤3 unused codes remain (the v0.28.0 workload). Gates the
+   *  prompt-terminal vs callback-terminal scenario variants. */
+  backup_code_prompt_on_use?: boolean;
   /** Hydra access-token shape: "jwt" | "opaque" (capabilities.json key; absent = unknown). */
   access_token_format?: string;
 }

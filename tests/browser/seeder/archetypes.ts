@@ -79,6 +79,34 @@ export const USER_ARCHETYPES: UserArchetype[] = [
     totpConfigured: true,
     lowBackupCodes: true,
   },
+  {
+    // For settings-backup-codes-deactivate: seeded WITHOUT lookup_secret. The
+    // scenario creates its own codes from the settings page and deactivates
+    // them, so a completed walk leaves the identity exactly as seeded. One
+    // archetype per scenario: deactivation consumes the codes another
+    // scenario's precondition would need.
+    ref: "backup-code-user-3",
+    credentials: ["password", "totp"],
+    totpConfigured: true,
+  },
+  {
+    // For backup-code-reuse-rejected: also seeded without lookup_secret; the
+    // scenario proves the codes the settings page hands out are single-use,
+    // and rotating/burning them must not consume any other scenario's codes.
+    ref: "backup-code-user-4",
+    credentials: ["password", "totp"],
+    totpConfigured: true,
+  },
+  {
+    // The post-unlink product state: backup codes WITHOUT a TOTP credential
+    // (login-ui's "Unlink TOTP Authenticator App" removes totp and keeps
+    // lookup_secret). The seeder enrols TOTP for the codes, then unlinks it
+    // via the admin API. settings-totp-unlink re-enrols and unlinks again, so
+    // a completed walk restores this exact shape.
+    ref: "totp-unlink-user",
+    credentials: ["password", "lookup_secret"],
+    totpConfigured: false,
+  },
 
   // ── Multi-tenancy users ────────────────────────────────────────────────
   {

@@ -11,16 +11,18 @@
  */
 
 import { expect, Page } from "@playwright/test";
-import { HYDRA_PUBLIC_URL } from "../helpers/config";
+import { HYDRA_PUBLIC_URL, KRATOS_ADMIN_URL } from "../helpers/config";
 import { getRpClient } from "../helpers/oidc";
 import type { OIDCTokens } from "../helpers/oidc";
-import type { Manifest } from "../seeder/manifest-schema";
+import type { Manifest, ManifestUser } from "../seeder/manifest-schema";
 import type { PostCheckName } from "./scenario-types";
 
 export interface PostCheckArgs {
   page: Page;
   tokens: OIDCTokens;
   manifest: Manifest;
+  /** The scenario's seeded user — identity-scoped checks read it. */
+  user: ManifestUser;
 }
 
 /**
@@ -95,8 +97,30 @@ async function codeReplayRevokesFamily({ page, tokens, manifest }: PostCheckArgs
   expect(refreshBody.error, "revoked refresh token must answer invalid_grant").toBe("invalid_grant");
 }
 
+/**
+ * Deactivating backup codes must remove the lookup_secret credential, not
+ * merely hide the codes. The browser walk cannot prove this: with no
+ * lookup_secret the login UI stops OFFERING the backup-code method, so
+ * "deactivated" and "button never clicked" render the same reachable pages —
+ * the only honest witness is the credential's absence on the identity
+ * (observed 2026-08-31: the UI deactivation deletes the credential record
+ * outright). Admin API ⇒ internal lane only.
+ */
+async function backupCodesDeactivated({ user }: PostCheckArgs): Promise<void> {
+  const res = await fetch(
+    `${KRATOS_ADMIN_URL}/admin/identities/${user.identityId}?include_credential=lookup_secret`,
+  );
+  expect(res.ok, `admin read of identity ${user.identityId} must succeed (${res.status})`).toBe(true);
+  const identity = (await res.json()) as { credentials?: Record<string, unknown> };
+  expect(
+    identity.credentials?.lookup_secret,
+    "deactivation must delete the lookup_secret credential from the identity",
+  ).toBeUndefined();
+}
+
 const POST_CHECKS: Record<PostCheckName, (args: PostCheckArgs) => Promise<void>> = {
   "code-replay-revokes-family": codeReplayRevokesFamily,
+  "backup-codes-deactivated": backupCodesDeactivated,
 };
 
 export async function runPostCheck(name: PostCheckName, args: PostCheckArgs): Promise<void> {

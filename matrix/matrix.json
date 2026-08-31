@@ -175,7 +175,8 @@
         ],
         "oidc_providers": [
           "google_canonical"
-        ]
+        ],
+        "backup_code_prompt_on_use": true
       },
       "newPairs": 2
     },

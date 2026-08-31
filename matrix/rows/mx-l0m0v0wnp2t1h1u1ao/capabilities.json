@@ -34,6 +34,7 @@
   "verification_enabled": false,
   "access_token_format": "opaque",
   "mail_api": true,
+  "backup_code_prompt_on_use": false,
   "juju": {
     "oidc_providers": [
       "dex",

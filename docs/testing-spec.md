@@ -955,9 +955,26 @@ references** — other documents cite "§10 item N", so renumber nothing.
       = 90 // seconds` is passed unscaled to `setTimeout`. A 1000x unit
       mismatch, confirmed at upstream HEAD.
 
-    *Still staged, in rough value order:* the self-serve settings surface
-    (password change, TOTP unlink, passkey delete, backup-code deactivate,
-    connected accounts — committed as item 15); S-2 mode 1 (used consent challenge with a live session, the half
+    *Landed 2026-08-31, settings surface wave 2:* TOTP unlink
+    (`settings-totp-unlink` — the `/ui/setup_secure` linked/enrolment DOM
+    split, the lookup_secret-only login shape, and forced re-enrolment under
+    enforced MFA), backup-code deactivate
+    (`settings-backup-codes-deactivate` — the server-side witness is the
+    `backup-codes-deactivated` post check, because deactivation removes the
+    method from the login UI entirely), and backup-code single-use
+    (`backup-code-reuse-rejected`). The same change caught and fixed a
+    locator drift: login-ui v0.28.0 renders settings-created backup codes as
+    CANDIDATES behind an "I saved the backup codes" confirm, so the old
+    harvest action captured codes Kratos never stored. It also surfaced a
+    version fork, modeled as the `backup_code_prompt_on_use` capability
+    (matrix/lib.mjs): iam.orange (login-ui ≥ v0.27) renders the regeneration
+    prompt after EVERY backup-code sign-in, the v0.28.0 workload only at ≤3
+    unused codes — `settings-backup-codes-regenerate` is the prompt-terminal
+    variant, `backup-code-reuse-rejected`'s burn phase the callback-terminal
+    one.
+
+    *Still staged, in rough value order:* passkey delete and connected
+    accounts (committed as item 15); S-2 mode 1 (used consent challenge with a live session, the half
     carrying the RP-silence claim); resend-invalidation of a prior code;
     kratos-vs-hydra session split-brain (admin session revoke → re-authorize
     must re-challenge); short-lifespan expiry lanes (S-1); and
@@ -981,26 +998,28 @@ references** — other documents cite "§10 item N", so renumber nothing.
     - `expired-token-submit`: rejected on paths without flow expiry handling or missing `short_lifespans` capability.
 
     *Prerequisite for expiry coverage:* A short-lifespans deployment row. Decision rule: if kratos/hydra operators expose lifespan config, it becomes a 10th model dimension (cited); otherwise a seed-style row with a documented divergence (the `webauthn: null` precedent), flow lifespans ≤5s, and a new `short_lifespans` capability key threaded through `capabilities()` / `satisfies()` / `expected-set.ts` / `verify.mjs` when implemented. The expiry scenario pins the platform's actual terminal (§11 — real behaviour, not an aspiration; PD-12).
-12. **Dead machinery in the transition table.** Measured: **63 declared
-    transitions, 50 traversed, 13 unused, and 4 states never visited by any
-    path** across 46 tier-A scenarios.
+12. **Dead machinery in the transition table.** Originally measured: **63
+    declared transitions, 50 traversed, 13 unused, and 4 states never visited
+    by any path** across 46 tier-A scenarios. Two entries resolved 2026-08-31:
 
     | Unused edges | Verdict |
     |---|---|
     | 10 Google alternates (`provider:google:*`, `provider:dex:consent → oidc-callback`) | Defensible — alternates for a nondeterministic third-party UI |
-    | `consent → oidc-callback` | **Not defensible** — see below |
-    | `login-password → login-backup-code-verify` | Coverable today |
+    | `consent → oidc-callback` | **Deleted 2026-08-31** — see below |
+    | `login-password → login-backup-code-verify` | **Covered 2026-08-31** — `settings-totp-unlink` phases 1 and 4 traverse it (it is the real login shape of a lookup_secret-only identity, the post-unlink product state) |
     | `login-password → login-webauthn-verify` | Coverable since login-ui#884 — this is PD-4's falsifier (§7) |
     | `tenant-selection → login-totp-verify` | Coverable now portal runs MT — re-measure |
 
-    The 4 unvisited states are `consent`, `provider:dex:consent`,
-    `provider:google:consent` and `provider:google:interstitial`. The Google
-    ones are defensible for the same reason as their edges; `consent` and
-    `provider:dex:consent` are not — a consent screen cannot appear in this
-    deployment at all, because login-ui auto-accepts every request with
-    `remember=true` and grants all requested scopes, so nothing would catch a
-    consent-screen regression or a scope escalation. Decide per entry: cover it,
-    or delete it.
+    The unvisited states were `consent`, `provider:dex:consent`,
+    `provider:google:consent` and `provider:google:interstitial`. The provider
+    ones are defensible third-party IdP surfaces and stay. `consent`
+    (login-ui's /ui/consent) could not appear in this deployment at all —
+    login-ui auto-accepts every request with `remember=true` and grants all
+    requested scopes — and the decision (2026-08-31) is that consent will not
+    be supported: the state, its detection and its `consent → oidc-callback`
+    edge are deleted, with tombstone comments at each site. The residual risk
+    that decision accepts is named here once: nothing in this suite would
+    catch a consent-screen regression or a scope escalation.
 
     Re-derive by walking `TRANSITION_TABLE` (`framework/transitions.ts`) against
     every suite's `expectedPath`, prepending the synthetic `start` state the
@@ -1019,6 +1038,12 @@ references** — other documents cite "§10 item N", so renumber nothing.
     now logs a `manifest shape <hash>` per run and fails when the two disagree.
     Worth one focused look, because anything that makes run 1 and run 2 disagree
     undermines the gate's "identical executed set" contract.
+    One more data point (2026-08-31, canonical-internal): `oidc-dex-login`
+    failed the gate's FIRST run and passed the second, with the S-10 detector
+    reporting the SAME manifest shape hash for both runs — so this instance is
+    not seeder or manifest nondeterminism. Three immediate isolated re-runs
+    passed, and a full gate re-run was green twice; the split correlates with
+    the first suite pass after `make up`, not with any code path.
 14. **Preflight asserts identifier-first (staged).** The layer-2 preflight currently adapts to two-step vs one-step flow shapes; it must instead fail the login style check when a deployment presents the deprecated one-step shape, in every backend including `urls` (a deprecated shape on a real deployment is a finding, not noise — matching the TLS-verification precedent in §9). Note that `capabilities()`' hard-coded `identifier_first_enabled: true` becomes an invariant with this citation, not a free variable.
 15. **Account-linking coverage (committed, staged).**
     - **The gap:** `account_linking_enabled` is true on 8 rows with zero scenarios.

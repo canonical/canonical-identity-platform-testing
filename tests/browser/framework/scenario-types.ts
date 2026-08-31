@@ -55,6 +55,9 @@ export interface ScenarioRequires {
   secondFactorMethods?: string[];
   /** Mail (mailslurper) API must be reachable — the scenario reads email (mail_api capability). */
   mailApi?: boolean;
+  /** Backup-code regeneration prompt renders after every backup-code sign-in
+   *  (backup_code_prompt_on_use capability — a login-ui version fork). */
+  backupCodePromptOnUse?: boolean;
 
   /** Support service-presence keys of the form "service:<name>". */
   [key: `service:${string}`]: boolean | undefined;
@@ -190,11 +193,10 @@ export type Intervention = StateIntervention | TransitionIntervention;
 
 /**
  * Named API-side checks that run after the walk, against the tokens the
- * relying party received. Implementations live in
- * `framework/intervention-checks.ts` — scenarios name a check, they never
- * implement one (same contract as claim assertions).
+ * relying party received and the scenario's manifest user. Scenarios name a
+ * check; the implementation lives in framework/intervention-checks.ts.
  */
-export type PostCheckName = "code-replay-revokes-family";
+export type PostCheckName = "code-replay-revokes-family" | "backup-codes-deactivated";
 
 // ---------------------------------------------------------------------------
 // Phases

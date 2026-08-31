@@ -687,15 +687,49 @@ export const TRANSITION_TABLE: TransitionTable = {
       await verifyBackupCode(page, code);
     },
   },
-
-  // ── Consent screen ────────────────────────────────────────────────────
-
-  "consent → oidc-callback": {
-    description: "Accept consent (auto-redirects with skip_consent clients)",
-    action: async (_page) => {
-      // With skip_consent clients, consent is auto-accepted — no action needed
+  // The identity's ONLY second factor is lookup_secret (the post-unlink
+  // state): enforced MFA accepts the code and then walks straight into TOTP
+  // re-enrolment instead of completing to the callback (observed 2026-08-31
+  // on login-ui:stable). "setup-secure → setup-complete" then captures the
+  // fresh secret into ctx.totpSecret for later phases.
+  "login-backup-code-verify → setup-secure": {
+    description: "Submit backup code (no TOTP on the identity — enforced MFA walks into re-enrolment)",
+    action: async (page, user, ctx) => {
+      const code = ctx.backupCode ?? user.backupCode;
+      if (!code) {
+        throw new Error(
+          "Backup code not available. Either the user must have backupCode in the manifest, " +
+          "or a previous phase must have set ctx.backupCode."
+        );
+      }
+      await verifyBackupCode(page, code);
     },
   },
+
+  // Error self-transition (R-2 pattern): submit a code an earlier phase
+  // already spent. Kratos rejects it visibly ("This backup code was already
+  // used") and the flow stays put — the runner's expectError assertion reads
+  // the message.
+  "login-backup-code-verify → login-backup-code-verify": {
+    description: "Submit an already-used backup code (error — stays on the backup code page)",
+    action: async (page, user, ctx) => {
+      const code = ctx.backupCode ?? user.backupCode;
+      if (!code) {
+        throw new Error(
+          "Backup code not available. Either the user must have backupCode in the manifest, " +
+          "or a previous phase must have set ctx.backupCode."
+        );
+      }
+      await verifyBackupCode(page, code);
+    },
+  },
+
+  // No consent-screen transition exists on purpose: login-ui auto-accepts
+  // every consent request (remember=true, all scopes), so /ui/consent is
+  // unreachable in this deployment and coverage was decided against
+  // (docs/testing-spec.md §10 item 12). The provider consent states
+  // (provider:dex:consent, provider:google:consent) are third-party IdP
+  // surfaces and are unaffected.
 
   // ── Recovery flow transitions ──────────────────────────────────────────
   //
@@ -861,47 +895,120 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // Also a self-transition: creating codes re-renders /ui/setup_backup_codes.
-  // The page has two entry shapes — "Create backup codes" when none exist,
-  // "View backup codes"/"Deactivate backup codes" when some do — and creation
-  // itself sometimes lands back on the collapsed shape, so the action drives
-  // whichever is present and finishes by HARVESTING one fresh code into
-  // ctx.backupCode. A later freshSession phase then signs in with it, which is
-  // the only assertion that the codes this page hands out are real.
+  // Also a self-transition: /ui/setup_backup_codes re-renders in place for
+  // BOTH of its operations, so one action serves two walks, branched on
+  // ctx.backupCode (the "reset-password → reset-password" change/restore
+  // precedent):
+  //
+  //  - First traversal (ctx.backupCode unset): create (or regenerate) codes
+  //    and HARVEST one into ctx.backupCode. The page has two entry shapes —
+  //    "Create backup codes" when none exist, "View backup codes"/
+  //    "Deactivate backup codes" when some do. Newer login-ui (observed
+  //    2026-08-31 on :stable) renders the fresh codes as CANDIDATES: nothing
+  //    is stored until the "I saved the backup codes" checkbox enables the
+  //    commit button — a code harvested without that click authenticates
+  //    nowhere ("Invalid backup code"). Older login-ui (orange's
+  //    v0.24–v0.25) commits on create and shows no checkbox. The action
+  //    drives whichever shape renders. A later freshSession phase signing in
+  //    with the harvested code is the only assertion that the codes this
+  //    page hands out are real.
+  //
+  //  - Second traversal (ctx.backupCode set): DEACTIVATE the codes through
+  //    the confirmation dialog and require the page to collapse to its
+  //    no-codes shape. Server-side credential removal is the
+  //    "backup-codes-deactivated" post check's contract, not this action's —
+  //    after deactivation the login UI stops OFFERING the backup-code
+  //    method, so no browser walk can reach a rejection.
   "setup-backup-codes → setup-backup-codes": {
-    description: "Create (or regenerate) backup codes and capture one for a later login",
+    description: "Create backup codes and capture one (first pass) or deactivate them (second pass)",
     action: async (page, _user, ctx) => {
       const viewBtn = page.getByRole("button", { name: "View backup codes" });
       const createBtn = page.getByRole("button", { name: /^Create( new)? backup codes$/ });
+      const deactivateBtn = page.getByRole("button", { name: "Deactivate backup codes" });
 
-      // Two entry shapes: collapsed ("Create backup codes" / "View backup
-      // codes"+"Deactivate") — wait for the page to settle on either before
-      // branching, isVisible() does not wait.
+      if (ctx.backupCode) {
+        // Deactivate pass. The dialog repeats the trigger button's accessible
+        // name, so scope the confirm click to the dialog.
+        await deactivateBtn.click();
+        const dialog = page.getByRole("dialog", { name: "Deactivate backup codes" });
+        await expect(dialog).toBeVisible();
+        await dialog.getByRole("button", { name: "Deactivate backup codes" }).click();
+        await expect(page.getByRole("button", { name: "Create backup codes", exact: true })).toBeVisible();
+        await expect(deactivateBtn).not.toBeVisible();
+        return;
+      }
+
+      // Create pass. Wait for the page to settle on either entry shape before
+      // branching — isVisible() does not wait.
       await expect(createBtn.or(viewBtn).first()).toBeVisible();
       if (await viewBtn.isVisible()) {
         await viewBtn.click();
       }
       await createBtn.click();
 
-      // Post-create the page either lists the codes or collapses back to
-      // View/Deactivate — open the view if needed, then wait for the codes
-      // toolbar before harvesting.
-      await expect(page.getByRole("button", { name: "Deactivate backup codes" })).toBeVisible();
-      if (await viewBtn.isVisible().catch(() => false)) {
-        await viewBtn.click();
-      }
-      await expect(page.getByRole("button", { name: "Download" })).toBeVisible();
-
       // Unused codes render as 8-char lowercase alphanumerics; consumed ones
       // render as the literal "Used". Freshly created ⇒ all lines are codes.
-      const codes = (await page.locator("main").innerText())
-        .split("\n")
-        .map((l) => l.trim())
-        .filter((l) => /^[a-z0-9]{8}$/.test(l));
-      if (codes.length === 0) {
-        throw new Error("setup-backup-codes: created codes but none are visible to harvest");
+      const harvest = async () => {
+        const codes = (await page.locator("main").innerText())
+          .split("\n")
+          .map((l) => l.trim())
+          .filter((l) => /^[a-z0-9]{8}$/.test(l));
+        if (codes.length === 0) {
+          throw new Error("setup-backup-codes: created codes but none are visible to harvest");
+        }
+        ctx.backupCode = codes[0];
+      };
+
+      // Two post-create shapes: the candidate list behind the "I saved the
+      // backup codes" confirm (newer UI), or the already-committed toolbar
+      // with "Deactivate backup codes" (older UI).
+      const savedCheckbox = page.getByLabel("I saved the backup codes");
+      await expect(savedCheckbox.or(deactivateBtn).first()).toBeVisible();
+
+      if (await savedCheckbox.isVisible()) {
+        // Harvest from the candidate list, then COMMIT — the codes do not
+        // exist server-side until this click.
+        await expect(page.getByRole("button", { name: "Download" })).toBeVisible();
+        await harvest();
+        // Vanilla-framework checkbox: the styled label span intercepts
+        // pointer events over the input, so .check() on the input times out —
+        // click the label and assert the input state instead.
+        await page.getByText("I saved the backup codes").click();
+        await expect(savedCheckbox).toBeChecked();
+        const commitBtn = page.getByRole("button", { name: "Create backup codes", exact: true });
+        await expect(commitBtn).toBeEnabled();
+        await commitBtn.click();
+        await expect(deactivateBtn).toBeVisible();
+      } else {
+        // Committed on create; open the view if the page collapsed, then
+        // harvest from the stored list.
+        if (await viewBtn.isVisible().catch(() => false)) {
+          await viewBtn.click();
+        }
+        await expect(page.getByRole("button", { name: "Download" })).toBeVisible();
+        await harvest();
       }
-      ctx.backupCode = codes[0];
+    },
+  },
+
+  // /ui/setup_secure with TOTP already linked ("setup-secure-linked", a
+  // DOM-split of the same URL — see helpers/page-state.ts). Unlinking
+  // re-renders the enrolment shape in place; server-side it deletes the totp
+  // credential and KEEPS lookup_secret, which is why the next login lands on
+  // "login-password → login-backup-code-verify".
+  "manage-details → setup-secure-linked": {
+    description: 'Open "Authenticator" in the settings nav (TOTP linked — lands on the unlink shape)',
+    action: async (page) => {
+      await page.getByRole("link", { name: "Authenticator", exact: true }).click();
+      await expect(page.getByRole("button", { name: "Unlink TOTP Authenticator App" })).toBeVisible();
+    },
+  },
+
+  "setup-secure-linked → setup-secure": {
+    description: "Unlink the TOTP authenticator (page re-renders the enrolment shape in place)",
+    action: async (page) => {
+      await page.getByRole("button", { name: "Unlink TOTP Authenticator App" }).click();
+      await expect(page.getByRole("textbox", { name: "Verify code" })).toBeVisible();
     },
   },
 

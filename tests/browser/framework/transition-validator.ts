@@ -38,15 +38,21 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   "login-password": ["setup-secure", "login-totp-verify", "login-backup-code-verify", "login-webauthn-verify", "oidc-callback", "login-password", "reset-email"],
   "login-totp-verify": ["oidc-callback", "login-backup-code-verify", "login-totp-verify", "backup-code-regenerate", "reset-password"],
   "login-webauthn-verify": ["oidc-callback"],
-  "login-backup-code-verify": ["oidc-callback", "login-backup-code-verify", "backup-code-regenerate"],
+  // → setup-secure: the identity's only 2FA is lookup_secret (post-unlink)
+  // and MFA is enforced, so an accepted code walks into TOTP re-enrolment.
+  "login-backup-code-verify": ["oidc-callback", "login-backup-code-verify", "backup-code-regenerate", "setup-secure"],
 
   // ── Setup states ──────────────────────────────────────────────────────
   "setup-secure": ["setup-complete"],
+  // The linked shape of /ui/setup_secure (TOTP already enrolled): unlinking
+  // re-renders the enrolment shape in place.
+  "setup-secure-linked": ["setup-secure"],
   "setup-passkey": ["setup-complete", "login-webauthn-verify", "oidc-callback"],
   "setup-complete": ["oidc-callback"],
-  // Reached from the settings hub ("Backup codes" nav). The self-edge is
-  // creating/regenerating codes: the page re-renders in place (observed
-  // 2026-08-27 on iam.orange). First-login backup-code ENROLMENT still has no
+  // Reached from the settings hub ("Backup codes" nav). The self-edge is the
+  // page re-rendering in place for BOTH of its operations — create/regenerate
+  // (observed 2026-08-27 on iam.orange) and deactivate (observed 2026-08-31
+  // on login-ui:stable). First-login backup-code ENROLMENT still has no
   // driving action and remains covered by specs/use-backup-codes.spec.ts.
   "setup-backup-codes": ["setup-backup-codes"],
 
@@ -94,8 +100,8 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   "provider:google:consent": ["provider:google:interstitial", "oidc-callback"],
   "provider:google:interstitial": ["oidc-callback"],
 
-  // ── Consent ────────────────────────────────────────────────────────────
-  consent: ["oidc-callback"],
+  // No login-ui consent state: /ui/consent is unreachable (auto-accept) and
+  // coverage was decided against — docs/testing-spec.md §10 item 12.
 
   // ── Terminal states ───────────────────────────────────────────────────
   // A callback carrying `error=` (or a failed code exchange) is where an OAuth
@@ -109,7 +115,7 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   "error-page": [],
   "oidc-error-page": [],
   // The settings hub: recovery's terminal, and the settings scenarios' base.
-  "manage-details": ["reset-password", "setup-backup-codes", "setup-secure"],
+  "manage-details": ["reset-password", "setup-backup-codes", "setup-secure", "setup-secure-linked"],
 };
 
 // ---------------------------------------------------------------------------

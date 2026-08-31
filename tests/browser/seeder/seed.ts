@@ -27,7 +27,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 
 // Helpers (reuse the existing ones)
-import { createIdentity, createIdentityWithOIDC, deleteIdentity, findIdentityByEmail, deleteIdentitySessions, listIdentities, markVerified, createSessionToken, initTotpSettingsFlow, confirmTotpEnrollment, generateBackupCodes, burnBackupCodes } from "../helpers/kratos";
+import { createIdentity, createIdentityWithOIDC, deleteIdentity, deleteIdentityCredentialType, findIdentityByEmail, deleteIdentitySessions, listIdentities, markVerified, createSessionToken, initTotpSettingsFlow, confirmTotpEnrollment, generateBackupCodes, burnBackupCodes } from "../helpers/kratos";
 import { generateTotpCode } from "../helpers/totp";
 import { createTenant, deleteTenant, getServiceToken, listTenants, provisionUser } from "../helpers/tenants";
 import { addUsersToGroup, ensureGroup, getHookAdminToken, listUserGroups } from "../helpers/hooks";
@@ -265,20 +265,33 @@ async function seedPasswordUser(ref: string, user: UserArchetype): Promise<Manif
     await markVerified(identityId);
   }
 
-  // Provision TOTP if the archetype requires it
+  // Provision TOTP if the archetype requires it. An archetype declaring
+  // lookup_secret WITHOUT totp describes the post-unlink product state:
+  // backup codes only exist as a by-product of TOTP enrolment (Kratos
+  // generates lookup_secret inside the TOTP settings flow), so the seeder
+  // enrols TOTP, generates the codes, then removes the totp credential via
+  // the admin API — exactly the identity shape login-ui's "Unlink TOTP
+  // Authenticator App" leaves behind (observed 2026-08-31: unlink deletes
+  // the totp credential and keeps lookup_secret).
+  const totpUnlinked = user.credentials.includes("lookup_secret") && !user.credentials.includes("totp");
   let totpSecret: string | null = null;
   let backupCode: string | undefined;
-  if (user.totpConfigured && !localUsersEnabled()) {
+  if ((user.totpConfigured || totpUnlinked) && !localUsersEnabled()) {
     // TOTP enrolment logs in with the password method; without local users the
     // self-service login endpoint is disabled and the attempt can only 404.
     console.log(`  [seed] TOTP skipped for ${ref}: local users disabled on this deployment`);
-  } else if (user.totpConfigured) {
+  } else if (user.totpConfigured || totpUnlinked) {
     try {
       const needsBackupCodes = user.credentials.includes("lookup_secret");
       const result = await provisionTotp(email, DEFAULT_TEST_PASSWORD, identityId, needsBackupCodes, user.lowBackupCodes ?? false);
-      totpSecret = result.totpSecret;
       backupCode = result.backupCode;
-      console.log(`  [seed] TOTP provisioned for ${ref}`);
+      if (totpUnlinked) {
+        await deleteIdentityCredentialType(identityId, "totp");
+        console.log(`  [seed] TOTP provisioned then unlinked for ${ref} (backup codes remain)`);
+      } else {
+        totpSecret = result.totpSecret;
+        console.log(`  [seed] TOTP provisioned for ${ref}`);
+      }
     } catch (err) {
       // Keep the CAUSE. The post-condition near the manifest write reports it
       // verbatim; inventing a likely cause there sent the last reader chasing
@@ -629,6 +642,25 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
                 totpFailures.set(ref, msg);
                 console.warn(`  ⚠ Failed to provision TOTP for ${ref} (backfill): ${err}`);
               }
+            }
+          }
+          // Backfill the unlinked-TOTP shape (lookup_secret without totp):
+          // when the previous manifest carries no backup code, enrol TOTP for
+          // the codes and unlink it again — the runner resolves unused codes
+          // via the admin API, so a stale manifest code alone is not fatal,
+          // but an identity with NO lookup_secret at all is.
+          const totpUnlinked = user.credentials.includes("lookup_secret") && !user.credentials.includes("totp");
+          if (totpUnlinked && !preservedBackupCode && localUsersEnabled()) {
+            try {
+              const result = await provisionTotp(email, DEFAULT_TEST_PASSWORD, existingId, true, user.lowBackupCodes ?? false);
+              await deleteIdentityCredentialType(existingId, "totp");
+              if (result.backupCode) {
+                manifestUser.backupCode = result.backupCode;
+              }
+              console.log(`  [seed] TOTP provisioned then unlinked for ${ref} (backfill)`);
+            } catch (err: unknown) {
+              totpFailures.set(ref, err instanceof Error ? err.message : String(err));
+              console.warn(`  ⚠ Failed to provision unlinked-TOTP shape for ${ref} (backfill): ${err}`);
             }
           }
 

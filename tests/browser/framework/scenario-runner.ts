@@ -516,7 +516,7 @@ export async function runScenario(
         }
         for (const name of scenario.postChecks!) {
           await test.step(`Post check: ${name}`, async () => {
-            await runPostCheck(name, { page, tokens, manifest });
+            await runPostCheck(name, { page, tokens, manifest, user });
           });
         }
       });

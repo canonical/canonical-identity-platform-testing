@@ -41,5 +41,6 @@
   ],
   "verification_enabled": true,
   "access_token_format": "jwt",
-  "mail_api": true
+  "mail_api": true,
+  "backup_code_prompt_on_use": false
 }

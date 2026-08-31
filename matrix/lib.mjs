@@ -225,6 +225,18 @@ export function capabilities(dims, overrides = {}) {
     // has no mail API declares `caps: { mail_api: false }` in the model and the
     // suite gates mail-dependent scenarios off at runtime (requires.mailApi).
     mail_api: true,
+    // login-ui VERSION fork, observed on both sides: the v0.28.0 workload the
+    // compose/juju stacks run only offers the backup-code regeneration prompt
+    // when the identity is running low (≤3 unused codes — fresh 12, burn 1 →
+    // straight to the callback, measured 2026-08-31 on ghcr :stable), while
+    // iam.orange.canonical.com (login-ui ≥ v0.27, measured 2026-08-27 and
+    // 2026-08-31) renders the prompt after EVERY backup-code sign-in — and its
+    // "I don't need new codes" resumption is broken there (session suite
+    // note), so the prompt is a terminal on that target. Rows whose target
+    // behaves the old way declare `caps: { backup_code_prompt_on_use: true }`;
+    // the suite gates the prompt-terminal vs callback-terminal scenario
+    // variants on it (requires.backupCodePromptOnUse).
+    backup_code_prompt_on_use: false,
     // Backend-divergent keys: the juju lane renders its second provider as
     // a second dex client (idp-dex2 integrator - google needs real
     // credentials the harness lacks), so providers=2 rows offer [dex, dex2]

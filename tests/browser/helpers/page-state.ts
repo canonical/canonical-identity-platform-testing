@@ -56,11 +56,11 @@ export type PageState =
   | { type: "login-webauthn-verify" }
   | { type: "login-backup-code-verify" }
   | { type: "setup-secure" }
+  | { type: "setup-secure-linked" }
   | { type: "setup-passkey" }
   | { type: "setup-backup-codes" }
   | { type: "setup-complete" }
   | { type: "tenant-selection" }
-  | { type: "consent" }
   | { type: "oidc-callback" }
   | { type: "oidc-callback-error" }
   | { type: "error-page" }
@@ -653,6 +653,17 @@ export async function detectPageState(page: Page): Promise<PageState> {
   }
 
   if (urlContains(page, "/ui/setup_secure")) {
+    // Two DOM shapes share this URL (observed 2026-08-31 on login-ui:stable):
+    // TOTP already linked renders only the "Unlink TOTP Authenticator App"
+    // button; enrolment renders the QR + "Verify code" form. URL alone cannot
+    // split them, and the unlink journey needs both as distinct states.
+    const unlinkVisible = await page
+      .getByRole("button", { name: "Unlink TOTP Authenticator App" })
+      .isVisible()
+      .catch(() => false);
+    if (unlinkVisible) {
+      return { type: "setup-secure-linked" };
+    }
     return { type: "setup-secure" };
   }
 
@@ -668,9 +679,10 @@ export async function detectPageState(page: Page): Promise<PageState> {
     return { type: "setup-complete" };
   }
 
-  if (urlContains(page, "/ui/consent")) {
-    return { type: "consent" };
-  }
+  // No /ui/consent detection: login-ui auto-accepts every consent request
+  // (remember=true, all scopes), so the page is unreachable and coverage was
+  // decided against (docs/testing-spec.md §10 item 12). The provider consent
+  // states above are third-party IdP surfaces, not this page.
 
   // Self-serve account page. login-ui lands here whenever a flow is initialised
   // while a satisfying session already exists (handleFlowError:

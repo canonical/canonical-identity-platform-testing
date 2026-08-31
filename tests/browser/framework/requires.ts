@@ -195,5 +195,19 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
+  // 16. backupCodePromptOnUse (backup_code_prompt_on_use capability — the
+  // login-ui version fork on the backup-code sign-in terminal). Absent
+  // defaults to false: the v0.28.0 workload both harness backends run only
+  // prompts when the identity runs low.
+  if (requires.backupCodePromptOnUse !== undefined) {
+    const actual = activeConfig.backup_code_prompt_on_use ?? false;
+    if (actual !== requires.backupCodePromptOnUse) {
+      return {
+        met: false,
+        reason: `requires backupCodePromptOnUse=${requires.backupCodePromptOnUse}, ActiveConfig backup_code_prompt_on_use=${actual}`,
+      };
+    }
+  }
+
   return { met: true };
 }

@@ -97,7 +97,13 @@ const DEPLOYED_CORE_RUN = [
   "specs/session.spec.ts :: session-reuse-no-max-age",
   "specs/session.spec.ts :: forced-reauth-max-age-0",
   "specs/settings.spec.ts :: settings-change-password",
+  // The prompt-terminal variant of the settings-created-codes proof: this row
+  // declares backup_code_prompt_on_use=true (iam.orange renders the
+  // regeneration prompt after every backup-code sign-in), which also gates
+  // backup-code-reuse-rejected (the callback-terminal variant) OFF this row.
   "specs/settings.spec.ts :: settings-backup-codes-regenerate",
+  "specs/settings.spec.ts :: settings-backup-codes-deactivate",
+  "specs/settings.spec.ts :: settings-totp-unlink",
 ];
 
 for (const [row, expectedRun] of [
