@@ -30,10 +30,13 @@
 #
 # Usage (from a checkout on a node of the deployment's k8s cluster):
 #
-#   scripts/seed-in-cluster.sh --env teal [--check | --purge | --incremental]
+#   scripts/seed-in-cluster.sh --env <colour> [--check | --purge | --incremental]
 #
-#   --env <name>       deployment colour; namespace defaults to <name>-iam and
-#                      the ingress host to iam.<name>.canonical.com   (teal)
+#   --env <name>       REQUIRED — deployment colour; namespace defaults to
+#                      <name>-iam and the ingress host to
+#                      iam.<name>.canonical.com. No default on purpose: this
+#                      script deletes and re-creates identities, so the target
+#                      is never implied.
 #   --namespace <ns>   override the namespace
 #   --row <row>        matrix row whose capabilities.json declares the target
 #                      (deployed-core-local-mfa — the charmed-core shape)
@@ -58,7 +61,7 @@ set -euo pipefail
 
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
-ENVIRONMENT="teal"
+ENVIRONMENT=""
 NAMESPACE=""
 ROW="deployed-core-local-mfa"
 MODE="pod"
@@ -77,12 +80,17 @@ while [[ $# -gt 0 ]]; do
     --out) OUT="${2:?--out needs a value}"; shift ;;
     --install-toolchain) INSTALL_TOOLCHAIN=1 ;;
     --check | --fresh | --incremental | --purge) SEED_ARGS+=("$1") ;;
-    -h | --help) sed -n '5,56p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h | --help) sed -n '5,59p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
 done
 
+[[ -n "$ENVIRONMENT" ]] || {
+  echo "✗ --env is required (deployment colour, e.g. --env orange): this script mutates the target deployment, so it is never implied" >&2
+  echo "  usage: scripts/seed-in-cluster.sh --env <colour> [--namespace <ns>] [--check | --purge | --incremental]" >&2
+  exit 2
+}
 NAMESPACE="${NAMESPACE:-${ENVIRONMENT}-iam}"
 OUT="${OUT:-$PWD/manifest.${ENVIRONMENT}.json}"
 INGRESS_HOST="iam.${ENVIRONMENT}.canonical.com"
