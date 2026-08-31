@@ -37,19 +37,56 @@ import { clickSubmit, fillSettledField } from "./form";
  * same step with "Please enter your email address.".
  *
  * Both events are observable, so we wait for them to settle rather than
- * retrying the fill: the flow id must be in the URL and the network must be
- * quiet. After that a dropped value is a real product regression and must fail
- * loudly, so the fill is asserted once and never retried.
+ * retrying the fill: the network must be quiet, and the flow id must be in the
+ * URL on the versions that put it there. After that a dropped value is a real
+ * product regression and must fail loudly, so the fill is asserted once and
+ * never retried.
  */
 export async function enterEmail(page: Page, email: string): Promise<void> {
-  await page.waitForURL(/[?&]flow=/, { timeout: 15_000 });
+  // The flow id reaches the URL only on login-ui versions that perform the
+  // shallow router.replace(?flow=…). Waiting for it unconditionally made this
+  // helper time out on a deployment that never does — measured on teal
+  // (login-ui <= v0.25.0, 2026-08-28): the URL stays /ui/login forever, so a
+  // BROKEN DEPLOYMENT was reported as a 15s wait inside a harness helper.
+  // Race it against the condition that actually matters, a quiet network;
+  // fillSettledField remains the loud guard for a value that does not stick.
+  await Promise.race([
+    page.waitForURL(/[?&]flow=/, { timeout: 15_000 }).catch(() => {}),
+    page.waitForLoadState("networkidle"),
+  ]);
 
   const continueButton = page.getByRole("button", {
     name: "Continue",
     exact: true,
   });
   await fillSettledField(page, page.getByLabel("Email"), email);
+
+  // Which server refused, and with what. The identifier submit is the one hop
+  // where a 5xx renders NOTHING in the UI (teal: 500 `invalid password` with an
+  // empty alert region), so without this the only symptom is "Continue is still
+  // visible" — a description of the page, not of the fault.
+  const submitted = page
+    .waitForResponse(
+      (r) =>
+        r.request().method() === "POST" &&
+        /\/self-service\/login(\/id-first)?(\?|$)/.test(r.url()),
+      { timeout: 15_000 },
+    )
+    .catch(() => null);
   await continueButton.click();
+
+  const response = await submitted;
+  if (response && response.status() >= 500) {
+    const body = (await response.text().catch(() => "")).replace(/\s+/g, " ").slice(0, 300);
+    throw new Error(
+      `the deployment refused the identifier submit: ${response.status()} ` +
+        `POST ${new URL(response.url()).pathname} -> ${body}\n` +
+        `    Nothing is rendered to the user for this, so it is invisible in the UI too. ` +
+        `A login-ui before v0.26.0 posts the identifier step to the GENERIC ` +
+        `/self-service/login endpoint instead of /self-service/login/id-first, and kratos ` +
+        `rejects that body (password: "") with exactly this.`,
+    );
+  }
 
   // The identifier step re-renders in place rather than navigating, so the
   // disappearance of Continue is what marks the transition. A validation
