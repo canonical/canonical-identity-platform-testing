@@ -38,6 +38,12 @@
 #                      script deletes and re-creates identities, so the target
 #                      is never implied.
 #   --namespace <ns>   override the namespace
+#   --host <fqdn>      override the ingress host in the printed handoff (the
+#                      LOGIN_UI_URL/KRATOS_PUBLIC_URL/HYDRA_PUBLIC_URL of the
+#                      urls-lane run). Seeding itself never touches the
+#                      ingress — it runs over pod IPs — so this only matters
+#                      for targets off the iam.<colour>.canonical.com scheme
+#                      (e.g. --env login --host login.canonical.com).
 #   --row <row>        matrix row whose capabilities.json declares the target
 #                      (deployed-core-local-mfa — the charmed-core shape)
 #   --mode pod|node    where the seeder runs (pod)
@@ -62,6 +68,7 @@ set -euo pipefail
 REPO="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 ENVIRONMENT=""
+INGRESS_HOST=""
 NAMESPACE=""
 ROW="deployed-core-local-mfa"
 MODE="pod"
@@ -74,13 +81,14 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --env) ENVIRONMENT="${2:?--env needs a value}"; shift ;;
     --namespace) NAMESPACE="${2:?--namespace needs a value}"; shift ;;
+    --host) INGRESS_HOST="${2:?--host needs a value}"; shift ;;
     --row) ROW="${2:?--row needs a value}"; shift ;;
     --mode) MODE="${2:?--mode needs a value}"; shift ;;
     --proxy) PROXY="${2:?--proxy needs a value}"; PROXY_FROM="--proxy"; shift ;;
     --out) OUT="${2:?--out needs a value}"; shift ;;
     --install-toolchain) INSTALL_TOOLCHAIN=1 ;;
     --check | --fresh | --incremental | --purge) SEED_ARGS+=("$1") ;;
-    -h | --help) sed -n '5,59p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h | --help) sed -n '5,64p' "${BASH_SOURCE[0]}"; exit 0 ;;
     *) echo "unknown argument: $1" >&2; exit 2 ;;
   esac
   shift
@@ -93,7 +101,7 @@ done
 }
 NAMESPACE="${NAMESPACE:-${ENVIRONMENT}-iam}"
 OUT="${OUT:-$PWD/manifest.${ENVIRONMENT}.json}"
-INGRESS_HOST="iam.${ENVIRONMENT}.canonical.com"
+INGRESS_HOST="${INGRESS_HOST:-iam.${ENVIRONMENT}.canonical.com}"
 [[ "$MODE" == "node" || "$MODE" == "pod" ]] || { echo "--mode must be node or pod" >&2; exit 2; }
 [[ ${#SEED_ARGS[@]} -gt 0 ]] || SEED_ARGS=("--fresh")
 
@@ -110,7 +118,7 @@ fail() { echo "✗ $*" >&2; exit 1; }
   || fail "no such materialized row: $ROW (see matrix/matrix.json)"
 
 echo "── plan"
-echo "  ${MODE} mode, row $ROW, seeder ${SEED_ARGS[*]}, namespace $NAMESPACE"
+echo "  ${MODE} mode, row $ROW, seeder ${SEED_ARGS[*]}, namespace $NAMESPACE, ingress $INGRESS_HOST"
 echo "  checkout $REPO"
 
 # ── kubectl ────────────────────────────────────────────────────────────────
