@@ -54,6 +54,7 @@ const JUJU_CORE_MODEL = process.env.MATRIX_JUJU_CORE_MODEL ?? "iam-matrix-core";
 // run but did not" while its runtime skips are held to the tier-B allowlist.
 // matrix/tests/runner.test.mjs pins the two lists against each other.
 export const TIER_A_FILES = new Set([
+  "device.spec.ts",
   "error.spec.ts",
   "oidc-error.spec.ts",
   "login.spec.ts",

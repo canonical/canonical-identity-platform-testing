@@ -61,6 +61,8 @@ export type PageState =
   | { type: "setup-backup-codes" }
   | { type: "setup-complete" }
   | { type: "tenant-selection" }
+  | { type: "device-code" }
+  | { type: "device-complete" }
   | { type: "oidc-callback" }
   | { type: "oidc-callback-error" }
   | { type: "error-page" }
@@ -679,6 +681,16 @@ export async function detectPageState(page: Page): Promise<PageState> {
     return { type: "setup-complete" };
   }
 
+  // ── Device flow pages (RFC 8628) ─────────────────────────────────────────
+  // /ui/device_code: "Enter code to continue" + the user-code textbox (the
+  // code arrives prefilled via hydra's verification_uri_complete).
+  // /ui/device_complete: "Sign in successful … successfully connected".
+  if (urlContains(page, "/ui/device_code")) {
+    return { type: "device-code" };
+  }
+  if (urlContains(page, "/ui/device_complete")) {
+    return { type: "device-complete" };
+  }
   // No /ui/consent detection: login-ui auto-accepts every consent request
   // (remember=true, all scopes), so the page is unreachable and coverage was
   // decided against (docs/testing-spec.md §10 item 12). The provider consent

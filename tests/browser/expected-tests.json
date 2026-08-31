@@ -10,8 +10,9 @@
     "A value may be a number, or an array when a file's collection legitimately",
     "varies by profile — update the array deliberately, never to silence a run."
   ],
-  "total": [52, 53],
+  "total": [53, 54],
   "files": {
+    "device.spec.ts": 1,
     "error.spec.ts": 3,
     "google-oidc.spec.ts": 3,
     "login.spec.ts": 5,

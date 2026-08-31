@@ -67,7 +67,18 @@ http:
       middlewares:
         - sidecar-replace-path-regex-login-ui
 
-    # Device auth endpoint
+    # Hydra API endpoints
+    login-ui-api-hydra:
+      entryPoints:
+        - web
+      rule: "PathPrefix(`/api/hydra`)"
+      service: login-ui-svc
+
+    # Device flow user-code acceptance (login-ui v0.28.0 registers exactly
+    # PUT /api/device — pkg/web/router.go:187 at @197703c9; the reference
+    # deployment routes it as its own Path rule at @ab24edd2bc5a
+    # docker/traefik/login-ui-routes.yml). The /api/hydra prefix above is a
+    # NEWER login-ui's route family and does not cover this on v0.28.
     login-ui-api-device:
       entryPoints:
         - web

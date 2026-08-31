@@ -31,12 +31,12 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   // ── Flow start ────────────────────────────────────────────────────────
   // `manage-details` from start = opening the settings hub with a live
   // session from an earlier phase (settings scenarios).
-  start: ["login-email", "oidc-callback", "tenant-selection", "reset-email", "verification", "register-email", "setup-passkey", "oidc-error-page", "oidc-callback-error", "manage-details"],
+  start: ["login-email", "oidc-callback", "tenant-selection", "reset-email", "verification", "register-email", "setup-passkey", "oidc-error-page", "oidc-callback-error", "manage-details", "device-code"],
 
   // ── Login UI states ────────────────────────────────────────────────────
   "login-email": ["login-password", "tenant-selection", "provider:dex:login", "provider:google:login", "oidc-callback", "reset-email", "register-email", "verification"],
   "login-password": ["setup-secure", "login-totp-verify", "login-backup-code-verify", "login-webauthn-verify", "oidc-callback", "login-password", "reset-email"],
-  "login-totp-verify": ["oidc-callback", "login-backup-code-verify", "login-totp-verify", "backup-code-regenerate", "reset-password"],
+  "login-totp-verify": ["oidc-callback", "login-backup-code-verify", "login-totp-verify", "backup-code-regenerate", "reset-password", "device-complete"],
   "login-webauthn-verify": ["oidc-callback"],
   // → setup-secure: the identity's only 2FA is lookup_secret (post-unlink)
   // and MFA is enforced, so an accepted code walks into TOTP re-enrolment.
@@ -55,6 +55,12 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   // on login-ui:stable). First-login backup-code ENROLMENT still has no
   // driving action and remains covered by specs/use-backup-codes.spec.ts.
   "setup-backup-codes": ["setup-backup-codes"],
+
+  // ── Device flow (RFC 8628) ────────────────────────────────────────────
+  // Confirming the user code opens a login_challenge journey; the terminal
+  // is /ui/device_complete (urls.device.success) — tokens arrive by RP
+  // polling, never a callback.
+  "device-code": ["login-email"],
 
   // ── Recovery flow ─────────────────────────────────────────────────────
   // A recovery code only yields an AAL1 session. Because settings.required_aal
@@ -114,6 +120,9 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   "oidc-callback-error": [],
   "error-page": [],
   "oidc-error-page": [],
+  // Device journey terminal (urls.device.success): tokens arrive by RP
+  // polling, nothing follows in the browser.
+  "device-complete": [],
   // The settings hub: recovery's terminal, and the settings scenarios' base.
   "manage-details": ["reset-password", "setup-backup-codes", "setup-secure", "setup-secure-linked"],
 };

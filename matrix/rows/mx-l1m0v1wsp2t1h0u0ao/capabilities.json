@@ -40,6 +40,7 @@
   "access_token_format": "opaque",
   "mail_api": true,
   "backup_code_prompt_on_use": false,
+  "device_flow": true,
   "juju": {
     "oidc_providers": [
       "dex",

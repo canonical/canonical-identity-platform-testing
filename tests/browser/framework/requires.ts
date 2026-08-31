@@ -209,5 +209,18 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
+  // 17. deviceFlow (device_flow capability — hydra's urls.device configured
+  // and login-ui's device pages routed). Absent defaults to false: older
+  // declarations predate the capability.
+  if (requires.deviceFlow !== undefined) {
+    const actual = activeConfig.device_flow ?? false;
+    if (actual !== requires.deviceFlow) {
+      return {
+        met: false,
+        reason: `requires deviceFlow=${requires.deviceFlow}, ActiveConfig device_flow=${actual}`,
+      };
+    }
+  }
+
   return { met: true };
 }

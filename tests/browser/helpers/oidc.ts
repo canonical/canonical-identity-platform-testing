@@ -8,13 +8,12 @@
  * The dev stack runs the Hydra exemplary OAuth 2.0 consumer on :4446.
  * These helpers drive the browser through the full OAuth2 flow.
  */
-
 import { Page, expect } from "@playwright/test";
 import { buildAuthorizeUrl } from "./hydra";
 import { decodeJwtPayload, TokenClaims } from "./jwt";
-import { OIDC_CONSUMER_URL } from "./config";
+import { HYDRA_PUBLIC_URL, OIDC_CONSUMER_URL } from "./config";
 import type { Manifest, ManifestOauthClientRp } from "../seeder/manifest-schema";
-import { getRpClient as getManifestRpClient } from "../framework/manifest";
+import { getRpClient as getManifestRpClient, readManifest } from "../framework/manifest";
 
 const CALLBACK_URL = `${OIDC_CONSUMER_URL}/callback`;
 
@@ -143,5 +142,86 @@ async function extractTokensFromCallback(page: Page): Promise<OIDCTokens> {
     refreshToken: refreshToken || undefined,
     accessTokenClaims: accessTokenIsJwt ? decodeJwtPayload(accessToken) : null,
     idTokenClaims: decodeJwtPayload(idToken),
+  };
+}
+/** RFC 8628 §3.2 device authorization response, as the walk needs it. */
+export interface DeviceAuthorization {
+  deviceCode: string;
+  verificationUriComplete: string;
+}
+
+/**
+ * Device-grant bootstrap (RFC 8628 §3.1): request a device_code/user_code
+ * pair from hydra's public device endpoint, authenticated the way the seeded
+ * RP is registered (client_secret_post — hydra rejects basic auth for it).
+ * Public surface + manifest only, so it runs on the live lane.
+ *
+ * Returns hydra's own verification_uri_complete: entering the journey there
+ * is exactly what a real device's link/QR does, and hydra redirects it to
+ * login-ui's /ui/device_code with the device_challenge attached.
+ */
+export async function startDeviceAuth(page: Page): Promise<DeviceAuthorization> {
+  const rp = getRpClient(readManifest());
+  if (!rp) {
+    throw new Error("startDeviceAuth: no RP client in the manifest — seed first");
+  }
+  const res = await page.request.post(`${HYDRA_PUBLIC_URL}/oauth2/device/auth`, {
+    form: {
+      client_id: rp.clientId,
+      client_secret: rp.clientSecret,
+      scope: "openid profile email offline_access",
+    },
+  });
+  const body = await res.text();
+  if (!res.ok()) {
+    throw new Error(`device authorization failed: HTTP ${res.status()} ${body.slice(0, 300)}`);
+  }
+  const parsed = JSON.parse(body) as { device_code?: string; verification_uri_complete?: string };
+  if (!parsed.device_code || !parsed.verification_uri_complete) {
+    throw new Error(`device authorization answered without device_code/verification_uri_complete: ${body.slice(0, 300)}`);
+  }
+  return { deviceCode: parsed.device_code, verificationUriComplete: parsed.verification_uri_complete };
+}
+
+/**
+ * Redeem an APPROVED device_code at the token endpoint (RFC 8628 §3.4) — the
+ * RP-side half of the grant, which never passes through the browser: device
+ * tokens arrive by polling, not via a callback. Called by the runner after
+ * the walk observed /ui/device_complete, so the code is approved and a single
+ * poll must succeed; authorization_pending here means the approval did not
+ * stick and IS the failure.
+ */
+export async function pollDeviceToken(page: Page, deviceCode: string): Promise<OIDCTokens> {
+  const rp = getRpClient(readManifest());
+  if (!rp) {
+    throw new Error("pollDeviceToken: no RP client in the manifest — seed first");
+  }
+  const res = await page.request.post(`${HYDRA_PUBLIC_URL}/oauth2/token`, {
+    form: {
+      client_id: rp.clientId,
+      client_secret: rp.clientSecret,
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+      device_code: deviceCode,
+    },
+  });
+  const body = await res.text();
+  if (!res.ok()) {
+    throw new Error(`device token poll failed after device_complete: HTTP ${res.status()} ${body.slice(0, 300)}`);
+  }
+  const parsed = JSON.parse(body) as {
+    access_token?: string;
+    id_token?: string;
+    refresh_token?: string;
+  };
+  if (!parsed.access_token || !parsed.id_token) {
+    throw new Error(`device token poll answered without access_token/id_token: ${body.slice(0, 300)}`);
+  }
+  const accessTokenIsJwt = parsed.access_token.split(".").length === 3;
+  return {
+    accessToken: parsed.access_token,
+    idToken: parsed.id_token,
+    refreshToken: parsed.refresh_token || undefined,
+    accessTokenClaims: accessTokenIsJwt ? decodeJwtPayload(parsed.access_token) : null,
+    idTokenClaims: decodeJwtPayload(parsed.id_token),
   };
 }

@@ -870,9 +870,9 @@ references** — other documents cite "§10 item N", so renumber nothing.
 | 7 | user-verification-service functional coverage | Staged |
 | 8 | Rename `webhook-flow.spec.ts`; cover hook-service directly | Staged |
 | 9 | OIDC error paths | **Landed** — the `oidc-error` suite |
-| 10 | Device authorization grant | Decided: wire — staged |
+| 10 | Device authorization grant | **Landed** — the `device` suite |
 | 11 | Navigation & weird-user-behaviour coverage | Wave 1 landed; wave 2 specified, staged |
-| 12 | Dead machinery in the transition table | Measured; decision needed per entry |
+| 12 | Dead machinery in the transition table | Two entries resolved 2026-08-31 (consent deleted, backup-code edge covered); rest decided per entry |
 | 13 | The unexplained run-1/run-2 split (S-10) | Instrumented; cause still open |
 | 14 | Preflight asserts identifier-first | Staged |
 | 15 | Account-linking coverage | Committed — staged |
@@ -921,22 +921,35 @@ references** — other documents cite "§10 item N", so renumber nothing.
    Note `expose_internal_errors: true` makes `error_debug`
    user-visible, so the suite pins the rendered surface — a leak-shaped
    regression fails a test.
-10. **Device authorization grant — decided: wire, staged.** The grant is
-    fully built and dead:
-    - login-ui ships `/ui/device_code` + `/ui/device_complete` and a
-      `PUT /api/device` BFF endpoint;
-    - the seeded RP carries the correct grant URN (C-13), and the Canonical
-      hydra 25.4.0 fork ships device support;
-    - but the control stack's `hydra.yml` sets no `urls.device`, so
-      verification falls through to Hydra's built-in "configuration key
-      missing" page.
-
-    Committed design (staged):
-    - **Config:** 3 `hydra.yml` lines mirroring `identity-platform-login-ui@ab24edd2bc5a docker/hydra/hydra.yml:21-23,38-40`.
-    - **Capability:** `device_flow` key in `config-model.mjs` and `capabilities()`, gating via `requires.deviceFlow`; on the charmed backend, verify `hydra-operator` exposes the device URLs — if not, `device_flow: false` on juju rows plus a `harnessGaps` entry citing the operator gap.
-    - **States & transitions:** `device-code`, `device-complete`; edges `start → device-code`, `device-code → login-email`, `<terminal> → device-complete` — every added edge MUST be traversed by a scenario in the same change (item 12 is the cautionary tale).
-    - **Second token source:** Device-flow tokens arrive via RP polling of `/oauth2/token`, not the callback. `defineScenario()` allows one exception to the callback requirement: `device-complete` terminals on scenarios declaring `requires.deviceFlow`.
-    - **Preflight:** Layer-2 device flow probe (hydra's device endpoint responds vs. its built-in "configuration key missing" page) matching the declaration.
+10. **Device authorization grant — LANDED 2026-08-31** as the `device` suite,
+    exactly along the committed design:
+    - **Config:** `hydra.yml` device URLs + polling interval mirroring
+      `identity-platform-login-ui@ab24edd2bc5a docker/hydra/hydra.yml`, and the
+      reference's `Path(/api/device)` traefik route restored (login-ui v0.28.0
+      registers exactly that — `pkg/web/router.go:187` at @197703c9;
+      the /api/hydra prefix is a later version's route family).
+    - **Capability:** `device_flow: true` in `capabilities()`, three
+      independent witnesses (compose measured end-to-end; hydra-operator
+      renders `urls.device` from the login-ui relation —
+      `canonical/hydra-operator@f7e000b templates/hydra.yaml.j2:61-63`,
+      `src/integrations.py:145-151`; iam.orange measured live: device/auth
+      issues codes through the ingress and /ui/device_code renders). Gating
+      via `requires.deviceFlow`.
+    - **States & transitions:** `device-code`, `device-complete`; edges
+      `start → device-code` (API bootstrap with the manifest RP —
+      client_secret_post against the public endpoint, so live-lane capable),
+      `device-code → login-email`, `login-totp-verify → device-complete` —
+      all traversed by `device-flow-login`.
+    - **Second token source:** the runner redeems `ctx.deviceCode` at the
+      token endpoint after the walk reaches `device-complete`; a failed poll
+      fails the walk. `defineScenario()`'s one callback-rule exception:
+      `device-complete` terminals on `requires.deviceFlow` scenarios, and the
+      scenario's claim assertions run against the POLLED tokens (sub + amr
+      records the browser login).
+    - **Preflight:** credential-free layer-2 probe — GET
+      `/oauth2/device/verify` redirects to `/ui/device_code` iff
+      `urls.device` is configured; an unset config falls through to hydra's
+      built-in "configuration key missing" page. Runs on the urls backend.
 11. **Navigation & weird-user-behaviour coverage — wave 1 landed; wave 2 specified below, implementation staged.**
     Kratos and Hydra route every reload, browser-history move and
     multi-tab/cross-browser journey through dedicated machinery, so this class

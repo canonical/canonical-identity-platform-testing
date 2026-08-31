@@ -24,7 +24,7 @@ import { listTenantOptions } from "../helpers/navigation";
 import { findUserByRef, readManifest, resolveTenantDisplayName } from "./manifest";
 import { readClaim } from "../helpers/jwt";
 import type { Manifest, ManifestUser } from "../seeder/manifest-schema";
-import { expectOIDCFlowComplete, type OIDCTokens } from "../helpers/oidc";
+import { expectOIDCFlowComplete, pollDeviceToken, type OIDCTokens } from "../helpers/oidc";
 import type { TokenClaims } from "../helpers/jwt";
 import type { Scenario, Phase, ExecutionLane } from "./scenario-types";
 import type { ActionContext } from "./transitions";
@@ -476,12 +476,21 @@ export async function runScenario(
   // instead of setup-secure.
   const cleanup = scenario.cleanup;
   try {
-    // Tokens per phase, for phases that end at the callback. Sparse on purpose:
-    // index i is phase i, `undefined` where that phase issued none.
+    // Tokens per phase. Sparse on purpose: index i is phase i, `undefined`
+    // where that phase issued none. Two token sources: phases ending at the
+    // OIDC callback capture from the consumer page (runPhase), and phases
+    // ending at device-complete redeem ctx.deviceCode at the token endpoint —
+    // device tokens arrive by RP polling (RFC 8628 §3.4), never a callback,
+    // so a failed poll here fails the walk even when no assertion reads the
+    // tokens: issuance IS the grant's contract.
     const phaseTokens: Array<OIDCTokens | undefined> = [];
     for (const [index, phase] of phases.entries()) {
       await test.step(`Phase: ${phase.name}`, async () => {
         phaseTokens[index] = await runPhase(page, user, phase, ctx, manifest);
+        const terminal = phase.expectedPath[phase.expectedPath.length - 1];
+        if (!phaseTokens[index] && terminal === "device-complete" && ctx.deviceCode) {
+          phaseTokens[index] = await pollDeviceToken(page, ctx.deviceCode);
+        }
       });
     }
 
@@ -494,10 +503,12 @@ export async function runScenario(
         // collection is the real gate. Belt-and-braces for a scenario object
         // built without the constructor: throw, never warn-and-return — a
         // downgraded assertion block is how a dead `noTenantId` shipped.
-        if (lastState !== "oidc-callback") {
+        // device-complete is the one other token-bearing terminal (RP-polled).
+        const deviceTerminal = lastState === "device-complete" && scenario.requires.deviceFlow === true;
+        if (lastState !== "oidc-callback" && !deviceTerminal) {
           throw new Error(
             `Scenario "${scenario.id}" declares assertions but ends on "${lastState}", ` +
-              "not oidc-callback — no tokens are issued, so they cannot be evaluated.",
+              "not oidc-callback or a device-flow terminal — no tokens are issued, so they cannot be evaluated.",
           );
         }
 

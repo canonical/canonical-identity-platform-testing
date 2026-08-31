@@ -26,7 +26,7 @@ import {
 import { clickDexLoginButton, loginWithDex } from "../helpers/dex";
 import { clickGoogleLoginButton, confirmGoogleIdentity, enterGoogleEmail, enterGooglePassword, enterGoogleTotp, dismissGoogleInterstitial } from "../helpers/google";
 import { GOOGLE_TEST_EMAIL, GOOGLE_TEST_PASSWORD, GOOGLE_TEST_TOTP_SECRET } from "../helpers/config";
-import { startOIDCFlow, startOIDCFlowWithParams, expectOIDCFlowComplete } from "../helpers/oidc";
+import { startOIDCFlow, startOIDCFlowWithParams, expectOIDCFlowComplete, startDeviceAuth } from "../helpers/oidc";
 // The oidc.ts starter waits for a login/consent/callback entry URL; error-path
 // starts terminate on /ui/oidc_error or the RP error page instead, so they use
 // the raw navigation from helpers/hydra.
@@ -66,6 +66,10 @@ export interface ActionContext {
   totpCodeWindow?: "expired";
   /** Backup code generated during setup (stored here for later use). */
   backupCode?: string;
+  /** RFC 8628 device_code minted by "start → device-code" — the runner
+   *  redeems it at the token endpoint after the walk reaches
+   *  device-complete (device tokens arrive by RP polling, not a callback). */
+  deviceCode?: string;
   /** Set by the runner when a "double-submit" intervention targets the
    *  transition being executed. The transition's action MUST forward it to
    *  its submit helper and acknowledge via doubleSubmitConsumed — the runner
@@ -439,6 +443,49 @@ export const TRANSITION_TABLE: TransitionTable = {
       }
       await submitTotpCode(page, secret, Date.now(), { doubleSubmit: ctx.doubleSubmit });
       if (ctx.doubleSubmit) ctx.doubleSubmitConsumed = true;
+    },
+  },
+  // ── Device flow (RFC 8628) ─────────────────────────────────────────────
+  // The device half is an API call: startDeviceAuth() mints the
+  // device_code/user_code pair with the manifest's RP client (public
+  // endpoint + client_secret_post, so it runs on the live lane) and the
+  // browser enters at hydra's own verification_uri_complete — exactly where
+  // a real device's link/QR points. Hydra redirects to /ui/device_code with
+  // the user code prefilled.
+  "start → device-code": {
+    description: "Mint a device_code with the manifest RP and open hydra's verification URL",
+    action: async (page, _user, ctx) => {
+      const auth = await startDeviceAuth(page);
+      ctx.deviceCode = auth.deviceCode;
+      await page.goto(auth.verificationUriComplete);
+      await expect(page.getByRole("heading", { name: "Enter code to continue" })).toBeVisible();
+    },
+  },
+
+  // The code arrives prefilled from the URL; Next hands the accepted
+  // device_challenge to hydra, which opens a login_challenge journey.
+  "device-code → login-email": {
+    description: "Confirm the prefilled user code — hydra opens the login journey",
+    action: async (page) => {
+      await page.getByRole("button", { name: "Next" }).click();
+    },
+  },
+
+  // Terminal: after the second factor, login-ui accepts the device session
+  // and lands on urls.device.success (/ui/device_complete, "Sign in
+  // successful … successfully connected"). No callback follows — the runner
+  // polls the token endpoint with ctx.deviceCode instead.
+  "login-totp-verify → device-complete": {
+    description: "Submit TOTP — the device journey terminates on /ui/device_complete",
+    action: async (page, user, ctx) => {
+      const secret = user.totpSecret ?? ctx.totpSecret;
+      if (!secret) {
+        throw new Error(
+          "TOTP secret not available. The user must have totpSecret in the manifest, " +
+          "or a previous phase must have set ctx.totpSecret."
+        );
+      }
+      await submitTotpCode(page, secret);
     },
   },
 

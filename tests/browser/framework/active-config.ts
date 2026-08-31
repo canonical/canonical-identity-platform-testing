@@ -41,6 +41,9 @@ export interface ActiveConfig {
    *  when ≤3 unused codes remain (the v0.28.0 workload). Gates the
    *  prompt-terminal vs callback-terminal scenario variants. */
   backup_code_prompt_on_use?: boolean;
+  /** RFC 8628 device grant wired end-to-end: hydra urls.device configured,
+   *  login-ui /ui/device_code + /ui/device_complete routed. */
+  device_flow?: boolean;
   /** Hydra access-token shape: "jwt" | "opaque" (capabilities.json key; absent = unknown). */
   access_token_format?: string;
 }

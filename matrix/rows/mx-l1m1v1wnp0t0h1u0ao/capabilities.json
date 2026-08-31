@@ -34,5 +34,6 @@
   "verification_enabled": true,
   "access_token_format": "opaque",
   "mail_api": true,
-  "backup_code_prompt_on_use": false
+  "backup_code_prompt_on_use": false,
+  "device_flow": true
 }

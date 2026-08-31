@@ -18,6 +18,10 @@ log:
 
 oauth2:
   expose_internal_errors: true
+  device_authorization:
+    # how often a non-interactive device polls the token endpoint (matches the
+    # reference: identity-platform-login-ui@ab24edd2bc5a docker/hydra/hydra.yml)
+    token_polling_interval: 5s
   # NOTE: the token hook is deliberately NOT configured here. hydra.yml is shared
   # by every profile, and Hydra fails token issuance outright when the hook is
   # unreachable — on `core`, which scales hook-service to 0, every /oauth2/token
@@ -37,6 +41,9 @@ urls:
     public: http://localhost:4444
   consent: http://localhost/ui/consent
   login: http://localhost/ui/login
+  device:
+    verification: http://localhost/ui/device_code
+    success: http://localhost/ui/device_complete
   error: http://localhost/ui/oidc_error
 
 secrets:

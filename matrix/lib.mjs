@@ -237,6 +237,18 @@ export function capabilities(dims, overrides = {}) {
     // the suite gates the prompt-terminal vs callback-terminal scenario
     // variants on it (requires.backupCodePromptOnUse).
     backup_code_prompt_on_use: false,
+    // RFC 8628 device authorization grant, wired end-to-end on every backend:
+    //  - compose: shared docker/hydra/hydra.yml sets urls.device.verification/
+    //    success and traefik routes PUT /api/device to login-ui (full journey
+    //    measured 2026-08-31: device/auth → /ui/device_code → login →
+    //    /ui/device_complete → token poll returns access+id+refresh);
+    //  - juju: hydra-operator renders urls.device from the login-ui relation
+    //    (canonical/hydra-operator@f7e000b templates/hydra.yaml.j2:61-63,
+    //    src/integrations.py:145-151), which every row relates;
+    //  - iam.orange: measured 2026-08-31 — /oauth2/device/auth issues codes
+    //    through the public ingress and /ui/device_code renders.
+    // The seeded RP carries the device grant URN (C-13).
+    device_flow: true,
     // Backend-divergent keys: the juju lane renders its second provider as
     // a second dex client (idp-dex2 integrator - google needs real
     // credentials the harness lacks), so providers=2 rows offer [dex, dex2]

@@ -292,6 +292,7 @@ async function verifyBehavior(dims, caps, u, backend) {
   await verifyHydraTokens(v, caps, u);
 
   await verifyMailApi(caps, u);
+  await verifyDeviceFlow(caps, u);
 }
 
 async function verifyKratosFlowShape(v, caps, u) {
@@ -808,6 +809,43 @@ async function verifyMailApi(caps, u) {
   } catch (err) {
     record("behavior", "mail api reachable", false, `GET ${mailApiUrl}/mail?pagenumber=1 → ${err?.cause?.code ?? err}`);
   }
+}
+// Device-flow capability probe (RFC 8628, §10 item 10). Credential-free
+// discriminator: GET /oauth2/device/verify (no user_code) makes hydra
+// redirect to urls.device.verification — a Location naming /ui/device_code
+// proves the URLs are configured, while an unset urls.device falls through
+// to hydra's built-in "configuration key missing" error page (no such
+// redirect). Works through a public ingress, so it runs on the urls backend
+// with zero credentials (measured 2026-08-31 on compose and iam.orange:
+// both answer 302 → /ui/device_code).
+async function verifyDeviceFlow(caps, u) {
+  const declared = caps.device_flow ?? false;
+  if (!u.hydraPublic) {
+    record("behavior", `device flow ${declared ? "wired" : "absent"}`, false, "skipped: no HYDRA_PUBLIC_URL — hydra's device endpoint cannot be asked", { warn: true });
+    return;
+  }
+  let res;
+  try {
+    res = await fetch(`${u.hydraPublic}/oauth2/device/verify`, {
+      redirect: "manual",
+      signal: AbortSignal.timeout(8000),
+    });
+  } catch (err) {
+    record("behavior", `device flow ${declared ? "wired" : "absent"}`, false, `GET ${u.hydraPublic}/oauth2/device/verify → ${err?.cause?.message ?? err?.message ?? err}`);
+    return;
+  }
+  const location = res.headers.get("location") ?? "";
+  const wired = res.status >= 300 && res.status < 400 && location.includes("/ui/device_code");
+  record(
+    "behavior",
+    `device flow ${declared ? "wired" : "absent"}`,
+    wired === declared,
+    wired === declared
+      ? (declared ? `verify endpoint redirects to ${location.split("?")[0]}` : "verify endpoint does not redirect to a device page")
+      : declared
+        ? `declared device_flow=true but GET /oauth2/device/verify → HTTP ${res.status}${location ? ` Location ${location.split("?")[0]}` : " (no device redirect)"} — hydra's urls.device is not configured`
+        : `declared device_flow=false but the verify endpoint redirects to ${location.split("?")[0]} — the grant is wired`,
+  );
 }
 
 

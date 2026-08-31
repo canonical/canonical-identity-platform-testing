@@ -81,6 +81,7 @@ const TFDEFAULT_RUN = [
 // direction. mail_api=false is what keeps recovery/verification/registration
 // out of the list even though local users exist.
 const DEPLOYED_CORE_RUN = [
+  "specs/device.spec.ts :: device-flow-login",
   "specs/error.spec.ts :: wrong-password-error",
   "specs/error.spec.ts :: invalid-totp-code",
   "specs/oidc-error.spec.ts :: unknown-client-renders-error-page",

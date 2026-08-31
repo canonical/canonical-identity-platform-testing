@@ -58,6 +58,8 @@ export interface ScenarioRequires {
   /** Backup-code regeneration prompt renders after every backup-code sign-in
    *  (backup_code_prompt_on_use capability — a login-ui version fork). */
   backupCodePromptOnUse?: boolean;
+  /** RFC 8628 device authorization grant is wired (device_flow capability). */
+  deviceFlow?: boolean;
 
   /** Support service-presence keys of the form "service:<name>". */
   [key: `service:${string}`]: boolean | undefined;
@@ -336,21 +338,28 @@ export function defineScenario(scenario: Scenario): Scenario {
     );
   }
   // Validate: `assertions` are evaluated against the tokens the relying party
-  // received, so they are only meaningful when the journey ENDS at the OIDC
-  // callback. A block declared on any other final state can never run — and one
+  // received, so they are only meaningful when the journey ENDS where tokens
+  // exist. A block declared on any other final state can never run — and one
   // shipped that way (`noTenantId` on a scenario ending at
   // login-webauthn-verify), silently downgraded to a warning by the runner.
   // Fail at import instead: `make test-browser-list` then catches it.
+  //
+  // ONE exception (§10 item 10): device-flow tokens arrive via RP polling of
+  // /oauth2/token, never a callback, so `device-complete` is a token-bearing
+  // terminal on scenarios declaring requires.deviceFlow — the runner polls
+  // with ctx.deviceCode there.
   if (scenario.assertions) {
     const path = scenario.phases
       ? scenario.phases[scenario.phases.length - 1]?.expectedPath ?? []
       : scenario.expectedPath ?? [];
     const finalState = path[path.length - 1];
-    if (finalState !== "oidc-callback") {
+    const deviceTerminal = finalState === "device-complete" && scenario.requires.deviceFlow === true;
+    if (finalState !== "oidc-callback" && !deviceTerminal) {
       throw new Error(
         `Scenario "${scenario.id}" declares assertions but its final state is ` +
-        `"${finalState ?? "<empty path>"}", not "oidc-callback". No tokens are issued there, ` +
-        `so the assertions could never be evaluated — remove them, or extend the path to the callback.`
+        `"${finalState ?? "<empty path>"}", not "oidc-callback" (or "device-complete" with ` +
+        `requires.deviceFlow). No tokens are issued there, so the assertions could never be ` +
+        `evaluated — remove them, or extend the path to a token-bearing terminal.`
       );
     }
   }
@@ -407,10 +416,12 @@ export function defineScenario(scenario: Scenario): Scenario {
     const path = scenario.phases
       ? scenario.phases[scenario.phases.length - 1]?.expectedPath ?? []
       : scenario.expectedPath ?? [];
-    if (path[path.length - 1] !== "oidc-callback") {
+    const finalState = path[path.length - 1];
+    const deviceTerminal = finalState === "device-complete" && scenario.requires.deviceFlow === true;
+    if (finalState !== "oidc-callback" && !deviceTerminal) {
       throw new Error(
-        `Scenario "${scenario.id}" declares postChecks but does not end at "oidc-callback" — ` +
-        `no tokens are issued, so the checks could never run.`
+        `Scenario "${scenario.id}" declares postChecks but does not end at "oidc-callback" (or ` +
+        `"device-complete" with requires.deviceFlow) — no tokens are issued, so the checks could never run.`
       );
     }
   }
