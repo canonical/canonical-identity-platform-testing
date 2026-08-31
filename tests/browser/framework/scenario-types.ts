@@ -198,7 +198,7 @@ export type Intervention = StateIntervention | TransitionIntervention;
  * relying party received and the scenario's manifest user. Scenarios name a
  * check; the implementation lives in framework/intervention-checks.ts.
  */
-export type PostCheckName = "code-replay-revokes-family" | "backup-codes-deactivated";
+export type PostCheckName = "code-replay-revokes-family" | "backup-codes-deactivated" | "device-code-replay-rejected";
 
 // ---------------------------------------------------------------------------
 // Phases

@@ -26,7 +26,7 @@ import {
 import { clickDexLoginButton, loginWithDex } from "../helpers/dex";
 import { clickGoogleLoginButton, confirmGoogleIdentity, enterGoogleEmail, enterGooglePassword, enterGoogleTotp, dismissGoogleInterstitial } from "../helpers/google";
 import { GOOGLE_TEST_EMAIL, GOOGLE_TEST_PASSWORD, GOOGLE_TEST_TOTP_SECRET } from "../helpers/config";
-import { startOIDCFlow, startOIDCFlowWithParams, expectOIDCFlowComplete, startDeviceAuth } from "../helpers/oidc";
+import { startOIDCFlow, startOIDCFlowWithParams, expectOIDCFlowComplete, startDeviceAuth, expectDeviceTokenPending } from "../helpers/oidc";
 // The oidc.ts starter waits for a login/consent/callback entry URL; error-path
 // starts terminate on /ui/oidc_error or the RP error page instead, so they use
 // the raw navigation from helpers/hydra.
@@ -457,8 +457,31 @@ export const TRANSITION_TABLE: TransitionTable = {
     action: async (page, _user, ctx) => {
       const auth = await startDeviceAuth(page);
       ctx.deviceCode = auth.deviceCode;
+      // The property that makes the grant safe: possession of the
+      // device_code alone yields NO tokens — hydra must answer
+      // authorization_pending until the browser journey completes.
+      await expectDeviceTokenPending(page, auth.deviceCode);
       await page.goto(auth.verificationUriComplete);
       await expect(page.getByRole("heading", { name: "Enter code to continue" })).toBeVisible();
+    },
+  },
+
+  // Error self-transition (R-2 pattern): a user code hydra never issued.
+  // login-ui's BFF answers its NOT_FOUND_ERROR_DESC ("invalid, expired or
+  // already used") but the page collapses it to a generic "Something went
+  // wrong, please try again" (observed 2026-08-31, login-ui:stable — the
+  // S-8 message-collapse class; registered in config-model upstreamFindings).
+  // The runner's expectError assertion needs only a visible, non-empty error.
+  "device-code → device-code": {
+    description: "Submit a user code hydra never issued (error — stays on the device page)",
+    action: async (page) => {
+      const field = page.getByRole("textbox");
+      await field.clear();
+      // Well-formed shape (8 chars), impossible value: hydra's user codes are
+      // mixed-case base62 and an outstanding code equal to this literal would
+      // be a collision, not a behaviour.
+      await field.fill("wrongcod");
+      await page.getByRole("button", { name: "Next" }).click();
     },
   },
 

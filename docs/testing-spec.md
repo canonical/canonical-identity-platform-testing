@@ -950,6 +950,16 @@ references** — other documents cite "§10 item N", so renumber nothing.
       `/oauth2/device/verify` redirects to `/ui/device_code` iff
       `urls.device` is configured; an unset config falls through to hydra's
       built-in "configuration key missing" page. Runs on the urls backend.
+    - **Failure coverage (same day):** `device-code-invalid-rejected` submits
+      a user code hydra never issued and requires the visible rejection
+      (R-2; login-ui collapses the BFF's precise message to a generic one —
+      registered in `upstreamFindings`); the bootstrap transition asserts a
+      pre-approval poll answers `authorization_pending` (no tokens from
+      possession of the device_code alone); the
+      `device-code-replay-rejected` post check redeems the spent device_code
+      a second time and requires `invalid_grant` (single-use). Expired-code
+      coverage waits on the short-lifespans row (item 11's prerequisite),
+      like every other expiry lane.
 11. **Navigation & weird-user-behaviour coverage — wave 1 landed; wave 2 specified below, implementation staged.**
     Kratos and Hydra route every reload, browser-history move and
     multi-tab/cross-browser journey through dedicated machinery, so this class

@@ -60,7 +60,7 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   // Confirming the user code opens a login_challenge journey; the terminal
   // is /ui/device_complete (urls.device.success) — tokens arrive by RP
   // polling, never a callback.
-  "device-code": ["login-email"],
+  "device-code": ["login-email", "device-code"],
 
   // ── Recovery flow ─────────────────────────────────────────────────────
   // A recovery code only yields an AAL1 session. Because settings.required_aal

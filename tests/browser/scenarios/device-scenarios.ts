@@ -59,6 +59,26 @@ export const deviceScenarios = defineScenarioSuite({
           );
         },
       },
+      // Redeem-once: the runner's poll consumed the device_code; a second
+      // redemption must answer invalid_grant.
+      postChecks: ["device-code-replay-rejected"],
+    }),
+
+    // ── Failure: a user code hydra never issued ────────────────────────────
+    // The self-transition submits a well-formed wrong code and the runner
+    // demands a visible error (R-2). Requires only the wired grant — no
+    // login, no user state — so it runs on every device_flow row, local
+    // users or not. The bootstrap transition additionally asserts the
+    // pre-approval poll answers authorization_pending, so this scenario also
+    // witnesses that an unapproved device_code yields no tokens.
+    defineScenario({
+      id: "device-code-invalid-rejected",
+      description:
+        "A user code hydra never issued is rejected visibly, and the unapproved device_code redeems no tokens",
+      requires: { deviceFlow: true },
+      user: { ref: "no-mfa", credentials: ["password"], totpConfigured: false },
+      expectedPath: ["device-code", "device-code"],
+      expectError: true,
     }),
   ],
 });

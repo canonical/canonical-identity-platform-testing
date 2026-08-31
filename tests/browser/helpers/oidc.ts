@@ -225,3 +225,27 @@ export async function pollDeviceToken(page: Page, deviceCode: string): Promise<O
     idTokenClaims: decodeJwtPayload(parsed.id_token),
   };
 }
+
+/**
+ * Assert a freshly minted device_code is NOT redeemable before the user
+ * completes the browser journey (RFC 8628 §3.5 authorization_pending) — the
+ * property that makes the grant safe at all: possession of the device_code
+ * alone must never yield tokens.
+ */
+export async function expectDeviceTokenPending(page: Page, deviceCode: string): Promise<void> {
+  const rp = getRpClient(readManifest());
+  if (!rp) {
+    throw new Error("expectDeviceTokenPending: no RP client in the manifest — seed first");
+  }
+  const res = await page.request.post(`${HYDRA_PUBLIC_URL}/oauth2/token`, {
+    form: {
+      client_id: rp.clientId,
+      client_secret: rp.clientSecret,
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+      device_code: deviceCode,
+    },
+  });
+  const body = await res.text();
+  expect(res.status(), `pre-approval device poll must be rejected, got HTTP ${res.status()} ${body.slice(0, 200)}`).toBeGreaterThanOrEqual(400);
+  expect(body, "pre-approval device poll must answer authorization_pending").toContain("authorization_pending");
+}

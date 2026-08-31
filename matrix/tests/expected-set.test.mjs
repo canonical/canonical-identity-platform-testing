@@ -52,6 +52,8 @@ function expectedSet(row) {
 // skips on both seed rows, which keeps the two canaries discriminating about
 // local-user gating.
 const PD931_RUN = [
+  // requires only deviceFlow, so it runs even without local users.
+  "specs/device.spec.ts :: device-code-invalid-rejected",
   "specs/oidc-error.spec.ts :: unknown-client-renders-error-page",
   "specs/oidc-error.spec.ts :: invalid-redirect-uri-renders-error-page",
   "specs/oidc-error.spec.ts :: invalid-scope-redirects-error-to-rp",
@@ -65,6 +67,7 @@ const PD931_RUN = [
 
 // The terraform-default shape: oidc only, no local users, no MT, no sequencing.
 const TFDEFAULT_RUN = [
+  "specs/device.spec.ts :: device-code-invalid-rejected",
   "specs/oidc-error.spec.ts :: unknown-client-renders-error-page",
   "specs/oidc-error.spec.ts :: invalid-redirect-uri-renders-error-page",
   "specs/oidc-error.spec.ts :: invalid-scope-redirects-error-to-rp",
@@ -82,6 +85,7 @@ const TFDEFAULT_RUN = [
 // out of the list even though local users exist.
 const DEPLOYED_CORE_RUN = [
   "specs/device.spec.ts :: device-flow-login",
+  "specs/device.spec.ts :: device-code-invalid-rejected",
   "specs/error.spec.ts :: wrong-password-error",
   "specs/error.spec.ts :: invalid-totp-code",
   "specs/oidc-error.spec.ts :: unknown-client-renders-error-page",

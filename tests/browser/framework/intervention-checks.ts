@@ -23,6 +23,9 @@ export interface PostCheckArgs {
   manifest: Manifest;
   /** The scenario's seeded user — identity-scoped checks read it. */
   user: ManifestUser;
+  /** The walk's RFC 8628 device_code, when the scenario ran the device
+   *  grant — replay checks redeem it a second time. */
+  deviceCode?: string;
 }
 
 /**
@@ -117,10 +120,38 @@ async function backupCodesDeactivated({ user }: PostCheckArgs): Promise<void> {
     "deactivation must delete the lookup_secret credential from the identity",
   ).toBeUndefined();
 }
+/**
+ * RFC 8628 inherits RFC 6749 §10.5: a device_code is single-use. The happy
+ * walk's runner poll already redeemed it, so a second redemption at the token
+ * endpoint must answer invalid_grant — otherwise anyone holding a spent
+ * device_code could mint fresh token families forever (observed rejection
+ * 2026-08-31: HTTP 400 invalid_grant "… not_found").
+ */
+async function deviceCodeReplayRejected({ page, manifest, deviceCode }: PostCheckArgs): Promise<void> {
+  if (!deviceCode) {
+    throw new Error("device-code-replay-rejected: the walk recorded no device_code — declare it on a device-flow scenario");
+  }
+  const rp = getRpClient(manifest);
+  if (!rp) {
+    throw new Error("device-code-replay-rejected: no RP client in the manifest");
+  }
+  const res = await page.request.post(`${HYDRA_PUBLIC_URL}/oauth2/token`, {
+    form: {
+      client_id: rp.clientId,
+      client_secret: rp.clientSecret,
+      grant_type: "urn:ietf:params:oauth:grant-type:device_code",
+      device_code: deviceCode,
+    },
+  });
+  expect(res.status(), "replayed device_code must be rejected").toBeGreaterThanOrEqual(400);
+  const body = (await res.json()) as { error?: string };
+  expect(body.error, "replayed device_code must answer invalid_grant").toBe("invalid_grant");
+}
 
 const POST_CHECKS: Record<PostCheckName, (args: PostCheckArgs) => Promise<void>> = {
   "code-replay-revokes-family": codeReplayRevokesFamily,
   "backup-codes-deactivated": backupCodesDeactivated,
+  "device-code-replay-rejected": deviceCodeReplayRejected,
 };
 
 export async function runPostCheck(name: PostCheckName, args: PostCheckArgs): Promise<void> {
