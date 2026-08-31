@@ -10,6 +10,14 @@
  * transitions, not states. Both scenarios are live-lane compatible: they need
  * a seeded user and the public login-ui, never an admin API.
  *
+ * MT-compatible on purpose: every settings archetype is a ZERO-TENANT user,
+ * and a zero-tenant login walks the same path on an MT deployment as on a
+ * non-MT one (no tenant-selection state — tenant-scenarios' zero-tenant-login
+ * is the standing proof). The settings surfaces themselves are tenant-free:
+ * verified 2026-08-31 on canonical-portal (same nav, same backup-codes and
+ * authenticator shapes as canonical-internal), so nothing here declares
+ * multiTenancy.
+ *
  * Deliberately absent:
  *  - The unauthenticated bounce (manage_details without a session → login):
  *    its first hop would need a second "start → login-email" entry, and the
@@ -47,7 +55,6 @@ export const settingsScenarios = defineScenarioSuite({
         "Change the password from the settings hub, sign in with the new one, restore the seeded one, sign in again",
       requires: {
         mfaEnabled: true,
-        multiTenancy: false,
         localUsersEnabled: true,
         secondFactorMethods: ["totp"],
       },
@@ -93,7 +100,6 @@ export const settingsScenarios = defineScenarioSuite({
         "Create backup codes from the settings hub and sign in with one of them",
       requires: {
         mfaEnabled: true,
-        multiTenancy: false,
         localUsersEnabled: true,
         secondFactorMethods: ["totp", "backup_codes"],
         // The prompt-terminal variant of the settings-created-codes proof:
@@ -145,7 +151,6 @@ export const settingsScenarios = defineScenarioSuite({
         "Create backup codes from the settings hub, deactivate them, and prove the lookup_secret credential is removed",
       requires: {
         mfaEnabled: true,
-        multiTenancy: false,
         localUsersEnabled: true,
         secondFactorMethods: ["totp", "backup_codes"],
       },
@@ -186,7 +191,6 @@ export const settingsScenarios = defineScenarioSuite({
         "A backup code that already signed in once is rejected on replay, visibly",
       requires: {
         mfaEnabled: true,
-        multiTenancy: false,
         localUsersEnabled: true,
         secondFactorMethods: ["totp", "backup_codes"],
         // The burn phase ends at the callback, which only exists where the
@@ -256,7 +260,6 @@ export const settingsScenarios = defineScenarioSuite({
       requires: {
         mfaEnabled: true,
         mfaEnforced: true,
-        multiTenancy: false,
         localUsersEnabled: true,
         secondFactorMethods: ["totp", "backup_codes"],
       },
