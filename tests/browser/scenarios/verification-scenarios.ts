@@ -19,7 +19,7 @@ export const verificationScenarios = defineScenarioSuite({
   defineScenario({
     id: "verify-email-after-registration",
     description: "New user registers, receives verification email, enters code",
-    requires: { multiTenancy: false, localUsersEnabled: true, mailApi: true },
+    requires: { localUsersEnabled: true, mailApi: true },
     user: { ref: "unverified-user", credentials: ["password"], totpConfigured: false, verified: false },
     expectedPath: [
       "verification",
@@ -31,7 +31,7 @@ export const verificationScenarios = defineScenarioSuite({
   defineScenario({
     id: "verify-email-from-login-prompt",
     description: "Unverified user logs in, sees verification prompt, verifies email",
-    requires: { multiTenancy: false, localUsersEnabled: true, mailApi: true },
+    requires: { localUsersEnabled: true, mailApi: true },
     user: { ref: "unverified-user-2", credentials: ["password"], totpConfigured: false, verified: false },
     expectedPath: [
       "verification",
@@ -43,7 +43,7 @@ export const verificationScenarios = defineScenarioSuite({
   defineScenario({
     id: "invalid-verification-code",
     description: "User enters an invalid verification code, sees error",
-    requires: { multiTenancy: false, localUsersEnabled: true, mailApi: true },
+    requires: { localUsersEnabled: true, mailApi: true },
     user: { ref: "unverified-user", credentials: ["password"], totpConfigured: false, verified: false },
     expectedPath: [
       "verification",

@@ -31,7 +31,7 @@ export const resilienceScenarios = defineScenarioSuite({
     defineScenario({
       id: "refresh-survives-login-walk",
       description: "F5 at every login step re-hydrates the same state and the walk still completes",
-      requires: { mfaEnabled: true, multiTenancy: false, localUsersEnabled: true },
+      requires: { mfaEnabled: true, localUsersEnabled: true },
       user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
       expectedPath: ["login-email", "login-password", "login-totp-verify", "oidc-callback"],
       interventions: [
@@ -51,7 +51,7 @@ export const resilienceScenarios = defineScenarioSuite({
     defineScenario({
       id: "double-click-submit",
       description: "Double-clicking Sign in on the password and TOTP steps never derails the walk",
-      requires: { mfaEnabled: true, multiTenancy: false, localUsersEnabled: true },
+      requires: { mfaEnabled: true, localUsersEnabled: true },
       user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
       expectedPath: ["login-email", "login-password", "login-totp-verify", "oidc-callback"],
       interventions: [
@@ -73,7 +73,7 @@ export const resilienceScenarios = defineScenarioSuite({
     defineScenario({
       id: "callback-replay-rejected",
       description: "Replaying the RP callback is rejected at both layers and revokes the token family",
-      requires: { mfaEnabled: true, multiTenancy: false, localUsersEnabled: true },
+      requires: { mfaEnabled: true, localUsersEnabled: true },
       user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
       expectedPath: ["login-email", "login-password", "login-totp-verify", "oidc-callback"],
       interventions: [
@@ -95,7 +95,7 @@ export const resilienceScenarios = defineScenarioSuite({
     defineScenario({
       id: "back-after-auth-terminal",
       description: "History-back after auth replays the consent-verifier hop and terminates in an explicit RP error",
-      requires: { mfaEnabled: true, multiTenancy: false, localUsersEnabled: true },
+      requires: { mfaEnabled: true, localUsersEnabled: true },
       user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
       expectedPath: ["login-email", "login-password", "login-totp-verify", "oidc-callback"],
       interventions: [
@@ -120,7 +120,7 @@ export const resilienceScenarios = defineScenarioSuite({
     defineScenario({
       id: "backup-code-history-roundtrip",
       description: "Browser Back/Forward across the TOTP ⇄ backup-code switch keeps the form live",
-      requires: { mfaEnabled: true, multiTenancy: false, hookService: true, localUsersEnabled: true },
+      requires: { mfaEnabled: true, hookService: true, localUsersEnabled: true },
       user: { ref: "backup-code-user", credentials: ["password", "totp", "lookup_secret"], totpConfigured: true },
       expectedPath: [
         "login-email",

@@ -26,7 +26,7 @@ export const registrationScenarios = defineScenarioSuite({
     id: "register-with-mfa",
     description:
       "Registration on an MFA-enforcing profile — email, password, then hand-off to email verification",
-    requires: { mfaEnabled: true, multiTenancy: false, hookService: true, registrationEnabled: true, localUsersEnabled: true, mailApi: true },
+    requires: { mfaEnabled: true, hookService: true, registrationEnabled: true, localUsersEnabled: true, mailApi: true },
     user: { ref: "new-user-mfa", credentials: ["password"], totpConfigured: false },
     expectedPath: [
       "register-email",
@@ -39,7 +39,7 @@ export const registrationScenarios = defineScenarioSuite({
     id: "register-without-mfa",
     description:
       "Registration without MFA enforcement — email, password, then hand-off to email verification",
-    requires: { multiTenancy: false, registrationEnabled: true, localUsersEnabled: true, mailApi: true },
+    requires: { registrationEnabled: true, localUsersEnabled: true, mailApi: true },
     user: { ref: "new-user-no-mfa", credentials: ["password"], totpConfigured: false },
     expectedPath: [
       "register-email",

@@ -29,7 +29,7 @@ export const webauthnScenarios = defineScenarioSuite({
       id: "webauthn-first-login-setup",
       description:
         "First login enrols the mandatory TOTP factor, then registers a virtual security key from the self-service passkey page",
-      requires: { webauthnEnabled: true, multiTenancy: false, mfaEnabled: true },
+      requires: { webauthnEnabled: true, mfaEnabled: true },
       user: { ref: "webauthn-new-user", credentials: ["password"], totpConfigured: false },
       phases: [
         {
@@ -57,7 +57,7 @@ export const webauthnScenarios = defineScenarioSuite({
       id: "webauthn-returning-login",
       description:
         "A returning user who has enrolled a security key is still challenged for the authenticator code — login-ui's MFA gate only recognises TOTP",
-      requires: { webauthnEnabled: true, multiTenancy: false, mfaEnabled: true },
+      requires: { webauthnEnabled: true, mfaEnabled: true },
       user: { ref: "webauthn-new-user-2", credentials: ["password"], totpConfigured: false },
       phases: [
         {

@@ -20,7 +20,7 @@ export const sessionScenarios = defineScenarioSuite({
   defineScenario({
     id: "session-reuse-no-max-age",
     description: "Second login reuses existing Kratos session (no max_age)",
-    requires: { mfaEnabled: true, multiTenancy: false, localUsersEnabled: true },
+    requires: { mfaEnabled: true, localUsersEnabled: true },
     user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
     phases: [
       {
@@ -45,7 +45,7 @@ export const sessionScenarios = defineScenarioSuite({
   defineScenario({
     id: "forced-reauth-max-age-0",
     description: "max_age=0 forces full re-authentication including MFA",
-    requires: { mfaEnabled: true, multiTenancy: false, localUsersEnabled: true },
+    requires: { mfaEnabled: true, localUsersEnabled: true },
     user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
     phases: [
       {
@@ -84,7 +84,7 @@ export const sessionScenarios = defineScenarioSuite({
   defineScenario({
     id: "backup-code-regeneration-prompt",
     description: "User running low on backup codes is prompted to regenerate after signing in with one",
-    requires: { mfaEnabled: true, multiTenancy: false, hookService: true, localUsersEnabled: true },
+    requires: { mfaEnabled: true, hookService: true, localUsersEnabled: true },
     user: { ref: "backup-code-user-2", credentials: ["password", "totp", "lookup_secret"], totpConfigured: true },
     expectedPath: [
       "login-email",

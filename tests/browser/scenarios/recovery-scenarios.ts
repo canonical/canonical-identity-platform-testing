@@ -18,7 +18,7 @@ export const recoveryScenarios = defineScenarioSuite({
   defineScenario({
     id: "password-reset-via-email",
     description: "Password reset: click reset, get code from email, set new password",
-    requires: { mfaEnabled: true, multiTenancy: false, hookService: true, localUsersEnabled: true, mailApi: true },
+    requires: { mfaEnabled: true, hookService: true, localUsersEnabled: true, mailApi: true },
     user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
     expectedPath: [
       "login-email",
@@ -41,7 +41,7 @@ export const recoveryScenarios = defineScenarioSuite({
   defineScenario({
     id: "password-reset-then-mfa-login",
     description: "Password reset followed by login with new password and MFA",
-    requires: { mfaEnabled: true, multiTenancy: false, hookService: true, localUsersEnabled: true, mailApi: true },
+    requires: { mfaEnabled: true, hookService: true, localUsersEnabled: true, mailApi: true },
     user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
     phases: [
       {
@@ -95,7 +95,7 @@ export const recoveryScenarios = defineScenarioSuite({
     id: "wrong-codes-rejected-in-place",
     description:
       "Wrong recovery codes are rejected in place on the code step, for the submissions the cap allows",
-    requires: { multiTenancy: false, localUsersEnabled: true, mailApi: true },
+    requires: { localUsersEnabled: true, mailApi: true },
     // Only a password identity is needed: the walk submits wrong codes and
     // never reaches the AAL2 gate, so demanding a TOTP secret here would make
     // the scenario unrunnable on MFA-off profiles for no reason.

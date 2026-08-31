@@ -17,7 +17,7 @@ export const errorScenarios = defineScenarioSuite({
   defineScenario({
     id: "wrong-password-error",
     description: "Wrong password shows error message on login-password page",
-    requires: { mfaEnabled: true, multiTenancy: false, localUsersEnabled: true },
+    requires: { mfaEnabled: true, localUsersEnabled: true },
     user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
     expectedPath: [
       "login-email",
@@ -33,7 +33,7 @@ export const errorScenarios = defineScenarioSuite({
   defineScenario({
     id: "invalid-totp-code",
     description: "Wrong TOTP code shows error on login-totp-verify page",
-    requires: { mfaEnabled: true, multiTenancy: false, localUsersEnabled: true },
+    requires: { mfaEnabled: true, localUsersEnabled: true },
     user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
     expectedPath: [
       "login-email",
@@ -48,7 +48,7 @@ export const errorScenarios = defineScenarioSuite({
   defineScenario({
     id: "backup-code-login",
     description: "User switches from TOTP verify to backup code and authenticates",
-    requires: { mfaEnabled: true, multiTenancy: false, hookService: true, localUsersEnabled: true },
+    requires: { mfaEnabled: true, hookService: true, localUsersEnabled: true },
     user: { ref: "backup-code-user", credentials: ["password", "totp", "lookup_secret"], totpConfigured: true },
     expectedPath: [
       "login-email",

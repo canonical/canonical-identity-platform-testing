@@ -18,7 +18,7 @@ export const loginScenarios = defineScenarioSuite({
   defineScenario({
     id: "first-login-mfa",
     description: "First-time login with MFA enabled — user must set up TOTP",
-    requires: { mfaEnabled: true, multiTenancy: false, localUsersEnabled: true },
+    requires: { mfaEnabled: true, localUsersEnabled: true },
     user: { ref: "first-mfa", credentials: ["password"], totpConfigured: false },
     expectedPath: [
       "login-email",
@@ -45,7 +45,7 @@ export const loginScenarios = defineScenarioSuite({
     id: "login-carries-group-claim",
     description:
       "A user in a hook-service group receives that group in both the access and ID token",
-    requires: { mfaEnabled: true, multiTenancy: false, localUsersEnabled: true, hookService: true },
+    requires: { mfaEnabled: true, localUsersEnabled: true, hookService: true },
     user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
     expectedPath: [
       "login-email",
@@ -60,7 +60,7 @@ export const loginScenarios = defineScenarioSuite({
   defineScenario({
     id: "returning-login-mfa",
     description: "Returning user with TOTP already configured",
-    requires: { mfaEnabled: true, multiTenancy: false, localUsersEnabled: true },
+    requires: { mfaEnabled: true, localUsersEnabled: true },
     user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
     expectedPath: [
       "login-email",
@@ -75,7 +75,7 @@ export const loginScenarios = defineScenarioSuite({
   defineScenario({
     id: "login-mfa-off",
     description: "Login with MFA disabled — password only, no TOTP",
-    requires: { mfaEnabled: false, multiTenancy: false, localUsersEnabled: true },
+    requires: { mfaEnabled: false, localUsersEnabled: true },
     user: { ref: "no-mfa", credentials: ["password"], totpConfigured: false },
     expectedPath: [
       "login-email",
@@ -93,7 +93,7 @@ export const loginScenarios = defineScenarioSuite({
   defineScenario({
     id: "expired-totp-code",
     description: "Expired TOTP code shows error, stays on login-totp-verify page",
-    requires: { mfaEnabled: true, multiTenancy: false, localUsersEnabled: true },
+    requires: { mfaEnabled: true, localUsersEnabled: true },
     user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
     expectedPath: [
       "login-email",
