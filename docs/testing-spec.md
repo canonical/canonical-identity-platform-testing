@@ -999,9 +999,10 @@ references** — other documents cite "§10 item N", so renumber nothing.
     *Still staged, in rough value order:* passkey delete and connected
     accounts (committed as item 15); S-2 mode 1 (used consent challenge with a live session, the half
     carrying the RP-silence claim); resend-invalidation of a prior code
-    (ACCIDENTALLY WITNESSED 2026-09-01: the resend-code primitive's pre-drain
-    race submitted the original code after a resend and kratos rejected it —
-    the deliberate expectError scenario stays staged);
+    LANDED 2026-09-01 (`verification-resend-invalidates-prior-code`: the
+    stale-after-resend knob runs the shared resend flow and submits the
+    ORIGINAL code, rejected visibly — first witnessed accidentally by the
+    resend primitive's pre-drain race, now asserted deliberately);
     kratos-vs-hydra session split-brain (admin session revoke → re-authorize
     must re-challenge); short-lifespan expiry lanes (S-1); and
     `prompt=login`/`prompt=none`/`id_token_hint` request-shaping. Service-API

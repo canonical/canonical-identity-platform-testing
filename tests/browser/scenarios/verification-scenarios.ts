@@ -74,5 +74,26 @@ export const verificationScenarios = defineScenarioSuite({
     ],
     interventions: [{ at: "verification", do: "resend-code" }],
   }),
+  // ── Resend invalidates the prior code ────────────────────────────────────
+  // The deliberate half of what the resend primitive's pre-drain race
+  // witnessed accidentally (2026-09-01): kratos replaces the flow's code on
+  // resend, so submitting the ORIGINAL code afterwards must be rejected
+  // visibly. The stale-after-resend knob makes the self-transition run the
+  // shared resend flow and submit the invalidated code (typed and asserted
+  // into the field, so the rejection is about the code, never a swallowed
+  // input).
+  defineScenario({
+    id: "verification-resend-invalidates-prior-code",
+    description:
+      "After a resend, the original verification code is rejected visibly",
+    requires: { verificationEnabled: true, localUsersEnabled: true, mailApi: true },
+    user: { ref: "unverified-user-4", credentials: ["password"], totpConfigured: false, verified: false },
+    expectedPath: [
+      "verification",
+      "verification",
+    ],
+    expectError: true,
+    verificationCodeSubmission: "stale-after-resend",
+  }),
   ],
 });

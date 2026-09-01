@@ -274,6 +274,13 @@ export interface Scenario {
    * no longer accepts, which is a different rejection from a wrong code.
    */
   totpCodeWindow?: "expired";
+  /**
+   * Which code the "verification → verification" error self-transition
+   * submits. Unset → a junk code. "stale-after-resend" → resend first, then
+   * submit the ORIGINAL code the resend invalidated (helpers/resend.ts).
+   * Requires expectError and a verification self-transition in the path.
+   */
+  verificationCodeSubmission?: "stale-after-resend";
   /** Perturbations applied to the walk (single-phase scenarios). */
   interventions?: Intervention[];
   /** Substring the final URL must contain (single-phase scenarios). */
@@ -381,6 +388,22 @@ export function defineScenario(scenario: Scenario): Scenario {
         `Scenario "${scenario.id}" declares expectError but its expectedPath has no ` +
         `self-transition (no state repeated back-to-back), so nothing would ever check ` +
         `for an error message — remove it, or repeat the state the flow stays on.`
+      );
+    }
+  }
+  // `verificationCodeSubmission` only fires inside the verification error
+  // self-transition — anywhere else it is a decorative flag (the R-2 class).
+  if (scenario.verificationCodeSubmission) {
+    const paths = scenario.phases
+      ? scenario.phases.map((p) => p.expectedPath)
+      : [scenario.expectedPath ?? []];
+    const hasPair = paths.some((p) =>
+      p.some((state, i) => i > 0 && state === "verification" && p[i - 1] === "verification"),
+    );
+    if (!hasPair || !scenario.expectError && !scenario.phases?.some((p) => p.expectError)) {
+      throw new Error(
+        `Scenario "${scenario.id}" declares verificationCodeSubmission but no path contains a ` +
+        `"verification → verification" self-transition with expectError — the knob could never fire.`
       );
     }
   }

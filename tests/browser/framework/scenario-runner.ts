@@ -432,6 +432,7 @@ export async function runScenario(
     flowParams: scenario.flowParams ?? {},
     selectTenant: resolveTenantDisplayName(manifest, scenario.user.selectTenant),
     totpCodeWindow: scenario.totpCodeWindow,
+    verificationCodeSubmission: scenario.verificationCodeSubmission,
     webauthn: extraCtx?.webauthn,
     // What the settings restore pass submits (transitions.ts
     // "reset-password → reset-password"): the pre-mutation truth, same snapshot

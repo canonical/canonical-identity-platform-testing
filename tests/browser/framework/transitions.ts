@@ -36,6 +36,7 @@ import { selectTenant } from "../helpers/navigation";
 import { MAIL_SUBJECTS, mailCursor, waitForMailCode } from "../helpers/mail";
 import { enterNewPassword, fillRegistrationPassword } from "../helpers/password";
 import { startRecoveryFlow, startVerificationFlow, startRegistrationFlow } from "../helpers/kratos";
+import { resendVerificationCode } from "../helpers/resend";
 import { LOGIN_UI_URL } from "../helpers/config";
 import { DEFAULT_TEST_PASSWORD } from "../helpers/test-credentials";
 import type { ExecutionLane } from "../helpers/config";
@@ -64,6 +65,11 @@ export interface ActionContext {
    * two different rejections instead of the same one twice.
    */
   totpCodeWindow?: "expired";
+  /** Which code the "verification → verification" error self-transition
+   *  submits. Unset → a junk code. "stale-after-resend" → run the resend
+   *  flow (helpers/resend.ts) and submit the ORIGINAL code, which the
+   *  resend invalidated — a different rejection with a different cause. */
+  verificationCodeSubmission?: "stale-after-resend";
   /** Backup code generated during setup (stored here for later use). */
   backupCode?: string;
   /** RFC 8628 device_code minted by "start → device-code" — the runner
@@ -1178,10 +1184,28 @@ export const TRANSITION_TABLE: TransitionTable = {
   },
 
   // The scenario declares `expectError: true`; the runner reads the message.
+  // Two rejection kinds, the scenario's choice (`verificationCodeSubmission`,
+  // the totpCodeWindow precedent): a junk code, or the ORIGINAL code after a
+  // resend invalidated it (kratos replaces the flow's code on resend —
+  // witnessed 2026-09-01 by the resend primitive's pre-drain race, now
+  // asserted deliberately).
   "verification → verification": {
-    description: "Submit invalid verification code (error — stays on verification page)",
-    action: async (page) => {
-      await page.getByLabel(/verification code/i).fill("000000");
+    description: "Submit a rejected verification code (error — stays on verification page)",
+    action: async (page, user, ctx) => {
+      if (ctx.verificationCodeSubmission !== "stale-after-resend") {
+        await page.getByLabel(/verification code/i).fill("000000");
+        await page.getByRole("button", { name: "Continue", exact: true }).click();
+        return;
+      }
+      assertInternalLane(ctx, "Stale-after-resend code submission (reads Mailslurper)");
+      const { originalCode, cursor } = await resendVerificationCode(page, user.email, ctx.mailCursor);
+      ctx.mailCursor = cursor;
+      // Same React-race-safe input as the accept path: typed per character,
+      // value asserted, so the rejection below is about the CODE, never a
+      // swallowed field.
+      const codeField = page.getByLabel(/verification code/i);
+      await codeField.pressSequentially(originalCode, { delay: 20 });
+      await expect(codeField).toHaveValue(originalCode);
       await page.getByRole("button", { name: "Continue", exact: true }).click();
     },
   },

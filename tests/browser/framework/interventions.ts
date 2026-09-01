@@ -27,7 +27,7 @@
 
 import { test, expect, Page } from "@playwright/test";
 import { assertPageState } from "../helpers/page-state";
-import { MAIL_SUBJECTS, mailCursor, waitForMailCode } from "../helpers/mail";
+import { resendVerificationCode } from "../helpers/resend";
 import type { ManifestUser } from "../seeder/manifest-schema";
 import type { StateIntervention } from "./scenario-types";
 import { assertInternalLane, type ActionContext } from "./transitions";
@@ -127,45 +127,14 @@ export async function runStateIntervention(
     case "resend-code":
       await test.step(`Intervention: resend code at ${iv.at}`, async () => {
         assertInternalLane(ctx, "Resend-code intervention (reads Mailslurper)");
-        // ORDERING IS THE WHOLE PRIMITIVE. Courier delivery is async, and
-        // this intervention fires milliseconds after the address submit — so
-        // first DRAIN the original send (using the walk's own pre-send
-        // cursor), and only then snapshot. Without the drain, the snapshot
-        // can predate the original mail's arrival, the arrival wait below
-        // resolves the ORIGINAL code as if it were the resent one, and the
-        // walk then submits a code the resend just invalidated
-        // ("Verification code incorrect" — observed 2026-09-01 before the
-        // drain existed).
-        await waitForMailCode({
-          recipient: user.email,
-          subject: MAIL_SUBJECTS.verification,
-          seen: ctx.mailCursor,
-        });
-        const cursor = await mailCursor(user.email);
-
-        // PD-10, pinned as REAL behaviour (§11, the PD-12 precedent): the
-        // cooldown countdown renders (~1m30s) while the button re-enables
-        // after 90ms (RESEND_CODE_TIMEOUT passed unscaled to setTimeout),
-        // and no server-side limit exists either — so this immediate click
-        // SUCCEEDS today. When the fix lands, the button stays disabled for
-        // the full cooldown, this click times out, and the failure is the
-        // signal to flip this primitive to wait-or-assert-disabled.
-        await page.getByRole("button", { name: "Resend code" }).click();
-        await expect(
-          page.getByText(/request again in/i).first(),
-          "the cooldown countdown must render after a resend",
-        ).toBeVisible();
-
-        // The resend is real: a NEW message lands for this address.
-        await waitForMailCode({
-          recipient: user.email,
-          subject: MAIL_SUBJECTS.verification,
-          seen: cursor,
-        });
+        // The ordering contract (drain original → snapshot → click → wait)
+        // and the PD-10 pin both live in helpers/resend.ts, shared with the
+        // stale-after-resend branch of "verification → verification".
+        const { cursor } = await resendVerificationCode(page, user.email, ctx.mailCursor);
+        // Re-anchor the walk: its code-submit can now only resolve the
+        // RESENT mail, and reaching the terminal proves the newest code is
+        // the one the platform accepts.
         ctx.mailCursor = cursor;
-
-        // Still on the same page — the walk continues and its code-submit
-        // proves the RESENT code (newest) is the one the platform accepts.
         await assertPageState(page, iv.at);
       });
       return;
