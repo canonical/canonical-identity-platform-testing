@@ -1120,6 +1120,21 @@ export const TRANSITION_TABLE: TransitionTable = {
       await fillRegistrationPassword(page, password);
     },
   },
+  // Verification OFF: kratos answers the password submit with
+  // continue_with[redirect_browser_to → /ui/manage_details] (measured
+  // 2026-09-01 on mx-l1m0v0wnp0t1h0u1aj), RegisterPassword.tsx follows it as
+  // the fallback branch (v0.28.0 RegisterPassword.tsx:85-94), and the
+  // registration `session` after-hook (docker/kratos/kratos.yml, mirroring
+  // the operator template) means the settings hub actually serves — the
+  // runner-observed terminal.
+  "register-password → manage-details": {
+    description:
+      "Enter valid password and submit — no verification hand-off; the session lands on the settings hub",
+    action: async (page, _user, ctx) => {
+      const password = ctx.newPassword ?? DEFAULT_TEST_PASSWORD;
+      await fillRegistrationPassword(page, password);
+    },
+  },
 
   // ── Verification flow transitions ──────────────────────────────────────
   //

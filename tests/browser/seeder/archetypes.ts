@@ -166,6 +166,13 @@ export const USER_ARCHETYPES: UserArchetype[] = [
     credentials: ["password"],
     totpConfigured: false,
   },
+  {
+    // For register-without-verification: deleted and re-created like the
+    // other new-user-* archetypes, on rows where verification is off.
+    ref: "new-user-no-verification",
+    credentials: ["password"],
+    totpConfigured: false,
+  },
 
   // ── Verification users ─────────────────────────────────────────────────
   // One per verification scenario: completing a verification flow permanently

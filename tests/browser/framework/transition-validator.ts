@@ -80,9 +80,11 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   // ── Registration flow ────────────────────────────────────────────────
   // Kratos always appends the verification hook when verification is enabled,
   // and RegisterPassword.tsx follows continue_with[show_verification_ui] first.
-  // No session is issued after registration, so no TOTP-enrolment step exists.
+  // The registration `session` after-hook issues a session; verification-on
+  // rows hand off to the verification page, verification-off rows land on
+  // the settings hub (runner-observed 2026-09-01).
   "register-email": ["register-password"],
-  "register-password": ["verification"],
+  "register-password": ["verification", "manage-details"],
 
   // ── Verification flow ─────────────────────────────────────────────────
   // A standalone verification flow is not part of an OIDC journey, so Kratos

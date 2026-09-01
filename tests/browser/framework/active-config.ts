@@ -28,6 +28,8 @@ export interface ActiveConfig {
   local_users_enabled: boolean | null;
   registration_enabled: boolean | null;
   account_linking_enabled: boolean | null;
+  /** Email verification flow enabled (verification_enabled capability). */
+  verification_enabled?: boolean;
   oidc_providers: string[];
 
   /**

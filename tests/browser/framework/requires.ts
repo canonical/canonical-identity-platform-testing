@@ -222,5 +222,18 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
+  // 18. verificationEnabled (verification_enabled capability). Absent
+  // defaults to true: verification was an unconditional assumption before
+  // the verification-off registration variant existed.
+  if (requires.verificationEnabled !== undefined) {
+    const actual = activeConfig.verification_enabled ?? true;
+    if (actual !== requires.verificationEnabled) {
+      return {
+        met: false,
+        reason: `requires verificationEnabled=${requires.verificationEnabled}, ActiveConfig verification_enabled=${actual}`,
+      };
+    }
+  }
+
   return { met: true };
 }

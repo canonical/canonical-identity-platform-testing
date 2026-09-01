@@ -45,6 +45,8 @@ export interface ScenarioRequires {
   mfaEnforced?: boolean;
   /** Registration must be enabled (registration_enabled flag). */
   registrationEnabled?: boolean;
+  /** Email verification must be enabled/disabled (verification_enabled flag). */
+  verificationEnabled?: boolean;
   /** Account linking must be enabled (account_linking_enabled flag). */
   accountLinkingEnabled?: boolean;
   /** OIDC must be enabled (oidc_enabled flag). */

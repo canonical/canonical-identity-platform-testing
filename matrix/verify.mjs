@@ -69,7 +69,11 @@ function resolveUrls(env = {}, backend = "compose") {
     loginUi: pick("LOGIN_UI_URL", "http://localhost"),
     // Explicitly-supplied login-ui base overrides the declaration's base_url.
     loginUiOverridden: Boolean(env.LOGIN_UI_URL ?? process.env.LOGIN_UI_URL),
-    mailApi: pick("MAIL_API_URL", undefined),
+    // Mailslurper's JSON service API is a published compose host port (4437 —
+    // distinct from the 4436 web UI; helpers/config.ts carries the same
+    // default), so it gets the same backend-aware fallback as every other
+    // published surface: localhost on compose/juju, undefined on urls.
+    mailApi: local("MAIL_API_URL", 4437),
     // Add-on status endpoints (compose backend publishes these host ports).
     serviceStatus: {
       "tenant-service": pick("TENANT_SERVICE_URL", "http://localhost:8081"),
