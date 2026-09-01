@@ -147,11 +147,33 @@ async function deviceCodeReplayRejected({ page, manifest, deviceCode }: PostChec
   const body = (await res.json()) as { error?: string };
   expect(body.error, "replayed device_code must answer invalid_grant").toBe("invalid_grant");
 }
+/**
+ * The register-without-verification premise, pinned server-side: with the
+ * verification flow OFF, the freshly registered identity's address must be
+ * UNVERIFIED — otherwise "the unverified account signs in" is vacuous
+ * (verified 2026-09-01 on mx-l1m0v0wnp0t1h0u1aj). Looks the identity up by
+ * the scenario user's EMAIL: registration deleted and re-created it, so the
+ * manifest's identityId is stale by design.
+ */
+async function registeredAddressUnverified({ user }: PostCheckArgs): Promise<void> {
+  const res = await fetch(
+    `${KRATOS_ADMIN_URL}/admin/identities?credentials_identifier=${encodeURIComponent(user.email)}`,
+  );
+  expect(res.ok, `admin lookup of ${user.email} must succeed (${res.status})`).toBe(true);
+  const identities = (await res.json()) as Array<{
+    verifiable_addresses?: Array<{ value: string; verified: boolean }>;
+  }>;
+  expect(identities.length, `registration must have created an identity for ${user.email}`).toBeGreaterThan(0);
+  for (const address of identities[0].verifiable_addresses ?? []) {
+    expect(address.verified, `address ${address.value} must be unverified with the verification flow off`).toBe(false);
+  }
+}
 
 const POST_CHECKS: Record<PostCheckName, (args: PostCheckArgs) => Promise<void>> = {
   "code-replay-revokes-family": codeReplayRevokesFamily,
   "backup-codes-deactivated": backupCodesDeactivated,
   "device-code-replay-rejected": deviceCodeReplayRejected,
+  "registered-address-unverified": registeredAddressUnverified,
 };
 
 export async function runPostCheck(name: PostCheckName, args: PostCheckArgs): Promise<void> {

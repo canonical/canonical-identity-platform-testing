@@ -81,6 +81,10 @@ export const registrationScenarios = defineScenarioSuite({
         expectedPath: ["login-email", "login-password", "oidc-callback"],
       },
     ],
+    // Server-side premise pin: with verification off the created identity's
+    // address stays UNVERIFIED — without this, phase 2's "unverified account
+    // signs in" could silently become vacuous if kratos ever auto-verified.
+    postChecks: ["registered-address-unverified"],
   }),
   ],
 });
