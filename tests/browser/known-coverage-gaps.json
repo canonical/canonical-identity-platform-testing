@@ -27,6 +27,11 @@
       "test": "settings.spec.ts \u203a settings-backup-codes-regenerate",
       "reason": "the prompt-after-every-backup-code-sign-in terminal this scenario pins only exists on backup_code_prompt_on_use=true targets (iam.orange, login-ui >= v0.27); every gate profile runs the v0.28.0 workload, which prompts only at <=3 unused codes — that side of the fork is covered by backup-code-reuse-rejected's burn phase",
       "unblocked_by": "a gate profile whose login-ui renders the regeneration prompt after every backup-code sign-in, or the urls-lane row deployed-core-local-mfa joining the coverage union"
+    },
+    {
+      "test": "registration.spec.ts \u203a register-without-verification",
+      "reason": "requires verification_enabled=false, and every gate profile runs verification on; the scenario executes on the nightly matrix rows with verification off (mx-l1m0v0wnp0t1h0u1aj proven 2026-09-01: 11 executed matching the declaration, 0 failures)",
+      "unblocked_by": "a pinned gate profile with verification disabled, or the coverage union consuming nightly matrix row coverage"
     }
   ]
 }
