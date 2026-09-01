@@ -176,7 +176,7 @@ export interface ScenarioAssertions {
 export interface StateIntervention {
   /** State in this phase's expectedPath to perturb (after its assertion). */
   at: PageStateType;
-  do: "reload" | "replay-current-url" | "history-back" | "history-roundtrip" | "resend-code";
+  do: "reload" | "replay-current-url" | "history-back" | "history-roundtrip" | "resend-code" | "drop-totp-out-of-band";
   /** Terminal state expected after the perturbation (replay/history-back). */
   expect?: PageStateType;
   /** Substring the final URL must contain (e.g. an exact `error=` code). */
@@ -523,6 +523,22 @@ export function defineScenario(scenario: Scenario): Scenario {
         if (iv.expect || iv.untilUrl || iv.via) {
           throw new Error(
             `Scenario "${scenario.id}" ${where}: "resend-code" stays on "${iv.at}"; ` +
+            `it takes no expect/untilUrl/via.`
+          );
+        }
+      } else if (iv.do === "drop-totp-out-of-band") {
+        // Admin-side perturbation (the concurrent-session-revoke class): the
+        // page is untouched, so the SUBSEQUENT states are the assertion — a
+        // final-state anchor perturbs nothing anyone observes.
+        if (isFinal) {
+          throw new Error(
+            `Scenario "${scenario.id}" ${where}: "drop-totp-out-of-band" must be anchored ` +
+            `mid-walk — the states after it are what observe the dropped credential.`
+          );
+        }
+        if (iv.expect || iv.untilUrl || iv.via) {
+          throw new Error(
+            `Scenario "${scenario.id}" ${where}: "drop-totp-out-of-band" stays on "${iv.at}"; ` +
             `it takes no expect/untilUrl/via.`
           );
         }

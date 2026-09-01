@@ -440,10 +440,14 @@ Two classes of claim assertion close gaps a page walk cannot:
 
   **Read that scope carefully.** login-ui#884 (present in the v0.28.0 build
   under test) made WebAuthn usable as a second factor alongside TOTP, so this
-  assertion pins the
-  branch the scenario **walks**, not a platform impossibility. The remaining
-  defect is enrolment ordering; the webauthn-branch scenario that would pin it
-  is still missing — §10 item 12 names the exact transition it would traverse.
+  assertion pins the branch the scenario **walks**, not a platform
+  impossibility. The webauthn-branch scenario landed 2026-09-01
+  (`webauthn-key-only-forces-totp-enrolment`, §10 item 12's edge) and
+  CONFIRMED the finding sharper rather than falsifying it: a key-only
+  identity IS challenged for the key straight from the password step, the
+  signed assertion is accepted (`amr` records `webauthn`), and login-ui's
+  TOTP-only gate still forces TOTP re-enrolment mid-login before the
+  callback — a user cannot stay key-only, on either webauthn shape.
 
 **WebAuthn sign-in (the assertion ceremony) is covered by exactly one scenario.**
 Every other WebAuthn journey ENROLS: portal registers a key and never uses it,
@@ -1034,7 +1038,7 @@ references** — other documents cite "§10 item N", so renumber nothing.
     | 10 Google alternates (`provider:google:*`, `provider:dex:consent → oidc-callback`) | Defensible — alternates for a nondeterministic third-party UI |
     | `consent → oidc-callback` | **Deleted 2026-08-31** — see below |
     | `login-password → login-backup-code-verify` | **Covered 2026-08-31** — `settings-totp-unlink` phases 1 and 4 traverse it (it is the real login shape of a lookup_secret-only identity, the post-unlink product state) |
-    | `login-password → login-webauthn-verify` | Coverable since login-ui#884 — this is PD-4's falsifier (§7) |
+    | `login-password → login-webauthn-verify` | **Covered 2026-09-01** — `webauthn-key-only-forces-totp-enrolment` traverses it (a key-only identity, built by dropping the totp credential out-of-band). The intended PD-4 falsifier CONFIRMED instead: the signed key is accepted and TOTP re-enrolment is forced mid-login, identically on both webauthn shapes |
     | `tenant-selection → login-totp-verify` | Coverable now portal runs MT — re-measure |
 
     The unvisited states were `consent`, `provider:dex:consent`,

@@ -37,7 +37,9 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   "login-email": ["login-password", "tenant-selection", "provider:dex:login", "provider:google:login", "oidc-callback", "reset-email", "register-email", "verification"],
   "login-password": ["setup-secure", "login-totp-verify", "login-backup-code-verify", "login-webauthn-verify", "oidc-callback", "login-password", "reset-email"],
   "login-totp-verify": ["oidc-callback", "login-backup-code-verify", "login-totp-verify", "backup-code-regenerate", "reset-password", "device-complete"],
-  "login-webauthn-verify": ["oidc-callback"],
+  // → setup-secure: a key-only identity's signed assertion is accepted and
+  // login-ui then forces TOTP enrolment mid-login (PD-4, observed 2026-09-01).
+  "login-webauthn-verify": ["oidc-callback", "setup-secure"],
   // → setup-secure: the identity's only 2FA is lookup_secret (post-unlink)
   // and MFA is enforced, so an accepted code walks into TOTP re-enrolment.
   "login-backup-code-verify": ["oidc-callback", "login-backup-code-verify", "backup-code-regenerate", "setup-secure"],

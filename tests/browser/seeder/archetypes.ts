@@ -143,6 +143,11 @@ export const USER_ARCHETYPES: UserArchetype[] = [
     credentials: ["password"],
     totpConfigured: false,
   },
+  {
+    ref: "webauthn-new-user-3",
+    credentials: ["password"],
+    totpConfigured: false,
+  },
 
   // ── Google OIDC user ───────────────────────────────────────────────────
   // Only seeded when GOOGLE_TEST_EMAIL and GOOGLE_TEST_SUBJECT_ID are set.

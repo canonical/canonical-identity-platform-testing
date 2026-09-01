@@ -28,6 +28,7 @@
 import { test, expect, Page } from "@playwright/test";
 import { assertPageState } from "../helpers/page-state";
 import { resendVerificationCode } from "../helpers/resend";
+import { deleteIdentityCredentialType } from "../helpers/kratos";
 import type { ManifestUser } from "../seeder/manifest-schema";
 import type { StateIntervention } from "./scenario-types";
 import { assertInternalLane, type ActionContext } from "./transitions";
@@ -135,6 +136,21 @@ export async function runStateIntervention(
         // RESENT mail, and reaching the terminal proves the newest code is
         // the one the platform accepts.
         ctx.mailCursor = cursor;
+        await assertPageState(page, iv.at);
+      });
+      return;
+
+    case "drop-totp-out-of-band":
+      await test.step(`Intervention: drop TOTP credential out-of-band at ${iv.at}`, async () => {
+        assertInternalLane(ctx, "Out-of-band TOTP credential removal (admin API)");
+        // The admin-side perturbation class (wave 2's concurrent-session-revoke
+        // sibling): between two states of the walk, the identity loses its
+        // totp credential — what the SUBSEQUENT states observe is the
+        // scenario's assertion. The page is untouched.
+        if (!user.identityId) {
+          throw new Error(`drop-totp-out-of-band: no identityId for user "${user.ref}"`);
+        }
+        await deleteIdentityCredentialType(user.identityId, "totp");
         await assertPageState(page, iv.at);
       });
       return;

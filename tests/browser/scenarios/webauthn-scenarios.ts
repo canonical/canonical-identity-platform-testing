@@ -105,5 +105,65 @@ export const webauthnScenarios = defineScenarioSuite({
       },
       cleanup: "remove-2fa",
     }),
+    // ── The key-only identity: PD-4 walked, and CONFIRMED sharper ────────
+    // login-ui#884 (in the v0.28.0 build) made WebAuthn usable as a second
+    // factor; what nothing walked until now was the key-ONLY identity,
+    // because enrolment ordering forces TOTP first. This scenario builds the
+    // real shape — enrol both factors the only way the UI allows, then drop
+    // the totp credential out-of-band (the admin-side perturbation class),
+    // exactly the identity a user has after unlinking their authenticator
+    // while keeping a key.
+    //
+    // The intended falsifier FAILED to falsify, on both profile shapes
+    // (observed 2026-09-01, canonical-internal and canonical-portal
+    // identically): the fresh login lands on the KEY challenge straight from
+    // the password step (§10 item 12's last cheap edge, now traversed), the
+    // signed assertion is ACCEPTED — a session exists — and login-ui then
+    // forces TOTP RE-ENROLMENT mid-login before completing to the callback.
+    // PD-4 sharpened: not even a signed security key satisfies the TOTP-only
+    // gate; the user cannot stay key-only. The walk pins that reality (§11),
+    // and `amr` pins the claim half: webauthn IS recorded (the ceremony
+    // counted) — when a release lets the key complete without the forced
+    // enrolment, the path assertion fails and this scenario flips.
+    defineScenario({
+      id: "webauthn-key-only-forces-totp-enrolment",
+      description:
+        "A key-only identity is challenged for the key from the password step; the signed key is accepted and TOTP re-enrolment is still forced",
+      requires: { webauthnEnabled: true, mfaEnabled: true },
+      user: { ref: "webauthn-new-user-3", credentials: ["password"], totpConfigured: false },
+      phases: [
+        {
+          name: "first-login",
+          expectedPath: [
+            "login-email",
+            "login-password",
+            "setup-secure",
+            "setup-complete",
+            "oidc-callback",
+          ],
+        },
+        {
+          name: "enrol-security-key",
+          expectedPath: ["setup-passkey", "setup-complete"],
+        },
+        {
+          name: "key-only sign-in — key accepted, TOTP enrolment forced",
+          freshSession: true,
+          expectedPath: [
+            "login-email",
+            "login-password",
+            "login-webauthn-verify",
+            "setup-secure",
+            "setup-complete",
+            "oidc-callback",
+          ],
+          interventions: [{ at: "login-email", do: "drop-totp-out-of-band" }],
+        },
+      ],
+      assertions: {
+        custom: amrRecords({ mustInclude: ["webauthn"] }),
+      },
+      cleanup: "remove-2fa",
+    }),
   ],
 });

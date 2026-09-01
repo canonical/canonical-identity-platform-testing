@@ -1237,6 +1237,20 @@ export const TRANSITION_TABLE: TransitionTable = {
       await page.locator('button[name="webauthn_login_trigger"]').click();
     },
   },
+  // The key-only identity's REAL post-ceremony hop, identical on the
+  // sequencing and webauthn-as-2FA shapes (observed 2026-09-01 on both
+  // canonical-internal and canonical-portal): the signed assertion is
+  // ACCEPTED — a session exists, the settings flow id on /ui/setup_secure
+  // proves it — and login-ui's TOTP-only MFA gate then forces TOTP enrolment
+  // mid-login anyway instead of completing to the callback. PD-4, sharpened:
+  // not even a signed key satisfies the gate's credential check.
+  "login-webauthn-verify → setup-secure": {
+    description: "Authenticate with the security key — login-ui accepts it, then forces TOTP enrolment (PD-4)",
+    action: async (page, _user, ctx) => {
+      await ctx.webauthn?.setup();
+      await page.locator('button[name="webauthn_login_trigger"]').click();
+    },
+  },
 
   // ── Edge case transitions ──────────────────────────────────────────────
 
