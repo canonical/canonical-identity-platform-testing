@@ -998,7 +998,10 @@ references** — other documents cite "§10 item N", so renumber nothing.
 
     *Still staged, in rough value order:* passkey delete and connected
     accounts (committed as item 15); S-2 mode 1 (used consent challenge with a live session, the half
-    carrying the RP-silence claim); resend-invalidation of a prior code;
+    carrying the RP-silence claim); resend-invalidation of a prior code
+    (ACCIDENTALLY WITNESSED 2026-09-01: the resend-code primitive's pre-drain
+    race submitted the original code after a resend and kratos rejected it —
+    the deliberate expectError scenario stays staged);
     kratos-vs-hydra session split-brain (admin session revoke → re-authorize
     must re-challenge); short-lifespan expiry lanes (S-1); and
     `prompt=login`/`prompt=none`/`id_token_hint` request-shaping. Service-API
@@ -1009,13 +1012,13 @@ references** — other documents cite "§10 item N", so renumber nothing.
 
     | Primitive | Anchor | What it does | Where legal |
     |---|---|---|---|
-    | `resend-code` | `at` | Clicks resend on code-input forms, asserts cooldown countdown / rate-limit | `verification`, `reset-email-code` |
+    | `resend-code` | `at` | **Landed 2026-09-01** — clicks resend, requires the cooldown countdown, waits for the resent mail and re-anchors the walk's mail cursor so the following code submit proves newest-code-wins (`verification-resend-newest-code`). Pins PD-10's REAL behaviour: the immediate mid-cooldown click succeeds (90ms re-enable, no server limit) and the primitive fails loudly when the fix lands | `verification` ONLY — the proposed `reset-email-code` anchor is REFUTED: the v0.28 recovery code page renders no resend control (observed 2026-09-01) |
     | `back-forward-switch` | `at` | Navigates Back across method-switch boundaries, then Forward to resume | Mid-walk (MFA method-switch states) |
     | `concurrent-session-revoke` | `at` | Revokes the current session out-of-band via admin API before next submit | Mid-walk (authenticated states) |
     | `expired-token-submit` | `at` | Submits after flow lifespan expiry, asserts flow-expired terminal | Final or mid-walk state |
 
     Collection-time rejections in `defineScenario()`:
-    - `resend-code`: rejected if anchored on states without a resend control (legal only at `verification`, `reset-email-code`).
+    - `resend-code`: ENFORCED — rejected off `verification` (the only state rendering a resend control — the `reset-email-code` half of the original spec is refuted, see the table), at final path states (the following submit is the proof), and with expect/untilUrl/via.
     - `back-forward-switch`: rejected if anchored on states without a multi-method sibling step.
     - `concurrent-session-revoke`: rejected on `live` lane scenarios or states before session establishment.
     - `expired-token-submit`: rejected on paths without flow expiry handling or missing `short_lifespans` capability.

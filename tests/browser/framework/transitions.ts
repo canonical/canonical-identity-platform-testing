@@ -117,7 +117,7 @@ export type TransitionKey = `${string} → ${string}`;
 /** The transition table. */
 export type TransitionTable = Record<TransitionKey, TransitionAction>;
 
-function assertInternalLane(ctx: ActionContext, feature: string): void {
+export function assertInternalLane(ctx: ActionContext, feature: string): void {
   if (ctx.lane === "live") {
     throw new Error(`${feature} is not available in live lane`);
   }

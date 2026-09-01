@@ -221,7 +221,7 @@ async function runPhase(
     if (i < phase.expectedPath.length - 1) {
       for (const iv of interventions) {
         if ("at" in iv && iv.at === expectedState) {
-          await runStateIntervention(page, iv);
+          await runStateIntervention(page, iv, user, ctx);
         }
       }
 
@@ -265,7 +265,7 @@ async function runPhase(
   // captured, so the perturbation is free to navigate off the terminal.
   for (const iv of interventions) {
     if ("at" in iv && iv.at === lastState) {
-      await runStateIntervention(page, iv);
+      await runStateIntervention(page, iv, user, ctx);
     }
   }
 

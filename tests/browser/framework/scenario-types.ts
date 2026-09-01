@@ -176,7 +176,7 @@ export interface ScenarioAssertions {
 export interface StateIntervention {
   /** State in this phase's expectedPath to perturb (after its assertion). */
   at: PageStateType;
-  do: "reload" | "replay-current-url" | "history-back" | "history-roundtrip";
+  do: "reload" | "replay-current-url" | "history-back" | "history-roundtrip" | "resend-code";
   /** Terminal state expected after the perturbation (replay/history-back). */
   expect?: PageStateType;
   /** Substring the final URL must contain (e.g. an exact `error=` code). */
@@ -476,6 +476,31 @@ export function defineScenario(scenario: Scenario): Scenario {
           throw new Error(
             `Scenario "${scenario.id}" ${where}: "history-roundtrip" returns to "${iv.at}" by ` +
             `definition; it takes no expect/untilUrl/expectUrlContains.`
+          );
+        }
+      } else if (iv.do === "resend-code") {
+        // Legal ONLY where a resend control exists. The wave-2 table proposed
+        // reset-email-code too, but the v0.28 recovery code page has no
+        // resend control (observed 2026-09-01) — an anchor there would be a
+        // decorative intervention that can never fire its click.
+        if (iv.at !== "verification") {
+          throw new Error(
+            `Scenario "${scenario.id}" ${where}: "resend-code" is only legal at "verification" — ` +
+            `no other state renders a resend control (the recovery code page has none).`
+          );
+        }
+        // The walk must CONTINUE after the resend: submitting the resent code
+        // is the newest-code-wins proof, so a final-state anchor is decorative.
+        if (isFinal) {
+          throw new Error(
+            `Scenario "${scenario.id}" ${where}: "resend-code" must be anchored mid-walk — ` +
+            `the following code submit is what proves the resent code works.`
+          );
+        }
+        if (iv.expect || iv.untilUrl || iv.via) {
+          throw new Error(
+            `Scenario "${scenario.id}" ${where}: "resend-code" stays on "${iv.at}"; ` +
+            `it takes no expect/untilUrl/via.`
           );
         }
       } else {

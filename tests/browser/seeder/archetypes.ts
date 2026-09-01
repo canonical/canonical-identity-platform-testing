@@ -191,6 +191,12 @@ export const USER_ARCHETYPES: UserArchetype[] = [
     totpConfigured: false,
     verified: false,
   },
+  {
+    ref: "unverified-user-3",
+    credentials: ["password"],
+    totpConfigured: false,
+    verified: false,
+  },
 ];
 
 /** Look up an archetype by ref. Returns undefined if not found. */
