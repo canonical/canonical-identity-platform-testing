@@ -168,12 +168,25 @@ async function registeredAddressUnverified({ user }: PostCheckArgs): Promise<voi
     expect(address.verified, `address ${address.value} must be unverified with the verification flow off`).toBe(false);
   }
 }
+/**
+ * Account linking's whole point, pinned on the tokens: the sign-in that rode
+ * the LINKED provider must yield the SEEDED identity — sub equals the
+ * manifest identityId — not a freshly minted doppelgänger. (Login-time
+ * linking never recreates the identity, so the manifest id is current.)
+ */
+async function linkedIdentityTokens({ tokens, user }: PostCheckArgs): Promise<void> {
+  expect(
+    tokens.idTokenClaims.sub,
+    "the provider sign-in must land the linked (seeded) identity",
+  ).toBe(user.identityId);
+}
 
 const POST_CHECKS: Record<PostCheckName, (args: PostCheckArgs) => Promise<void>> = {
   "code-replay-revokes-family": codeReplayRevokesFamily,
   "backup-codes-deactivated": backupCodesDeactivated,
   "device-code-replay-rejected": deviceCodeReplayRejected,
   "registered-address-unverified": registeredAddressUnverified,
+  "linked-identity-tokens": linkedIdentityTokens,
 };
 
 export async function runPostCheck(name: PostCheckName, args: PostCheckArgs): Promise<void> {

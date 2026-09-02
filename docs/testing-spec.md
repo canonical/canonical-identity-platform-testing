@@ -875,11 +875,11 @@ references** — other documents cite "§10 item N", so renumber nothing.
 | 8 | Rename `webhook-flow.spec.ts`; cover hook-service directly | Staged |
 | 9 | OIDC error paths | **Landed** — the `oidc-error` suite |
 | 10 | Device authorization grant | **Landed** — the `device` suite |
-| 11 | Navigation & weird-user-behaviour coverage | Wave 1 landed; wave 2 specified, staged |
-| 12 | Dead machinery in the transition table | Two entries resolved 2026-08-31 (consent deleted, backup-code edge covered); rest decided per entry |
+| 11 | Navigation & weird-user-behaviour coverage | Wave 1 landed; wave 2: `resend-code` landed 2026-09-01, rest staged |
+| 12 | Dead machinery in the transition table | Resolved — every coverable edge traversed (2026-09-01), consent deleted |
 | 13 | The unexplained run-1/run-2 split (S-10) | Instrumented; cause still open |
 | 14 | Preflight asserts identifier-first | Staged |
-| 15 | Account-linking coverage | Committed — staged |
+| 15 | Account-linking coverage | **Landed** — the `account-linking` suite (two product defects filed) |
 | 16 | Blocking PR gate CI integration | Implemented — see docs/ci-spec.md |
 
 1. **Scenario variants** for legitimate behaviour forks:
@@ -1075,13 +1075,48 @@ references** — other documents cite "§10 item N", so renumber nothing.
     not seeder or manifest nondeterminism. Three immediate isolated re-runs
     passed, and a full gate re-run was green twice; the split correlates with
     the first suite pass after `make up`, not with any code path.
+    Third data point (2026-09-01, canonical-portal, first gate after a
+    profile switch + `make up`): `resilience › backup-code-history-roundtrip`
+    failed run 1 and passed run 2 (54/54); the immediate gate re-run was
+    green twice. Three instances, three unrelated scenarios, always run 1,
+    always right after `make up` — the warm-up hypothesis is now the only
+    one standing.
 14. **Preflight asserts identifier-first (staged).** The layer-2 preflight currently adapts to two-step vs one-step flow shapes; it must instead fail the login style check when a deployment presents the deprecated one-step shape, in every backend including `urls` (a deprecated shape on a real deployment is a finding, not noise — matching the TLS-verification precedent in §9). Note that `capabilities()`' hard-coded `identifier_first_enabled: true` becomes an invariant with this citation, not a free variable.
-15. **Account-linking coverage (committed, staged).**
-    - **The gap:** `account_linking_enabled` is true on 8 rows with zero scenarios.
-    - **Investigate-first rule:** Map the real surfaces on a live stack before inventing states — (a) login-time linking (OIDC sign-in matching an existing local identity), (b) the manage-details connected-accounts surface. States come from observed DOM, never from upstream docs alone.
-    - **Committed coverage shape:** A seeded archetype (existing password identity + dex-matchable email) in `seeder/archetypes.ts` — seeder remains the sole admin-API owner; minimum two scenarios gated on `requires.accountLinking`: a login-time link journey ending at `oidc-callback` with claim assertions proving the linked identity's tokens, and a settings link/unlink journey with a mandatory cleanup (it mutates a shared identity — §8 determinism rules apply).
-    - **Dimension decision rule:** If the login-ui charm exposes account linking as an operator toggle, it becomes a model dimension (cited) when implemented; otherwise it stays a capability derived from flags, with the reason recorded in the model.
-    - **No-dead-machinery rule:** Every added state and edge MUST be traversed by a scenario in the same change (item 12 is the cautionary tale).
+15. **Account-linking coverage — LANDED 2026-09-01** as the `account-linking`
+    suite, along the committed shape and with every surface observed live
+    first (canonical-portal — the pinned dex + no-sequencing + linking gate
+    profile, so this runs in the blocking gate):
+    - **Login-time linking** enters from the REGISTER page's provider buttons
+      (the identifier-first login page only offers providers to identities
+      already carrying the oidc credential). A dex sign-in for a seeded
+      password identity's address collides; kratos redirects to the
+      authenticate-to-link page (`/ui/login?flow=…&no_org_ui=true`,
+      DOM-identical to the password page — reuses `login-password`); the
+      password submit LINKS (admin-verified: the identity gains the oidc
+      credential with the dex subject). `link-at-login` proves it on the
+      tokens: the post-link dex sign-in's `sub` equals the seeded
+      `identityId` (`linked-identity-tokens` post check).
+    - **Settings linking**: new `connected-accounts` state
+      (`/ui/manage_connected_accounts`: per-provider Connect, Disconnect when
+      linked). Connect's settings flow carries no return_to, so kratos lands
+      on the settings `ui_url` fallback — `/ui/reset_password` (cosmetic; the
+      link is done, the Disconnect phase proves it). `settings-link-and-unlink`
+      is self-restoring; `remove-oidc` (new cleanup kind — kratos's oidc
+      credential DELETE needs `?identifier=` per linked provider) is crash
+      insurance.
+    - **Two product defects surfaced, filed in `upstreamFindings`:** (a) the
+      authenticate-to-link password submit answers 200 with a bare session —
+      no `continue_with`, no redirect — and the SPA renders nothing: the user
+      is linked, sessioned and STRANDED (the transition asserts the 200 and
+      walks on by navigation); (b) for a TOTP-bearing identity the same
+      submit dead-ends harder — kratos error 1010004, unknown to the BFF,
+      collapsed to a bare 500 (S-8 class) — so the walkable collision is the
+      no-2FA identity, collision-first.
+    - **Dimension decision:** stays a flags-derived capability
+      (`account_linking_enabled` ⇐ oidc); no charm toggle found.
+    - Dex substrate: two static-password accounts whose emails match the
+      `link-user` / `settings-link-user` archetypes (`docker/dex/config.yml`).
+    - Sequencing variants (post-OIDC passkey step-up fork) are item-1 work.
 16. **Blocking PR gate CI integration (implemented).** The baseline profile gate (`make gate`) runs as a blocking check on pull requests, with the non-blocking nightly matrix and juju drift lanes beside it. `docs/ci-spec.md` is the CI design contract (triggers, JIMM auth, pinning policy, triage flow).
 
 ## 11. Reviewing a change to this suite

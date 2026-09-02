@@ -63,6 +63,7 @@ export type PageState =
   | { type: "tenant-selection" }
   | { type: "device-code" }
   | { type: "device-complete" }
+  | { type: "connected-accounts" }
   | { type: "oidc-callback" }
   | { type: "oidc-callback-error" }
   | { type: "error-page" }
@@ -690,6 +691,12 @@ export async function detectPageState(page: Page): Promise<PageState> {
   }
   if (urlContains(page, "/ui/device_complete")) {
     return { type: "device-complete" };
+  }
+  // Connected accounts (settings nav): own URL, two shapes — per-provider
+  // "Connect" when nothing is linked, "Disconnect" rows when something is
+  // (S10 item 15; observed 2026-09-01).
+  if (urlContains(page, "/ui/manage_connected_accounts")) {
+    return { type: "connected-accounts" };
   }
   // No /ui/consent detection: login-ui auto-accepts every consent request
   // (remember=true, all scopes), so the page is unreachable and coverage was

@@ -32,6 +32,22 @@ staticPasswords:
     hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
     username: "Dex Test User"
     userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+  # The account-linking collision half (S10 item 15): same email as the
+  # SEEDED KRATOS PASSWORD IDENTITY `link-user` — a dex sign-in for this
+  # address collides with the existing local account, which is the
+  # login-time linking surface. Same test password as dex-user.
+  - email: "link-user@test.example"
+    # bcrypt hash of "dex-password"
+    hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
+    username: "Link Test User"
+    userID: "1b9c795b-ec99-4c84-a1b0-4dd2661f5467"
+  # The settings-linking half: matches the seeded `settings-link-user`
+  # kratos identity, linked and unlinked from /ui/manage_connected_accounts.
+  - email: "settings-link-user@test.example"
+    # bcrypt hash of "dex-password"
+    hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
+    username: "Settings Link User"
+    userID: "2c8d795b-ec99-4c84-a1b0-4dd2661f5468"
 
 oauth2:
   # Skip the approval/consent screen to simplify test flows.

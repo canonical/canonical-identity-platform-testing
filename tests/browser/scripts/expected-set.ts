@@ -25,6 +25,7 @@ import type { ActiveConfig } from "../framework/active-config";
 import type { ScenarioSuite } from "../framework/scenario-types";
 import { getExecutionLane } from "../helpers/config";
 
+import { accountLinkingScenarios } from "../scenarios/account-linking-scenarios";
 import { deviceScenarios } from "../scenarios/device-scenarios";
 import { errorScenarios } from "../scenarios/error-scenarios";
 import { oidcErrorScenarios } from "../scenarios/oidc-error-scenarios";
@@ -51,6 +52,7 @@ const lane = getExecutionLane();
 // suite at collection time from the sequencing flag — mirrored here from the
 // declaration (which IS active-config.json in matrix runs).
 const TIER_A: [string, ScenarioSuite][] = [
+  ["specs/account-linking.spec.ts", accountLinkingScenarios],
   ["specs/device.spec.ts", deviceScenarios],
   ["specs/error.spec.ts", errorScenarios],
   ["specs/oidc-error.spec.ts", oidcErrorScenarios],

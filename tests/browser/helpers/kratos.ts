@@ -239,14 +239,41 @@ export async function burnBackupCodes(
  * the credential record — and therefore the user handle Kratos allocated at
  * identity creation — in place, so the identity is left as the seeder made it.
  *
+ * `oidc` is the exception in TWO ways (measured 2026-09-01): a bare DELETE
+ * answers 400 "You must provide an identifier to delete this credential", so
+ * every linked provider identifier is read from the identity and deleted
+ * individually — and an identity with no oidc credential simply yields zero
+ * identifiers, keeping the idempotency contract.
+ *
  * Preferred over a public settings flow for cleanup: it needs no browser
  * session, so it still runs after a scenario failed halfway and left the
  * browser somewhere unauthenticated.
  */
 export async function deleteIdentityCredentialType(
   id: string,
-  type: "totp" | "webauthn" | "lookup_secret",
+  type: "totp" | "webauthn" | "lookup_secret" | "oidc",
 ): Promise<void> {
+  if (type === "oidc") {
+    const read = await fetch(`${KRATOS_ADMIN_URL}/admin/identities/${id}?include_credential=oidc`);
+    if (!read.ok) {
+      throw new Error(`failed to read oidc identifiers for ${id}: ${read.status} ${await read.text()}`);
+    }
+    const identity = (await read.json()) as {
+      credentials?: { oidc?: { identifiers?: string[] } };
+    };
+    for (const identifier of identity.credentials?.oidc?.identifiers ?? []) {
+      const res = await fetch(
+        `${KRATOS_ADMIN_URL}/admin/identities/${id}/credentials/oidc?identifier=${encodeURIComponent(identifier)}`,
+        { method: "DELETE" },
+      );
+      if (!res.ok && res.status !== 404) {
+        throw new Error(
+          `failed to delete oidc credential "${identifier}" for ${id}: ${res.status} ${await res.text()}`,
+        );
+      }
+    }
+    return;
+  }
   const res = await fetch(
     `${KRATOS_ADMIN_URL}/admin/identities/${id}/credentials/${type}`,
     { method: "DELETE" },

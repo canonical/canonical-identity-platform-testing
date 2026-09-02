@@ -35,8 +35,8 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
 
   // ── Login UI states ────────────────────────────────────────────────────
   "login-email": ["login-password", "tenant-selection", "provider:dex:login", "provider:google:login", "oidc-callback", "reset-email", "register-email", "verification"],
-  "login-password": ["setup-secure", "login-totp-verify", "login-backup-code-verify", "login-webauthn-verify", "oidc-callback", "login-password", "reset-email"],
-  "login-totp-verify": ["oidc-callback", "login-backup-code-verify", "login-totp-verify", "backup-code-regenerate", "reset-password", "device-complete"],
+  "login-password": ["setup-secure", "login-totp-verify", "login-backup-code-verify", "login-webauthn-verify", "oidc-callback", "login-password", "reset-email", "manage-details"],
+  "login-totp-verify": ["oidc-callback", "login-backup-code-verify", "login-totp-verify", "backup-code-regenerate", "reset-password", "device-complete", "manage-details"],
   // → setup-secure: a key-only identity's signed assertion is accepted and
   // login-ui then forces TOTP enrolment mid-login (PD-4, observed 2026-09-01).
   "login-webauthn-verify": ["oidc-callback", "setup-secure"],
@@ -85,7 +85,10 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   // The registration `session` after-hook issues a session; verification-on
   // rows hand off to the verification page, verification-off rows land on
   // the settings hub (runner-observed 2026-09-01).
-  "register-email": ["register-password"],
+  // → provider:dex:login: the register page's provider buttons are the
+  // login-time account-linking entry (S10 item 15) — the identifier-first
+  // login page only offers providers to already-linked identities.
+  "register-email": ["register-password", "provider:dex:login"],
   "register-password": ["verification", "manage-details"],
 
   // ── Verification flow ─────────────────────────────────────────────────
@@ -100,7 +103,12 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   "tenant-selection": ["login-password", "login-totp-verify", "oidc-callback"],
 
   // ── External providers ────────────────────────────────────────────────
-  "provider:dex:login": ["oidc-callback", "provider:dex:consent", "setup-passkey", "login-webauthn-verify"],
+  // → login-password: dex authenticated a COLLIDING address and kratos asks
+  // for the existing identity's password to link (the authenticate-to-link
+  // page reuses the login-password state). → reset-password: the settings
+  // Connect ceremony completes onto kratos's settings ui_url fallback (S10
+  // item 15; runner-observed 2026-09-01).
+  "provider:dex:login": ["oidc-callback", "provider:dex:consent", "setup-passkey", "login-webauthn-verify", "login-password", "reset-password"],
   "provider:dex:consent": ["oidc-callback"],
 
   "provider:google:login": ["provider:google:password", "login-webauthn-verify"],
@@ -128,7 +136,10 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   // polling, nothing follows in the browser.
   "device-complete": [],
   // The settings hub: recovery's terminal, and the settings scenarios' base.
-  "manage-details": ["reset-password", "setup-backup-codes", "setup-secure", "setup-secure-linked"],
+  "manage-details": ["reset-password", "setup-backup-codes", "setup-secure", "setup-secure-linked", "connected-accounts"],
+  // ── Account linking (S10 item 15) ─────────────────────────────────────
+  // Settings side: Connect → dex → back linked; Disconnect is the self-edge.
+  "connected-accounts": ["provider:dex:login", "connected-accounts"],
 };
 
 // ---------------------------------------------------------------------------

@@ -616,7 +616,114 @@ export const TRANSITION_TABLE: TransitionTable = {
   "provider:dex:login → oidc-callback": {
     description: "Login with Dex",
     action: async (page, user) => {
-      await loginWithDex(page);
+      // The scenario user's manifest email doubles as the dex static-password
+      // account (dex-user and the link users alike) — never hardcode one.
+      await loginWithDex(page, user.email);
+    },
+  },
+  // Hypothesised terminal of the login-time LINK walk (entered from
+  // /ui/register, no OIDC challenge): after the second factor the session
+  // lands on the settings hub. Same submit as "→ oidc-callback".
+  "login-totp-verify → manage-details": {
+    description: "Submit TOTP — the challenge-less link login lands on the settings hub",
+    action: async (page, user, ctx) => {
+      const secret = user.totpSecret ?? ctx.totpSecret;
+      if (!secret) {
+        throw new Error("TOTP secret not available for the link login's second factor.");
+      }
+      await submitTotpCode(page, secret);
+    },
+  },
+  // The authenticate-to-link completion, pinned as REAL behaviour (§11), for
+  // a no-2FA identity: the password submit LINKS and a session is issued —
+  // kratos answers 200 with a bare session object (methods password +
+  // oidc/dex; trace-verified 2026-09-01) — but the response carries no
+  // continue_with and no redirect_browser_to, and the SPA renders NOTHING:
+  // the user is linked, sessioned, and stranded on a dead password page
+  // (filed in upstreamFindings; the TOTP-identity variant dead-ends harder,
+  // kratos 1010004 → BFF 500). The action therefore asserts the 200-session
+  // submit and walks on by navigation — the issued session is what makes the
+  // settings hub serve. When the SPA learns to navigate, the manual goto
+  // becomes a no-op and this transition keeps passing.
+  "login-password → manage-details": {
+    description: "Submit the existing password on the authenticate-to-link page — linked and sessioned; the SPA strands, so walk on",
+    action: async (page, user) => {
+      const submitted = page.waitForResponse(
+        (r) => r.url().includes("/self-service/login?") && r.request().method() === "POST",
+        { timeout: 15_000 },
+      );
+      await enterPassword(page, user.password!);
+      const response = await submitted;
+      expect(response.status(), "the link submit must succeed (200 + session)").toBe(200);
+      await page.goto(`${LOGIN_UI_URL}/ui/manage_details`);
+      // Let the hub's own fetches (settings flow, whoami) finish before the
+      // phase ends: the next phase's freshSession clears cookies, and an
+      // in-flight request answering 401 makes the SPA bounce to /ui/login —
+      // a client-side redirect that races the next start navigation
+      // (observed 1-in-4, 2026-09-01).
+      await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
+    },
+  },
+
+  // ── Account linking (S10 item 15) ──────────────────────────────────────
+  // Login-time linking enters from the REGISTER page's provider buttons —
+  // the identifier-first login page only offers providers to identities that
+  // already carry the oidc credential (observed 2026-09-01).
+  "register-email → provider:dex:login": {
+    description: 'Click "Sign in with Dex" on the registration page',
+    action: async (page) => {
+      await page.getByRole("button", { name: /sign in with dex$/i }).click();
+      await page.waitForURL(/:5556|dex:/, { timeout: 15_000 }).catch(() => {});
+    },
+  },
+
+  // The collision: dex authenticates an address that already belongs to a
+  // seeded PASSWORD identity, and kratos redirects to the authenticate-to-
+  // link page — /ui/login?flow=…&no_org_ui=true, DOM-identical to the
+  // ordinary password page (observed 2026-09-01), so it reuses the
+  // login-password state (the settings-suite precedent).
+  "provider:dex:login → login-password": {
+    description: "Dex login for a colliding address — kratos asks for the existing password to link",
+    action: async (page, user) => {
+      await loginWithDex(page, user.email);
+    },
+  },
+
+  // Settings-side linking: the Connect buttons render one per provider, dex
+  // first (observed order); the dex landing is what the next state assert
+  // verifies.
+  "connected-accounts → provider:dex:login": {
+    description: 'Click Connect on the dex row of /ui/manage_connected_accounts',
+    action: async (page) => {
+      await page.getByRole("button", { name: "Connect" }).first().click();
+      await page.waitForURL(/:5556|dex:/, { timeout: 15_000 }).catch(() => {});
+    },
+  },
+
+  // The settings Connect ceremony's landing: the settings flow carries no
+  // return_to, so kratos completes onto selfservice.flows.settings.ui_url —
+  // /ui/reset_password (runner-observed 2026-09-01). The link itself is done.
+  "provider:dex:login → reset-password": {
+    description: "Dex login from the settings Connect — kratos lands on the settings ui_url fallback",
+    action: async (page, user) => {
+      await loginWithDex(page, user.email);
+    },
+  },
+
+  // Self-transition: Disconnect re-renders the page in its unlinked shape.
+  "connected-accounts → connected-accounts": {
+    description: "Disconnect the linked provider (page re-renders unlinked)",
+    action: async (page) => {
+      await page.getByRole("button", { name: "Disconnect" }).first().click();
+      await expect(page.getByRole("button", { name: "Connect" }).first()).toBeVisible();
+    },
+  },
+
+  "manage-details → connected-accounts": {
+    description: 'Open "Connected accounts" in the settings nav',
+    action: async (page) => {
+      await page.getByRole("link", { name: "Connected accounts", exact: true }).click();
+      await expect(page.getByRole("heading", { name: "Connected accounts" })).toBeVisible();
     },
   },
 

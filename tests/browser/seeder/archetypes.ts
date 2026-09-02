@@ -148,6 +148,27 @@ export const USER_ARCHETYPES: UserArchetype[] = [
     credentials: ["password"],
     totpConfigured: false,
   },
+  // ── Account-linking users (S10 item 15) ────────────────────────────────
+  // Each has a MATCHING static password account in docker/dex/config.yml —
+  // that email identity is what collides (login-time) or gets connected
+  // (settings). One per scenario: linking writes an oidc credential onto the
+  // identity, and although remove-oidc restores it, a shared archetype would
+  // couple scenario orderings.
+  {
+    // Password-ONLY on purpose: the login-time link flow dead-ends behind the
+    // BFF for a TOTP-bearing identity (kratos answers error id 1010004, the
+    // BFF 500s, the UI shows nothing — filed in upstreamFindings 2026-09-01),
+    // so the walkable collision is the no-2FA identity. The scenario runs the
+    // collision FIRST, before anything can enrol TOTP.
+    ref: "link-user",
+    credentials: ["password"],
+    totpConfigured: false,
+  },
+  {
+    ref: "settings-link-user",
+    credentials: ["password", "totp"],
+    totpConfigured: true,
+  },
 
   // ── Google OIDC user ───────────────────────────────────────────────────
   // Only seeded when GOOGLE_TEST_EMAIL and GOOGLE_TEST_SUBJECT_ID are set.

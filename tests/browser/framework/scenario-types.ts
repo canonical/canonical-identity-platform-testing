@@ -200,7 +200,7 @@ export type Intervention = StateIntervention | TransitionIntervention;
  * relying party received and the scenario's manifest user. Scenarios name a
  * check; the implementation lives in framework/intervention-checks.ts.
  */
-export type PostCheckName = "code-replay-revokes-family" | "backup-codes-deactivated" | "device-code-replay-rejected" | "registered-address-unverified";
+export type PostCheckName = "code-replay-revokes-family" | "backup-codes-deactivated" | "device-code-replay-rejected" | "registered-address-unverified" | "linked-identity-tokens";
 
 // ---------------------------------------------------------------------------
 // Phases
@@ -308,7 +308,7 @@ export interface Scenario {
    * The cleanup receives the Playwright Page (with session cookies) and
    * the action context (which may carry state like totpSecret).
    */
-  cleanup?: "remove-totp" | "remove-2fa" | "restore-password";
+  cleanup?: "remove-totp" | "remove-2fa" | "restore-password" | "remove-oidc";
 }
 
 // ---------------------------------------------------------------------------

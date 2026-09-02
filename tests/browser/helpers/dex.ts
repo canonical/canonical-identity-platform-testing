@@ -36,11 +36,11 @@ export async function registerDexIdentity(): Promise<string> {
  * With skipApprovalScreen enabled, Dex redirects back immediately
  * after successful login.
  */
-export async function loginWithDex(page: Page): Promise<void> {
+export async function loginWithDex(page: Page, email: string = DEX_USER_EMAIL): Promise<void> {
   // Wait for the Dex login form
   const emailInput = page.locator("#login");
   await expect(emailInput).toBeVisible({ timeout: 15_000 });
-  await emailInput.fill(DEX_USER_EMAIL);
+  await emailInput.fill(email);
 
   const passwordInput = page.locator("#password");
   await passwordInput.fill(DEX_USER_PASSWORD);

@@ -548,6 +548,14 @@ export async function runScenario(
         }
         await deleteIdentityCredentialType(user.identityId, "webauthn");
         await deleteIdentityCredentialType(user.identityId, "totp");
+      } else if (cleanup === "remove-oidc") {
+        // Account-linking scenarios write an oidc credential onto a seeded
+        // password identity; admin-side and unconditional for the same reason
+        // as remove-2fa — a walk that died mid-link has no usable session.
+        if (!user.identityId) {
+          throw new Error(`cleanup "remove-oidc": no identityId for user "${user.ref}"`);
+        }
+        await deleteIdentityCredentialType(user.identityId, "oidc");
       } else if (cleanup === "restore-password") {
         // The recovery scenarios change a shared seeded identity's password.
         // Put the seeded password back so later specs still authenticate —
