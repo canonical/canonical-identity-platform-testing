@@ -259,6 +259,37 @@ function recordProviderSet(check, flow, caps, detailPrefix) {
   record("behavior", check, ok, ok ? "" : `${detailPrefix} offers [${seen.join(", ")}]`);
 }
 
+/** Login STYLE, read off the flow's first step (§10 item 14). Under
+ *  `selfservice.flows.login.style: identifier_first` kratos populates step 1
+ *  with an `identifier` field and a `method=identifier_first` submit and no
+ *  credential node (ory/kratos@64e04ac, tag v25.4.0,
+ *  selfservice/strategy/idfirst/strategy_login.go:175-193); under the
+ *  deprecated one-step `unified` style the password strategy puts the
+ *  `password` node on step 1 directly (selfservice/strategy/password/login.go:208-213;
+ *  the switch is driver/config/config.go:1601-1603). The login-ui under test
+ *  drives identifier-first only (`identifier_first_enabled` in app-config is
+ *  one of the four truthfully-served keys), so a one-step deployment is a
+ *  finding on every backend — including `urls`, where this is read through
+ *  the BFF's `/self-service/login/flows?id=` mirror of the kratos flow. */
+function recordLoginStyle(check, flow, caps) {
+  const nodes = flow?.ui?.nodes ?? [];
+  const idFirstSubmit = nodes.some((n) => n.attributes?.name === "method" && n.attributes?.value === "identifier_first");
+  const passwordOnStepOne = nodes.some((n) => n.attributes?.name === "password");
+  const identifierFirst = idFirstSubmit && !passwordOnStepOne;
+  const want = caps.identifier_first_enabled === true;
+  const ok = identifierFirst === want;
+  record(
+    "behavior",
+    check,
+    ok,
+    ok
+      ? ""
+      : `step 1 carries ${idFirstSubmit ? "a method=identifier_first submit" : "no identifier_first submit"}` +
+        ` and ${passwordOnStepOne ? "a password node" : "no password node"} — ` +
+        `the ${identifierFirst ? "identifier-first" : "deprecated one-step (unified)"} shape, declared ${want ? "identifier-first" : "one-step"}`,
+  );
+}
+
 async function verifyBehavior(dims, caps, u, backend) {
   const v = derive(dims);
 
@@ -279,6 +310,7 @@ async function verifyBehavior(dims, caps, u, backend) {
       const { flow, why } = await loginFlowThroughBff(u);
       if (flow) {
         recordProviderSet(`oidc providers [${[...caps.oidc_providers].sort().join(", ") || "none"}] (through the login-ui BFF)`, flow, caps, "the browser login flow");
+        recordLoginStyle("login style identifier-first (through the login-ui BFF)", flow, caps);
       } else {
         record("behavior", "login flow readable through the login-ui BFF", false, why);
       }
@@ -369,6 +401,7 @@ async function verifyKratosFlowShape(v, caps, u) {
     record("behavior", "login flow creatable", false, `HTTP ${login.status}`);
   } else {
     recordProviderSet("login flow provider set", login.body, caps, "the login flow");
+    recordLoginStyle("login style identifier-first", login.body, caps);
   }
 
   // Flow toggles: kratos 404s a disabled endpoint with a distinctive body.

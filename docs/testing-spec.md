@@ -723,9 +723,10 @@ Three mechanisms close that hole structurally:
      then confirm `/sessions/whoami` refuses the AAL1 session with 403 and
      accepts the AAL2 one.
    - **Token-hook wiring** — ask for an audience only the hook can refuse.
+   - **Login style** — the flow's first step must carry the identifier-first
+     shape; the deprecated one-step shape refuses the row on every backend
+     (§10 item 14).
 
-
-A staged layer-2 check strengthening is specified in §10 item 14 to enforce the identifier-first invariant across all backends.
    So "any mismatch aborts loudly" holds exactly as far as layer 2 reaches. Two
    declared dimensions are still **not behaviourally probed**, and a wrong
    binding for either would deploy wrong and preflight green:
@@ -878,7 +879,7 @@ references** — other documents cite "§10 item N", so renumber nothing.
 | 11 | Navigation & weird-user-behaviour coverage | Wave 1 landed; wave 2: `resend-code` landed 2026-09-01, rest staged |
 | 12 | Dead machinery in the transition table | Resolved — every coverable edge traversed (2026-09-01), consent deleted |
 | 13 | The unexplained run-1/run-2 split (S-10) | Warm-up refuted 2026-09-02; evidence now survives run 2 (per-run artifacts); cause open |
-| 14 | Preflight asserts identifier-first | Staged |
+| 14 | Preflight asserts identifier-first | **Landed** 2026-09-02 — falsified on compose, proven through the BFF on orange |
 | 15 | Account-linking coverage | **Landed** — the `account-linking` suite (two product defects filed) |
 | 16 | Blocking PR gate CI integration | Implemented — see docs/ci-spec.md |
 
@@ -1097,7 +1098,20 @@ references** — other documents cite "§10 item N", so renumber nothing.
     diagnosable from the artifact alone — that, not another blind re-run,
     is the detector this item needed. Cause still open; no hypothesis
     currently favoured.
-14. **Preflight asserts identifier-first (staged).** The layer-2 preflight currently adapts to two-step vs one-step flow shapes; it must instead fail the login style check when a deployment presents the deprecated one-step shape, in every backend including `urls` (a deprecated shape on a real deployment is a finding, not noise — matching the TLS-verification precedent in §9). Note that `capabilities()`' hard-coded `identifier_first_enabled: true` becomes an invariant with this citation, not a free variable.
+14. **Preflight asserts identifier-first — LANDED 2026-09-02.** The layer-2
+    check `login style identifier-first` reads the login flow's first step and
+    requires the identifier-first shape: a `method=identifier_first` submit
+    and no `password` node (ory/kratos@64e04ac, tag v25.4.0,
+    `selfservice/strategy/idfirst/strategy_login.go:175-193` vs the unified
+    style's `selfservice/strategy/password/login.go:208-213`; the switch is
+    `driver/config/config.go:1601-1603`). It runs on every backend: directly
+    off kratos on compose/juju, and on `urls` through the BFF's
+    `/self-service/login/flows?id=` mirror (proven against iam.orange the same
+    day). Falsified deliberately: flipping the running kratos to
+    `style: unified` renders `identifier` in the default group plus a
+    `password` node on step 1, and the preflight refuses the row naming
+    exactly that. `capabilities()`' `identifier_first_enabled: true` is now
+    an invariant with this citation, not a free variable.
 15. **Account-linking coverage — LANDED 2026-09-01** as the `account-linking`
     suite, along the committed shape and with every surface observed live
     first (canonical-portal — the pinned dex + no-sequencing + linking gate

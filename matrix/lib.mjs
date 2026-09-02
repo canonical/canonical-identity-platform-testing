@@ -204,6 +204,10 @@ export function capabilities(dims, overrides = {}) {
   const caps = {
     oidc_webauthn_sequencing_enabled: dims.webauthn === "sequencing",
     base_url: "http://localhost",
+    // An INVARIANT, not a free variable: every row declares identifier-first
+    // and the preflight's layer-2 `login style identifier-first` check reads
+    // the shape off the live login flow (kratos's `selfservice.flows.login.style`),
+    // failing on the deprecated one-step shape in every backend (§10 item 14).
     identifier_first_enabled: true,
     multi_tenancy_enabled: v.tenant,
     support_email: "",
