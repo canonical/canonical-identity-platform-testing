@@ -34,7 +34,7 @@
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { readFileSync, writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { JUSTIFIED_SKIP } from "./skip-allowlist.mjs";
@@ -69,6 +69,10 @@ function collectTests(report) {
           ...(testCase.annotations ?? []),
           ...(testCase.results ?? []).flatMap((r) => r.annotations ?? []),
         ];
+        // Failure evidence rides along: without it a run-1-only failure
+        // leaves nothing behind once run 2 has overwritten test-results/
+        // (S-10 lost three instances that way).
+        const failed = (testCase.results ?? []).filter((r) => r.status !== "passed" && r.status !== "skipped");
         results.push({
           id: `${spec.file} › ${spec.title}`,
           status: testCase.status,
@@ -76,6 +80,12 @@ function collectTests(report) {
             .filter((a) => a.type === "skip")
             .map((a) => a.description ?? "")
             .join(" | "),
+          failures: failed.map((r) => ({
+            startTime: r.startTime,
+            durationMs: r.duration,
+            message: (r.error?.message ?? "").replace(/\u001b\[[0-9;]*m/g, ""),
+            attachments: (r.attachments ?? []).filter((a) => a.path).map((a) => `${a.name}: ${a.path}`),
+          })),
         });
       }
     }
@@ -191,11 +201,22 @@ for (let attempt = 1; attempt <= runs; attempt++) {
   }
   console.log(`manifest shape ${manifestFingerprint}`);
 
+  // Each run keeps its own artifact directory: Playwright wipes its output
+  // dir on start, so with a shared one run 2 destroys run 1's traces —
+  // exactly the evidence a run-1-only failure needs.
   const run = spawnSync(
     "npx",
-    ["playwright", "test", "--reporter=json", ...extraArgs],
+    ["playwright", "test", "--reporter=json", `--output=test-results/run-${attempt}`, ...extraArgs],
     { env: process.env, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
+  // The raw report is the whole evidence for a run-1-vs-run-2 comparison
+  // (per-test durations, error bodies, attachment paths); keep it beside
+  // the run's artifacts.
+  const reportStart = run.stdout?.indexOf("{") ?? -1;
+  if (reportStart !== -1) {
+    mkdirSync(`test-results/run-${attempt}`, { recursive: true });
+    writeFileSync(`test-results/run-${attempt}/report.json`, run.stdout.slice(reportStart));
+  }
 
   if (run.stderr) process.stderr.write(run.stderr);
 
@@ -233,6 +254,11 @@ for (let attempt = 1; attempt <= runs; attempt++) {
       console.log(`  skipped${justified ? "" : " (UNJUSTIFIED)"}: ${t.id} — ${t.reason || "<no reason given>"}`);
     } else if (t.status !== "expected") {
       console.log(`  ${t.status}: ${t.id}`);
+      for (const f of t.failures) {
+        console.log(`    started ${f.startTime} (${f.durationMs} ms)`);
+        for (const line of f.message.split("\n").slice(0, 12)) console.log(`    | ${line}`);
+        for (const a of f.attachments) console.log(`    ${a}`);
+      }
     }
   }
 

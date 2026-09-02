@@ -877,7 +877,7 @@ references** — other documents cite "§10 item N", so renumber nothing.
 | 10 | Device authorization grant | **Landed** — the `device` suite |
 | 11 | Navigation & weird-user-behaviour coverage | Wave 1 landed; wave 2: `resend-code` landed 2026-09-01, rest staged |
 | 12 | Dead machinery in the transition table | Resolved — every coverable edge traversed (2026-09-01), consent deleted |
-| 13 | The unexplained run-1/run-2 split (S-10) | Instrumented; cause still open |
+| 13 | The unexplained run-1/run-2 split (S-10) | Warm-up refuted 2026-09-02; evidence now survives run 2 (per-run artifacts); cause open |
 | 14 | Preflight asserts identifier-first | Staged |
 | 15 | Account-linking coverage | **Landed** — the `account-linking` suite (two product defects filed) |
 | 16 | Blocking PR gate CI integration | Implemented — see docs/ci-spec.md |
@@ -1075,12 +1075,28 @@ references** — other documents cite "§10 item N", so renumber nothing.
     not seeder or manifest nondeterminism. Three immediate isolated re-runs
     passed, and a full gate re-run was green twice; the split correlates with
     the first suite pass after `make up`, not with any code path.
-    Third data point (2026-09-01, canonical-portal, first gate after a
-    profile switch + `make up`): `resilience › backup-code-history-roundtrip`
-    failed run 1 and passed run 2 (54/54); the immediate gate re-run was
-    green twice. Three instances, three unrelated scenarios, always run 1,
-    always right after `make up` — the warm-up hypothesis is now the only
-    one standing.
+    Third data point (2026-09-01, canonical-portal): `resilience ›
+    backup-code-history-roundtrip` failed run 1 and passed run 2 (54/54);
+    the immediate gate re-run was green twice. Three instances, three
+    unrelated scenarios, always the first run of a gate.
+    **Focused look, 2026-09-02.** Warm-up REFUTED: instance 3's stack was
+    warm (six isolated suite runs preceded that gate), and two deliberately
+    cold gates (`make down` → profile switch → `make up` → gate, on
+    canonical-internal and core) were green with run-1 and run-2 durations
+    within 1% of each other (229 s vs 231 s; no test >3 s apart). Rate so
+    far: 3 in ~8 local gates, 0 in 6 CI gates. The real defect was the
+    harness: every instance's evidence was destroyed before anyone could
+    read it — the gate printed only the test id, and run 2 wiped
+    `test-results/` (Playwright clears its output dir on start), taking
+    run 1's trace with it. Fixed: each run writes to
+    `test-results/run-N/` (trace, video, error-context retained on
+    failure) plus its raw `report.json`; the gate log carries every
+    failure's error body, start timestamp and attachment paths; CI's
+    compose-log capture is timestamped (`docker logs -t`) so a failure's
+    window can be read from kratos/BFF logs. The next instance is
+    diagnosable from the artifact alone — that, not another blind re-run,
+    is the detector this item needed. Cause still open; no hypothesis
+    currently favoured.
 14. **Preflight asserts identifier-first (staged).** The layer-2 preflight currently adapts to two-step vs one-step flow shapes; it must instead fail the login style check when a deployment presents the deprecated one-step shape, in every backend including `urls` (a deprecated shape on a real deployment is a finding, not noise — matching the TLS-verification precedent in §9). Note that `capabilities()`' hard-coded `identifier_first_enabled: true` becomes an invariant with this citation, not a free variable.
 15. **Account-linking coverage — LANDED 2026-09-01** as the `account-linking`
     suite, along the committed shape and with every surface observed live

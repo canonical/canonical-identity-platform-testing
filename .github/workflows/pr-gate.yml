@@ -95,7 +95,7 @@ jobs:
           mkdir -p compose-logs
           docker ps -aq --filter label=com.docker.compose.project=identity-platform | while read -r c; do
             name="$(docker inspect --format '{{.Name}}' "$c" | tr -d /)"
-            docker logs "$c" > "compose-logs/${name}.log" 2>&1 || true
+            docker logs -t "$c" > "compose-logs/${name}.log" 2>&1 || true
           done
       - name: Upload failure evidence
         if: failure()
