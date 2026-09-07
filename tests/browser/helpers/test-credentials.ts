@@ -17,9 +17,3 @@ export const DEFAULT_TEST_PASSWORD = "Secure-Password-123!";
 /** Static Dex test user configured in docker/dex/config.yml. */
 export const DEX_USER_EMAIL = "dex-user@test.example";
 export const DEX_USER_PASSWORD = "dex-password";
-
-/** Dex static user ID — becomes the OIDC subject in Kratos credentials.
- *  Dex encodes userID + connector into a federated protobuf subject.
- *  This value was extracted from the Kratos OIDC callback logs. */
-export const DEX_USER_ID =
-  "CiQwOGE4Njg0Yi1kYjg4LTRiNzMtOTBhOS0zY2QxNjYxZjU0NjYSBWxvY2Fs";

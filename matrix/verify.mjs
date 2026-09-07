@@ -672,6 +672,27 @@ function manifestSvcClient(manifestPath) {
 const tokenShape = (token) =>
   token.startsWith("ory_at_") ? "opaque" : /^[\w-]+\.[\w-]+\.[\w-]+$/.test(token) ? "jwt" : `unrecognized (${token.slice(0, 12)}…)`;
 
+/** hook-service's request counter for hydra's hook route, read off its
+ *  prometheus endpoint; null when no hook-service answers (absent rows, or a
+ *  backend that does not publish it). */
+async function hookCallCount(u) {
+  const base = u.serviceStatus?.["hook-service"];
+  if (!base) return null;
+  const res = await fetch(`${base}/api/v0/metrics`, { signal: AbortSignal.timeout(5000) }).catch(() => null);
+  if (!res?.ok) return null;
+  const text = await res.text();
+  let total = 0;
+  let seen = false;
+  for (const line of text.split("\n")) {
+    const m = line.match(/^http_response_time_seconds_count\{([^}]*)\}\s+(\d+)/);
+    if (m && m[1].includes('route="POST/api/v0/hook/hydra"')) {
+      total += Number(m[2]);
+      seen = true;
+    }
+  }
+  return seen ? total : 0;
+}
+
 export async function verifyHydraTokens(v, caps, u) {
   const hookCheck = `token hook ${v.hook ? "wired" : "not wired"} (hook_service=${v.hook ? "present" : "absent"})`;
   if (!u.hydraPublic) {
@@ -796,14 +817,33 @@ export async function verifyHydraTokens(v, caps, u) {
     const seen = groups === undefined
       ? "no groups claim yet (nothing is a member of a hook-service group pre-seed)"
       : `groups=${JSON.stringify(groups)}`;
+    // Two witnesses that hydra calls the hook, strongest first:
+    //  (a) DENIAL — only when hook-service runs with authorization ON (the
+    //      charm default): the unauthorized audience is refused 403.
+    //  (b) THE CALL ITSELF — hook-service's prometheus counter for
+    //      `POST /api/v0/hook/hydra` advances by the mint. With authorization
+    //      OFF (this repo's compose default, PD-8) hook-service builds a noop
+    //      openfga client (canonical/hook-service@295273b cmd/serve.go:117-124 (NewNoopClient at :118, "Using noop authorizer" at :123))
+    //      and ALLOWS everything, so (a) cannot fire there — measured
+    //      2026-09-02 on jwt and opaque rows alike — and (b) is what stays
+    //      observable. Unwired hydra mints without touching the counter.
+    const before = await hookCallCount(u);
     const audience = await mint(`grant_type=client_credentials&scope=openid&audience=${encodeURIComponent(PROBE_AUDIENCE)}`);
     const err = audience.body?.error ?? "";
     if (audience.status === 200) {
+      const after = await hookCallCount(u);
+      const called = before !== null && after !== null && after > before;
       record(
         "behavior",
         hookCheck,
-        !v.hook,
-        v.hook ? `hydra minted an audience-scoped client_credentials token that hook-service must have denied — the token hook is not in effect; ${seen}` : "",
+        v.hook ? called : !called,
+        v.hook
+          ? called
+            ? `hook-service allowed the audience (authorization off) but its hook counter advanced ${before}→${after}: hydra called it; ${seen}`
+            : `hydra minted an audience-scoped client_credentials token and hook-service's hook counter did not advance (${before}→${after}) — the token hook is not in effect; ${seen}`
+          : called
+            ? `a hook-service answered hydra's hook call (counter ${before}→${after}) on a row that declares no hook-service`
+            : "",
       );
     } else if (audience.status === 403 && err === "access_denied") {
       record(

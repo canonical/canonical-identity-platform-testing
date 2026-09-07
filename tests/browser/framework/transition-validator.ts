@@ -100,7 +100,9 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   "backup-code-regenerate": ["oidc-callback"],
 
   // ── Tenant selection ──────────────────────────────────────────────────
-  "tenant-selection": ["login-password", "login-totp-verify", "oidc-callback"],
+  // → provider:dex:login: a dex-credentialed identity's credential page offers
+  // the provider button after selection (observed 2026-09-02).
+  "tenant-selection": ["login-password", "login-totp-verify", "oidc-callback", "provider:dex:login"],
 
   // ── External providers ────────────────────────────────────────────────
   // → login-password: dex authenticated a COLLIDING address and kratos asks

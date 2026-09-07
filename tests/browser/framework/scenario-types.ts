@@ -28,7 +28,10 @@ export interface ScenarioRequires {
   mfaEnabled?: boolean;
   /** Multi-tenancy must be enabled (tenant-service in profile). */
   multiTenancy?: boolean;
-  /** OIDC providers that must be configured. */
+  /** OIDC providers that must be configured (SUBSET: required ⊆ available).
+   *  An exact-set predicate was investigated 2026-09-02 and dropped: no
+   *  login-ui surface forks on provider COUNT, and "only oidc" is already the
+   *  equality `localUsersEnabled: false` (docs/testing-spec.md §10 item 1). */
   oidcProviders?: string[];
   /** WebAuthn must be enabled. */
   webauthnEnabled?: boolean;
@@ -304,12 +307,17 @@ export interface Scenario {
    *                         the scenario died with no usable session.
    *   - "restore-password"  undoes a self-service password change, leaving a
    *                         shared seeded identity as the seeder created it
+   *   - "remove-oidc"       deletes the oidc credential an account-linking
+   *                         walk wrote onto a seeded password identity
    *
-   * The cleanup receives the Playwright Page (with session cookies) and
-   * the action context (which may carry state like totpSecret).
+   * A walk that mutates more than one thing lists them (the sequencing
+   * linking variant links AND enrols a key: ["remove-oidc", "remove-2fa"]);
+   * each runs in order, admin-side, even when the walk failed halfway.
    */
-  cleanup?: "remove-totp" | "remove-2fa" | "restore-password" | "remove-oidc";
+  cleanup?: CleanupKind | CleanupKind[];
 }
+
+export type CleanupKind = "remove-totp" | "remove-2fa" | "restore-password" | "remove-oidc";
 
 // ---------------------------------------------------------------------------
 // Scenario Suite

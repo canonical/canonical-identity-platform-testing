@@ -81,6 +81,42 @@ export const accountLinkingScenarios = defineScenarioSuite({
       cleanup: "remove-oidc",
     }),
 
+    // The sequencing fork (§10 item 1): the post-link dex sign-in is
+    // diverted into security-key enrolment before the callback, exactly as
+    // oidc-dex-login is on sequencing rows. The link phase itself is entered
+    // from the register page and is not an OIDC login, so it does not fork.
+    defineScenario({
+      id: "link-at-login-sequencing",
+      description:
+        "Under OIDC→WebAuthn sequencing: the dex collision links after password auth, and the post-link dex sign-in enrols a key before yielding the seeded identity's tokens",
+      requires: {
+        accountLinkingEnabled: true,
+        oidcProviders: ["dex"],
+        oidcSequencing: true,
+        webauthnEnabled: true,
+        localUsersEnabled: true,
+      },
+      user: { ref: "link-user", credentials: ["password"], totpConfigured: false },
+      phases: [
+        {
+          name: "dex collides and the existing password links it",
+          expectedPath: [
+            "register-email",
+            "provider:dex:login",
+            "login-password",
+            "manage-details",
+          ],
+        },
+        {
+          name: "dex sign-in enrols a key, then lands the linked identity",
+          freshSession: true,
+          expectedPath: ["login-email", "provider:dex:login", "setup-passkey", "oidc-callback"],
+        },
+      ],
+      postChecks: ["linked-identity-tokens"],
+      cleanup: ["remove-oidc", "remove-2fa"],
+    }),
+
     // ── Settings linking: connect, then disconnect ───────────────────────
     // Self-restoring walk (link then unlink); remove-oidc is crash insurance
     // for a run that dies between the two.

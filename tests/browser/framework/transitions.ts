@@ -330,15 +330,15 @@ export const TRANSITION_TABLE: TransitionTable = {
   // callback — so Dex login lands on the passkey pages, not the callback.
   "provider:dex:login → setup-passkey": {
     description: "Log in with Dex; sequencing diverts to security-key enrolment",
-    action: async (page) => {
-      await loginWithDex(page);
+    action: async (page, user) => {
+      await loginWithDex(page, user.email);
     },
   },
 
   "provider:dex:login → login-webauthn-verify": {
     description: "Log in with Dex; sequencing diverts to security-key verification",
-    action: async (page) => {
-      await loginWithDex(page);
+    action: async (page, user) => {
+      await loginWithDex(page, user.email);
     },
   },
 
@@ -595,6 +595,24 @@ export const TRANSITION_TABLE: TransitionTable = {
         );
       }
       await selectTenant(page, tenantName);
+    },
+  },
+
+  // A dex-credentialed multi-tenant identity: tenant lookup keys on the
+  // identifier, so selection precedes the credential page exactly as for a
+  // password user, and that page offers "Sign in with Dex" (observed
+  // 2026-09-02, canonical-portal).
+  "tenant-selection → provider:dex:login": {
+    description: "Select tenant, then click the Dex login button",
+    action: async (page, _user, ctx) => {
+      const tenantName = ctx.selectTenant;
+      if (!tenantName) {
+        throw new Error(
+          "Tenant name not specified. Set ctx.selectTenant or user.selectTenant in the scenario."
+        );
+      }
+      await selectTenant(page, tenantName);
+      await clickDexLoginButton(page);
     },
   },
 

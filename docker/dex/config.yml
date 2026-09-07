@@ -48,6 +48,19 @@ staticPasswords:
     hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
     username: "Settings Link User"
     userID: "2c8d795b-ec99-4c84-a1b0-4dd2661f5468"
+  # Tenant journeys entered through dex (§10 item 1): the seeded
+  # `dex-single-tenant-user` / `dex-multi-tenant-user` identities carry these
+  # subjects; tenant-service memberships are keyed on the email.
+  - email: "dex-single-tenant-user@test.example"
+    # bcrypt hash of "dex-password"
+    hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
+    username: "Dex Single Tenant User"
+    userID: "3d9e795b-ec99-4c84-a1b0-4dd2661f5469"
+  - email: "dex-multi-tenant-user@test.example"
+    # bcrypt hash of "dex-password"
+    hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
+    username: "Dex Multi Tenant User"
+    userID: "4eaf795b-ec99-4c84-a1b0-4dd2661f546a"
 
 oauth2:
   # Skip the approval/consent screen to simplify test flows.

@@ -29,6 +29,10 @@ ifneq (,$(wildcard $(COMPOSE_PROFILE_OVERRIDE)))
   COMPOSE_FILES += -f $(COMPOSE_PROFILE_OVERRIDE)
 endif
 
+# dex loads its static accounts once at start; stamping the config's content
+# hash into the service environment (docker-compose.services.yml) makes a
+# changed docker/dex/config.yml a changed service, which `up` recreates.
+export DEX_CONFIG_SHA := $(shell sha256sum docker/dex/config.yml | cut -c1-12)
 COMPOSE := COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) docker compose $(COMPOSE_FILES)
 
 # All gate profiles, in gate order: the pinned rows of the config matrix.

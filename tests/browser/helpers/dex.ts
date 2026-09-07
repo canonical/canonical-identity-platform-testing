@@ -11,23 +11,7 @@
  */
 
 import { Page, expect } from "@playwright/test";
-import { createIdentityWithOIDC } from "./kratos";
-import { DEX_USER_EMAIL, DEX_USER_ID, DEX_USER_PASSWORD } from "./test-credentials";
-
-/**
- * Register a Kratos identity pre-linked with Dex OIDC credentials.
- *
- * The identity must exist AND have OIDC credentials before the
- * identifier-first login page will show the "Sign in with Dex" button
- * (account enumeration mitigation is off).
- */
-export async function registerDexIdentity(): Promise<string> {
-  return createIdentityWithOIDC({
-    email: DEX_USER_EMAIL,
-    provider: "dex",
-    subject: DEX_USER_ID,
-  });
-}
+import { DEX_USER_EMAIL, DEX_USER_PASSWORD } from "./test-credentials";
 
 /**
  * Complete the Dex login form (email + password).

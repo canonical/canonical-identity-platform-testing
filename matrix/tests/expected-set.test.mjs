@@ -63,6 +63,12 @@ const PD931_RUN = [
   "specs/oidc.spec.ts :: oidc-forced-reauth-demands-security-key",
   "specs/oidc.spec.ts :: oidc-webauthn-assertion",
   "specs/oidc.spec.ts :: oidc-login-mfa-enforcement",
+  // §10 item 1: tenant journeys entered through dex — the first tenant
+  // scenarios to run on an oidc-only row (the password-entered four still
+  // gate off on localUsersEnabled). Sequencing variants, because this row
+  // forks the post-dex step into key enrolment.
+  "specs/tenant.spec.ts :: dex-single-tenant-auto-select-sequencing",
+  "specs/tenant.spec.ts :: dex-multi-tenant-selection-sequencing",
 ];
 
 // The terraform-default shape: oidc only, no local users, no MT, no sequencing.

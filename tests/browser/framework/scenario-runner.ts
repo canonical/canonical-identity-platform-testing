@@ -28,7 +28,7 @@ import { expectOIDCFlowComplete, pollDeviceToken, type OIDCTokens } from "../hel
 import type { TokenClaims } from "../helpers/jwt";
 import type { Scenario, Phase, ExecutionLane } from "./scenario-types";
 import type { ActionContext } from "./transitions";
-import type { WebAuthnHelper } from "../helpers/webauthn";
+import { WebAuthnHelper } from "../helpers/webauthn";
 import { getExecutionLane, isLaneEnforcementDisabled } from "../helpers/config";
 import {
   deleteIdentityCredentialType,
@@ -310,10 +310,12 @@ async function assertTokenClaims(
   phaseTokens: Array<OIDCTokens | undefined> = [],
 ): Promise<void> {
   const a = scenario.assertions!;
-  // Opaque access tokens carry no readable claims (accessTokenClaims is
-  // null on access_token_format=opaque rows) — claim assertions then run
-  // against the ID token only. Introspection-side assertions are the
-  // opaque rows' still-open variant (docs/testing-spec.md, "Open work": scenario variants).
+  // Opaque access tokens carry no readable claims (accessTokenClaims is null
+  // on access_token_format=opaque rows) — claim assertions then run against
+  // the ID token only. Reading them back through hydra's admin introspection
+  // was implemented and DROPPED 2026-09-02: the admin API is internal-network
+  // only on every real deployment, so a check that needs it can never run
+  // where it matters (docs/testing-spec.md §10 item 1).
   const sides: [string, TokenClaims][] = tokens.accessTokenClaims
     ? [
         ["access token", tokens.accessTokenClaims],
@@ -339,8 +341,21 @@ async function assertTokenClaims(
       expected,
       `scenario "${scenario.id}" asserts tenantIdFromSeed but no seeded tenant matches "${tenantRef}"`,
     ).toBeDefined();
+    // The tenant_id claim has exactly one writer: hook-service's token hook,
+    // reading the selection tenant-service recorded. On a tenant row WITHOUT
+    // hook-service (pd931-single-oidc-mt, observed 2026-09-02) the journey
+    // and the selection are real but no claim is stamped — so the assertion
+    // pins that shape too, instead of being an undeclared hook requirement.
+    const hookPresent = (readActiveConfig().services ?? []).includes("hook-service");
     for (const [label, claims] of sides) {
-      expect(readClaim(claims, "tenant_id"), `${label} tenant_id`).toBe(expected);
+      if (hookPresent) {
+        expect(readClaim(claims, "tenant_id"), `${label} tenant_id`).toBe(expected);
+      } else {
+        expect(
+          readClaim(claims, "tenant_id"),
+          `${label} must not carry a tenant_id without hook-service (its only writer) in the profile`,
+        ).toBeUndefined();
+      }
     }
   }
 
@@ -426,6 +441,16 @@ export async function runScenario(
   // would "restore" the password to the one the test just set.
   const seededPassword = user.password;
 
+  // A path through a WebAuthn ceremony needs the virtual authenticator, and
+  // that is a property of the DECLARATION, not of which spec file happened to
+  // collect it: a sequencing tenant variant collected by tenant.spec.ts is
+  // as entitled to one as the same walk in oidc.spec.ts. Specs may still
+  // pass their own helper (the webauthn suite reads credentials off it).
+  const walks = scenario.phases?.map((p) => p.expectedPath) ?? [scenario.expectedPath ?? []];
+  const needsAuthenticator = walks.some((p) => p.some((s) => s === "setup-passkey" || s === "login-webauthn-verify"));
+  const webauthn = extraCtx?.webauthn ?? (needsAuthenticator ? new WebAuthnHelper(page) : undefined);
+  if (webauthn && !extraCtx?.webauthn) await webauthn.setup();
+
   // Build the action context
   const ctx: ActionContext = {
     lane,
@@ -433,7 +458,7 @@ export async function runScenario(
     selectTenant: resolveTenantDisplayName(manifest, scenario.user.selectTenant),
     totpCodeWindow: scenario.totpCodeWindow,
     verificationCodeSubmission: scenario.verificationCodeSubmission,
-    webauthn: extraCtx?.webauthn,
+    webauthn,
     // What the settings restore pass submits (transitions.ts
     // "reset-password → reset-password"): the pre-mutation truth, same snapshot
     // the restore-password cleanup uses.
@@ -534,44 +559,47 @@ export async function runScenario(
       });
     }
   } finally {
-    try {
-      if (cleanup === "remove-totp") {
-        await removeTotpViaPublicApi(page, ctx.totpSecret ?? user.totpSecret);
-      } else if (cleanup === "remove-2fa") {
-        // Both factors, admin-side and unconditional. The public settings flow
-        // needs a live AAL2 session, which is exactly what a scenario that
-        // failed at the passkey step no longer has — public-flow cleanup would
-        // leave the webauthn archetype carrying a stale TOTP credential across
-        // runs.
-        if (!user.identityId) {
-          throw new Error(`cleanup "remove-2fa": no identityId for user "${user.ref}"`);
+    const cleanups = cleanup === undefined ? [] : Array.isArray(cleanup) ? cleanup : [cleanup];
+    for (const kind of cleanups) {
+      try {
+        if (kind === "remove-totp") {
+          await removeTotpViaPublicApi(page, ctx.totpSecret ?? user.totpSecret);
+        } else if (kind === "remove-2fa") {
+          // Both factors, admin-side and unconditional. The public settings flow
+          // needs a live AAL2 session, which is exactly what a scenario that
+          // failed at the passkey step no longer has — public-flow cleanup would
+          // leave the webauthn archetype carrying a stale TOTP credential across
+          // runs.
+          if (!user.identityId) {
+            throw new Error(`cleanup "remove-2fa": no identityId for user "${user.ref}"`);
+          }
+          await deleteIdentityCredentialType(user.identityId, "webauthn");
+          await deleteIdentityCredentialType(user.identityId, "totp");
+        } else if (kind === "remove-oidc") {
+          // Account-linking scenarios write an oidc credential onto a seeded
+          // password identity; admin-side and unconditional for the same reason
+          // as remove-2fa — a walk that died mid-link has no usable session.
+          if (!user.identityId) {
+            throw new Error(`cleanup "remove-oidc": no identityId for user "${user.ref}"`);
+          }
+          await deleteIdentityCredentialType(user.identityId, "oidc");
+        } else if (kind === "restore-password") {
+          // The recovery scenarios change a shared seeded identity's password.
+          // Put the seeded password back so later specs still authenticate —
+          // returning-mfa is also used by login, error and session.
+          if (seededPassword && user.identityId) {
+            await setIdentityPassword(user.identityId, seededPassword);
+          }
         }
-        await deleteIdentityCredentialType(user.identityId, "webauthn");
-        await deleteIdentityCredentialType(user.identityId, "totp");
-      } else if (cleanup === "remove-oidc") {
-        // Account-linking scenarios write an oidc credential onto a seeded
-        // password identity; admin-side and unconditional for the same reason
-        // as remove-2fa — a walk that died mid-link has no usable session.
-        if (!user.identityId) {
-          throw new Error(`cleanup "remove-oidc": no identityId for user "${user.ref}"`);
-        }
-        await deleteIdentityCredentialType(user.identityId, "oidc");
-      } else if (cleanup === "restore-password") {
-        // The recovery scenarios change a shared seeded identity's password.
-        // Put the seeded password back so later specs still authenticate —
-        // returning-mfa is also used by login, error and session.
-        if (seededPassword && user.identityId) {
-          await setIdentityPassword(user.identityId, seededPassword);
-        }
+      } catch (err) {
+        // Cleanup best-effort: don't mask the original test failure. But say
+        // what it costs — a silently skipped cleanup is why first-login-mfa
+        // failed every rerun for a day before anyone saw a message.
+        console.warn(
+          `Cleanup "${kind}" for "${scenario.id}" failed (non-fatal): ${err} — ` +
+          `the user's state is now ahead of the manifest, so the next run of this scenario will likely fail until a reseed`,
+        );
       }
-    } catch (err) {
-      // Cleanup best-effort: don't mask the original test failure. But say
-      // what it costs — a silently skipped cleanup is why first-login-mfa
-      // failed every rerun for a day before anyone saw a message.
-      console.warn(
-        `Cleanup "${cleanup}" for "${scenario.id}" failed (non-fatal): ${err} — ` +
-        `the user's state is now ahead of the manifest, so the next run of this scenario will likely fail until a reseed`,
-      );
     }
   }
 }

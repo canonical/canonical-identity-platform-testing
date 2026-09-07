@@ -58,8 +58,6 @@ import type { Manifest, ManifestUser, ManifestTenant, ManifestMembership, Manife
 // Credentials — one definition, shared with the specs and the transition table
 import {
   DEFAULT_TEST_PASSWORD,
-  DEX_USER_EMAIL,
-  DEX_USER_ID,
   DEX_USER_PASSWORD,
 } from "../helpers/test-credentials";
 
@@ -314,12 +312,29 @@ async function seedPasswordUser(ref: string, user: UserArchetype): Promise<Manif
   };
 }
 
-/** Create an OIDC/Dex user. */
+/** Kratos's OIDC subject for a dex static-password account: dex encodes
+ *  `{user_id, conn_id}` as a protobuf IDTokenSubject (dexidp/dex
+ *  server/internal/types.proto) and base64url-encodes it — for the `local`
+ *  connector that is `0a <len> <userID> 12 05 local`. Derived, not extracted,
+ *  so an archetype needs only the userID it shares with docker/dex/config.yml. */
+export function dexSubject(userId: string): string {
+  return Buffer.concat([
+    Buffer.from([0x0a, userId.length]),
+    Buffer.from(userId),
+    Buffer.from([0x12, 5]),
+    Buffer.from("local"),
+  ]).toString("base64");
+}
+
+/** Create an OIDC/Dex user. The archetype's email is its dex static account's
+ *  email; the password is the shared dex test password. */
 async function seedDexUser(ref: string, user: UserArchetype): Promise<ManifestUser> {
+  if (!user.dexUserId) throw new Error(`archetype ${ref} declares oidc/dex but no dexUserId (docker/dex/config.yml userID)`);
+  const email = archetypeEmail(ref);
   const identityId = await createIdentityWithOIDC({
-    email: DEX_USER_EMAIL,
+    email,
     provider: "dex",
-    subject: DEX_USER_ID,
+    subject: dexSubject(user.dexUserId),
   });
 
   // Mark OIDC users as verified by default
@@ -327,14 +342,14 @@ async function seedDexUser(ref: string, user: UserArchetype): Promise<ManifestUs
 
   return {
     ref,
-    email: DEX_USER_EMAIL,
+    email,
     password: null,
     credentials: ["oidc/dex"],
     totpConfigured: false,
     totpSecret: null,
     identityId,
     verified: true,
-    dexEmail: DEX_USER_EMAIL,
+    dexEmail: email,
     dexPassword: DEX_USER_PASSWORD,
   };
 }
@@ -586,9 +601,7 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
         // In incremental mode, check if the user already exists
         const email = user.credentials.includes("oidc/google")
           ? GOOGLE_TEST_EMAIL!
-          : user.credentials.includes("oidc/dex")
-            ? DEX_USER_EMAIL
-            : archetypeEmail(ref);
+          : archetypeEmail(ref);
         const existingId = await findIdentityByEmail(email);
 
         if (existingId) {
@@ -611,7 +624,7 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
             verified: true,
             ...(preservedBackupCode ? { backupCode: preservedBackupCode } : {}),
             ...(user.credentials.includes("oidc/dex")
-              ? { dexEmail: DEX_USER_EMAIL, dexPassword: DEX_USER_PASSWORD }
+              ? { dexEmail: email, dexPassword: DEX_USER_PASSWORD }
               : {}),
           };
 
@@ -717,8 +730,11 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
         { userRef: "single-tenant-user", tenantRef: "alpha", role: "owner" },
         { userRef: "multi-tenant-user", tenantRef: "alpha", role: "owner" },
         { userRef: "multi-tenant-user", tenantRef: "beta", role: "member" },
+        // The dex-entered tenant journeys, same shapes (§10 item 1).
+        { userRef: "dex-single-tenant-user", tenantRef: "alpha", role: "member" },
+        { userRef: "dex-multi-tenant-user", tenantRef: "alpha", role: "member" },
+        { userRef: "dex-multi-tenant-user", tenantRef: "beta", role: "member" },
       ];
-
       for (const pm of provisionMap) {
         const user = users.find((u) => u.ref === pm.userRef);
         const tenant = tenants.find((t) => t.ref === pm.tenantRef);

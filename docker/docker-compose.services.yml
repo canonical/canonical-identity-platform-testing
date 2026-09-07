@@ -206,6 +206,15 @@ services:
         source: ./dex/config.yml
         target: /etc/dex/config.yml
     command: dex serve /etc/dex/config.yml
+    # dex reads its static accounts ONCE at start, and a bind-mounted file's
+    # content change never recreates the container (compose v5 implements
+    # file `configs:` as bind mounts too and does not hash their content —
+    # measured 2026-09-02), so a newly added dex account stayed invisible
+    # until a manual `docker restart`. The Makefile stamps the config's
+    # content hash into the environment; a changed hash is a changed service
+    # definition, which `up` recreates.
+    environment:
+      - DEX_CONFIG_SHA=${DEX_CONFIG_SHA:-unset}
     healthcheck:
       test: ["CMD", "wget", "--spider", "-q", "http://localhost:5556/dex/.well-known/openid-configuration"]
       interval: 5s

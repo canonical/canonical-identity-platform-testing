@@ -866,7 +866,7 @@ references** — other documents cite "§10 item N", so renumber nothing.
 
 | # | Item | Status |
 |---|---|---|
-| 1 | Scenario variants for legitimate behaviour forks | Staged |
+| 1 | Scenario variants for legitimate behaviour forks | **Landed** 2026-09-02 — dex tenant journeys (incl. sequencing), sequencing linking; opaque introspection and the exact-shape predicate investigated and dropped |
 | 2 | Remaining generated rows green on juju | Blocked — upstream charm wedge |
 | 3 | Upstream releases unblock the registered gaps | Blocked — awaiting a login-ui-operator release |
 | 4 | `smtp-integrator` instead of the mailslurper fallback | Staged |
@@ -883,12 +883,59 @@ references** — other documents cite "§10 item N", so renumber nothing.
 | 15 | Account-linking coverage | **Landed** — the `account-linking` suite (two product defects filed) |
 | 16 | Blocking PR gate CI integration | Implemented — see docs/ci-spec.md |
 
-1. **Scenario variants** for legitimate behaviour forks:
-   - oidc-only login/tenant journeys (tenant scenarios currently require
-     `localUsersEnabled`);
-   - opaque-token assertion variants (introspection-side);
-   - exact-shape `requires` predicates — "only oidc", "exactly one provider";
-     current keys are subset-only.
+1. **Scenario variants for legitimate behaviour forks — LANDED 2026-09-02**,
+   each observed live before being declared:
+   - **Dex-entered tenant journeys** (`dex-single-tenant-auto-select`,
+     `dex-multi-tenant-selection`, and their `-sequencing` twins): tenant
+     lookup keys on the identifier, so a dex-credentialed identity sees the
+     same selection page BEFORE its credential page, which then offers
+     "Sign in with Dex" (`tenant-selection → provider:dex:login`). The
+     sequencing twins fork into key enrolment and are the first tenant
+     scenarios ever to run on an oidc-only row (`pd931-single-oidc-mt`,
+     canary pinned). Two dex static accounts + `dexUserId` archetypes; the
+     seeder now DERIVES kratos's federated subject from the dex userID
+     (`seed.ts dexSubject`) instead of hand-extracting it from callback
+     logs. Runner change: a path through a WebAuthn ceremony provisions its
+     own virtual authenticator — that is a property of the declaration, not
+     of which spec file collected it.
+   - **`tenantIdFromSeed` pins both shapes**: hook-service's token hook is
+     the claim's ONLY writer, so on a tenant row without hook-service
+     (pd931) the journey and the selection are real but no `tenant_id` is
+     stamped — asserted as absent there, equal to the seed elsewhere.
+   - **Sequencing linking** (`link-at-login-sequencing`): the collision
+     phase is entered from the register page and does not fork; the
+     post-link dex sign-in enrols a key before the callback, like
+     `oidc-dex-login` on sequencing rows. Cleanup is now a LIST
+     (`["remove-oidc", "remove-2fa"]`) because the walk mutates two things.
+   - **Opaque tokens, introspection side — DECIDED NOT TO TEST.** The only
+     way to read an opaque access token's claims is hydra's admin
+     introspection, and the admin API is internal-network only on every real
+     deployment — so the check could run on compose alone and never where it
+     matters. Implemented, proven on `mx-l1m1v1wnp0t0h1u0ao`
+     (`login-carries-group-claim` through the introspected `ext.groups`),
+     and removed the same day; opaque rows keep asserting on the ID token
+     alone, and `access_token_format` stays a preflight-verified shape fact.
+     (Independently, every opaque row deploys tenant-service or hook-service,
+     whose admin APIs are JWKS-only and refuse opaque service tokens — the
+     2026-08-14 finding, re-measured for hook-service 2026-09-02 — so
+     `--fresh` seeding and the nightly stay red on them regardless.)
+   - **Exact-shape `requires` — investigated and DROPPED.** No login-ui
+     surface forks on provider count: the sole-provider oidc-only row
+     (`tfdefault-oidc-only`) renders the identifier-first page with no
+     provider button at all (providers are offered only to identities
+     already carrying the credential) and an unknown identifier renders
+     "This account does not exist or has no login method configured";
+     nothing a scenario could pin depends on "exactly one". "Only oidc" is
+     already the equality `localUsersEnabled: false`. An unconsumed
+     predicate is dead machinery (item 12), so none was kept.
+   - **Preflight, same change:** the token-hook probe's present direction
+     was unsatisfiable on compose — hook-service runs with authorization
+     OFF there (PD-8) and builds a noop openfga client
+     (canonical/hook-service@295273b cmd/serve.go:117-124), so nothing
+     denies the probe's audience, on jwt and opaque rows alike. The probe
+     now reads hook-service's own request counter for `POST
+     /api/v0/hook/hydra` across the mint (the call itself is the witness);
+     denial stays the stronger outcome where authorization is on.
 2. **Remaining generated rows green on juju.** Two named blockers, and only
    two: the kratos-operator wedge (filed upstream with three concrete asks —
    the harness only journals it, so rows that hit it fail their settle budget

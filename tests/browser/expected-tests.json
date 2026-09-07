@@ -10,9 +10,9 @@
     "A value may be a number, or an array when a file's collection legitimately",
     "varies by profile — update the array deliberately, never to silence a run."
   ],
-  "total": [60, 61],
+  "total": [65, 66],
   "files": {
-    "account-linking.spec.ts": 2,
+    "account-linking.spec.ts": 3,
     "device.spec.ts": 2,
     "error.spec.ts": 3,
     "google-oidc.spec.ts": 3,
@@ -26,7 +26,7 @@
     "resilience.spec.ts": 5,
     "session.spec.ts": 3,
     "settings.spec.ts": 5,
-    "tenant.spec.ts": 4,
+    "tenant.spec.ts": 8,
     "use-backup-codes.spec.ts": 1,
     "verification.spec.ts": 5,
     "webauthn.spec.ts": 3,
