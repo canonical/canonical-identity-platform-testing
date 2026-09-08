@@ -21,6 +21,11 @@ on:
         description: Result of the tested job (needs.<job>.result)
         type: string
         required: true
+      dry_run:
+        description: Run the triage and print it to the job summary WITHOUT filing, commenting or closing any issue (triage-smoke.yml)
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: read
@@ -40,6 +45,7 @@ jobs:
       LANE: ${{ inputs.lane }}
       LABEL: ${{ inputs.label }}
       OUTCOME: ${{ inputs.outcome }}
+      DRY_RUN: ${{ inputs.dry_run }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Download lane log
@@ -56,6 +62,7 @@ jobs:
           tail -c 102400 full-log.txt > excerpt.txt
           [ -s excerpt.txt ] || echo "(lane produced no log output)" > excerpt.txt
       - name: LLM triage (optional)
+        id: llm
         if: env.OUTCOME == 'failure'
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
@@ -68,6 +75,7 @@ jobs:
               tail -n 120 excerpt.txt
               echo '```'
             } > triage.md
+            echo "source=none" >> "$GITHUB_OUTPUT"
             exit 0
           fi
           cat > system.txt <<'EOF'
@@ -96,7 +104,12 @@ jobs:
                -d @request.json > response.json; then
             jq -r '.choices[0].message.content // empty' response.json > triage.md || true
           fi
-          if [ ! -s triage.md ]; then
+          if [ -s triage.md ]; then
+            echo "source=llm" >> "$GITHUB_OUTPUT"
+          else
+            echo "source=fallback" >> "$GITHUB_OUTPUT"
+            echo "OpenRouter answered without usable content:" >&2
+            jq -c '.error // {status: "no choices"}' response.json >&2 || true
             {
               echo "_LLM triage unavailable for this run — verbatim log tail._"
               echo '```'
@@ -104,8 +117,22 @@ jobs:
               echo '```'
             } > triage.md
           fi
+      # Smoke mode: the triage IS the deliverable. A fallback here means the
+      # key or the model is broken and the next real failure would go out
+      # untriaged — fail so the dispatcher sees it.
+      - name: Dry run — publish the triage, file nothing
+        if: env.OUTCOME == 'failure' && env.DRY_RUN == 'true'
+        env:
+          SOURCE: ${{ steps.llm.outputs.source }}
+        run: |
+          {
+            echo "### $LANE — triage dry run (source: $SOURCE)"
+            echo
+            cat triage.md
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$SOURCE" = "llm" ] || { echo "::error::LLM triage did not run (source=$SOURCE)"; exit 1; }
       - name: File or update the lane issue
-        if: env.OUTCOME == 'failure'
+        if: env.OUTCOME == 'failure' && env.DRY_RUN != 'true'
         run: |
           gh label create "$LABEL" --force --color D93F0B \
             --description "Automated triage for the '$LANE' lane" || true
@@ -126,7 +153,7 @@ jobs:
             gh issue create --title "[ci] $LANE failing" --label "$LABEL" --body-file body.md
           fi
       - name: Close the lane issue on green
-        if: env.OUTCOME == 'success'
+        if: env.OUTCOME == 'success' && env.DRY_RUN != 'true'
         run: |
           num="$(gh issue list --state open --label "$LABEL" --json number --jq '.[0].number // empty')"
           if [ -n "$num" ]; then
