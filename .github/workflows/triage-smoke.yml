@@ -1,0 +1,60 @@
+# Proves the LLM triage plumbing on demand — docs/ci-spec.md §6. The real
+# triage job only runs on a SCHEDULED lane failure, so a rotated key, a
+# retired model slug or a broken `secrets: inherit` would otherwise surface
+# only on the next red night, as a silent fall-back to the verbatim log tail.
+# This dispatch feeds the reusable workflow a synthetic failed-lane log in
+# dry-run mode: the triage lands in the job summary, no issue is filed,
+# commented or closed, and the job FAILS unless the LLM actually answered.
+name: Triage smoke
+
+on:
+  workflow_dispatch:
+  # Any PR that touches the triage plumbing proves it before merge (~1¢/run).
+  pull_request:
+    paths:
+      - .github/workflows/_triage.yml
+      - .github/workflows/triage-smoke.yml
+
+permissions:
+  contents: read
+  issues: write # required by the reusable workflow's declaration; dry-run never uses it
+
+jobs:
+  synthetic-lane:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - name: Write a failed-lane log
+        run: |
+          mkdir -p lane
+          cat > lane/smoke-log.txt <<'EOF'
+          ═══ matrix row: mx-smoke (compose) ═══
+          ── deploy
+          ── preflight
+          Verifying deployment against row: mx-smoke (backend: compose)
+            ✓ [compose] kratos env (9 vars)
+            ✗ [behavior] oidc providers [dex] — the registration flow offers [none]
+          ✗ 2 checks: 1 ok, 1 failed, 0 warning(s)
+          ✗ deployment does not match declaration 'mx-smoke' — refusing to test against it:
+              [behavior] oidc providers [dex] — the registration flow offers [none]
+
+          ═══ matrix verdict ═══
+            ✗ mx-smoke
+          make: *** [Makefile:265: test-matrix] Error 1
+          EOF
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: triage-smoke-log
+          path: lane/
+          retention-days: 1
+
+  triage:
+    needs: synthetic-lane
+    uses: ./.github/workflows/_triage.yml
+    with:
+      lane: triage smoke (synthetic)
+      label: ci-triage-smoke
+      artifact: triage-smoke-log
+      outcome: failure
+      dry_run: true
+    secrets: inherit
