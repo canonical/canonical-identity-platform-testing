@@ -68,10 +68,13 @@ export const googleOidcScenarios = defineScenarioSuite({
   //
   // When oidc_sequencing=true and webauthn_enabled=true, after the Google
   // OIDC provider returns, Kratos redirects to the login UI for AAL2.
-  // If the user has no webauthn key, they must register one (setup-passkey).
-  // If the user has a webauthn key, they must verify with it (login-webauthn-verify).
+  // If the user has no webauthn key, they must register one (setup-passkey);
+  // enrolling the key completes the ceremony and releases the callback in
+  // one step — there is no separate verify page (measured 2026-09-08 with
+  // real Google credentials, identical to the Dex twin `oidc-dex-login`).
+  // If the user already has a key, they verify with it (login-webauthn-verify).
   //
-  // Phase 1: First login — Google auth → register webauthn key → verify with key → callback
+  // Phase 1: First login — Google auth → register webauthn key → callback
   // Phase 2: Returning login — Google auth → verify with key → callback
   defineScenario({
     id: "google-oidc-sequencing",
@@ -88,7 +91,6 @@ export const googleOidcScenarios = defineScenarioSuite({
           "provider:google:totp",
           "provider:google:confirm-identity",
           "setup-passkey",
-          "login-webauthn-verify",
           "oidc-callback",
         ],
       },
@@ -96,22 +98,24 @@ export const googleOidcScenarios = defineScenarioSuite({
         name: "authenticate-with-key",
         flowParams: { max_age: "0" },
         // Google session persists from Phase 1, so Google auto-selects the
-        // session and redirects back immediately — no password/TOTP pages.
-        // The browser goes: login-ui → Kratos OIDC → Google (auto-session)
-        // → Kratos callback → login-ui (webauthn verify for AAL2).
+        // session and redirects back immediately — no password/TOTP pages,
+        // and the hop through accounts.google.com is too brief to be a
+        // state. The browser goes: login-ui → Kratos OIDC → Google
+        // (auto-session) → Kratos callback → login-ui (webauthn verify for
+        // AAL2). Measured 2026-09-08.
         expectedPath: [
           "login-email",
-          "provider:google:login",
           "login-webauthn-verify",
           "oidc-callback",
         ],
       },
     ],
     assertions: { noTenantId: true },
-    // TODO: Consider removing the webauthn key via the Kratos admin API
-    // instead of the settings page, to avoid navigating away from the
-    // current page. For now, cleanup is handled by the seeder
-    // (re-seeding deletes all identities).
+    // The key enrolled in phase 1 must not survive the run: a leftover key
+    // turns the next first-login into a verify step (measured 2026-09-08 —
+    // phase 1 landed on login-webauthn-verify instead of setup-passkey).
+    // Same cleanup as the Dex sequencing twins.
+    cleanup: "remove-2fa",
   }),
   ],
 });

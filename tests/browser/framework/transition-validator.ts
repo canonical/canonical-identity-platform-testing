@@ -34,7 +34,7 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   start: ["login-email", "oidc-callback", "tenant-selection", "reset-email", "verification", "register-email", "setup-passkey", "oidc-error-page", "oidc-callback-error", "manage-details", "device-code"],
 
   // ── Login UI states ────────────────────────────────────────────────────
-  "login-email": ["login-password", "tenant-selection", "provider:dex:login", "provider:google:login", "oidc-callback", "reset-email", "register-email", "verification"],
+  "login-email": ["login-password", "tenant-selection", "provider:dex:login", "provider:google:login", "login-webauthn-verify", "oidc-callback", "reset-email", "register-email", "verification"],
   "login-password": ["setup-secure", "login-totp-verify", "login-backup-code-verify", "login-webauthn-verify", "oidc-callback", "login-password", "reset-email", "manage-details"],
   "login-totp-verify": ["oidc-callback", "login-backup-code-verify", "login-totp-verify", "backup-code-regenerate", "reset-password", "device-complete", "manage-details"],
   // → setup-secure: a key-only identity's signed assertion is accepted and
@@ -113,7 +113,7 @@ const LEGAL_TRANSITIONS: Record<string, PageStateType[]> = {
   "provider:dex:login": ["oidc-callback", "provider:dex:consent", "setup-passkey", "login-webauthn-verify", "login-password", "reset-password"],
   "provider:dex:consent": ["oidc-callback"],
 
-  "provider:google:login": ["provider:google:password", "login-webauthn-verify"],
+  "provider:google:login": ["provider:google:password"],
   "provider:google:password": ["provider:google:totp"],
   "provider:google:totp": ["provider:google:confirm-identity", "provider:google:interstitial", "oidc-callback"],
   "provider:google:confirm-identity": ["provider:google:consent", "provider:google:interstitial", "oidc-callback", "setup-passkey", "login-webauthn-verify"],

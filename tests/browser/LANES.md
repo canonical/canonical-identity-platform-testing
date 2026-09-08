@@ -95,32 +95,57 @@ These are configured in `playwright.config.ts` under the `google-oidc` project.
 To register a Google OAuth2 client in Google Cloud Console, use this redirect URI:
 
 ```
-http://localhost:4433/self-service/methods/oidc/callback/google
+http://localhost/self-service/methods/oidc/callback/google
 ```
 
 ### Running Google OIDC Tests
 
+Measured end to end 2026-09-08 (all three scenarios green). The four
+environment variables gate the project; the bare `npx playwright test
+--project=google-oidc` invocation SKIPS everything, because the live
+`/api/v0/app-config` carries no `oidc_providers` key — the declared
+capabilities must be passed explicitly, exactly as the matrix lane does.
+
 ```bash
-# Set credentials
+# 1. Substitute a real Google OAuth client into docker/kratos/kratos.google.yml
+#    (client_id / client_secret — never commit it), then `make up`.
+
+# 2. Credentials
 export GOOGLE_TEST_EMAIL="your-email@canonical.com"
 export GOOGLE_TEST_PASSWORD="your-password"
 export GOOGLE_TEST_TOTP_SECRET="your-base32-totp-secret"
 export GOOGLE_TEST_SUBJECT_ID="your-google-sub-claim"
 
-# Run only Google OIDC tests
-npx playwright test --project=google-oidc
-
-# Run against the canonical-internal profile's declared capabilities
-BROWSER_TEST_CAPABILITIES=../../matrix/rows/canonical-internal/capabilities.json npx playwright test --project=google-oidc
+# 3. Seed (creates the google-user archetype linked to the sub), then run
+#    against the profile's DECLARED capabilities.
+make seed-test-data-clean
+cd tests/browser
+BROWSER_TEST_CAPABILITIES=../../matrix/rows/canonical-internal/capabilities.json \
+  npx playwright test --project=google-oidc
 ```
+
+Exactly one variant runs per profile: `google-oidc-sequencing` on a sequencing
+shape (`canonical-internal`), `google-oidc-first-login` and
+`google-oidc-session-reuse` on a non-sequencing providers=2 row (e.g.
+`make matrix-up ROW=mx-l0m0v0wnp2t1h1u0aj`, seeded with
+`npx tsx seeder/seed.ts --fresh --profile <row>` and run with that row's
+`capabilities.json`).
+
+Discovering the `sub` once: with the OAuth client wired, complete one Google
+sign-up through `/ui/register`, then read
+`GET /admin/identities?credentials_identifier=<email>&include_credential=oidc`
+→ `credentials.oidc.config.providers[].subject`; delete that identity before
+seeding (the seeder creates its own).
 
 ### Identity Registration
 
-Google OIDC tests register a Kratos identity in `beforeAll` via the admin API
-(using `createIdentityWithOIDC` with the Google `sub`). This makes the
-identifier-first flow show the "Sign in with Google" button. The identity is
-cleaned up in `afterAll`. Registration is idempotent — if the identity already
-exists (matched by email), it is reused.
+The `google-user` identity is seeded by the seeder (archetype `google-user`,
+`credentials: ["oidc/google"]`, created with `createIdentityWithOIDC` and the
+Google `sub`) — only when `GOOGLE_TEST_EMAIL` and `GOOGLE_TEST_SUBJECT_ID` are
+set, and the spec refuses to run against a manifest that lacks it. The
+pre-linked credential is what makes the identifier-first flow offer "Sign in
+with Google". The sequencing scenario declares `cleanup: "remove-2fa"` so the
+key it enrols does not survive into the next run.
 
 ## First Live Smoke Baseline
 

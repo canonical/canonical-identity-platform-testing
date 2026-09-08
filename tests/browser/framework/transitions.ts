@@ -764,18 +764,25 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  "provider:google:login → login-webauthn-verify": {
-    description: "Google session reuse — auto-redirects to webauthn verify",
-    action: async (page) => {
-      // Google session persists from a previous phase. After clickGoogleLoginButton
-      // navigated to accounts.google.com, Google auto-selects the session and
-      // redirects back to the Kratos callback, which then redirects to the login-ui
-      // for AAL2 (webauthn verify). We just need to wait for the browser to come
-      // back to the login-ui.
+  // Google session reuse: with a Google session from an earlier phase, the
+  // hop through accounts.google.com is sub-second (Google auto-selects the
+  // account and bounces to the Kratos callback), so `provider:google:login`
+  // is never an observable state — measured 2026-09-08: the runner's state
+  // assertion found the page already on the security-key verify step. The
+  // edge names what the browser can actually be seen doing: enter the email,
+  // click Google, land on the AAL2 verify page.
+  "login-email → login-webauthn-verify": {
+    description: "Enter email, click Google — a live Google session bounces straight to webauthn verify",
+    action: async (page, user) => {
+      await enterEmail(page, user.email);
+      const googleButton = page.getByRole("button", { name: /sign in with google/i });
+      await expect(googleButton).toBeVisible({ timeout: 10_000 });
+      const before = page.url();
+      await googleButton.click();
       await page.waitForURL(
         (url) => {
           const s = url.toString();
-          return s.includes("/ui/") && !s.includes("accounts.google.com");
+          return s !== before && s.includes("/ui/") && !s.includes("accounts.google.com");
         },
         { timeout: 30_000 },
       );
