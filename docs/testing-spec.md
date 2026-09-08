@@ -872,7 +872,7 @@ references** — other documents cite "§10 item N", so renumber nothing.
 | 4 | `smtp-integrator` instead of the mailslurper fallback | Staged |
 | 5 | Attach on real dev/stg | Blocked — prerequisites in the runbook |
 | 6 | CI dry run of the hosts-pinned ingress mode | Staged |
-| 7 | user-verification-service functional coverage | Staged |
+| 7 | user-verification-service functional coverage | Blocked — decisions come from Salesforce; no test-plane tenant |
 | 8 | hook-service coverage | **Closed** 2026-09-02 — direct contract is hook-service's own suite; cross-service claim already covered; duplicate spec deleted, Go file renamed |
 | 9 | OIDC error paths | **Landed** — the `oidc-error` suite |
 | 10 | Device authorization grant | **Landed** — the `device` suite |
@@ -953,8 +953,15 @@ references** — other documents cite "§10 item N", so renumber nothing.
    store-charm-only target.
 6. **CI dry run of the hosts-pinned ingress mode** — the deterministic variant
    of the WebAuthn hostname fix — before a pipeline trusts it.
-7. **user-verification-service functional coverage.** Deployed on two profiles
-   and only health-pinged; the only service left in that position.
+7. **user-verification-service functional coverage — BLOCKED, external
+   credential.** Deployed on two profiles and health-pinged; presence is
+   verified structurally by the preflight. A verification DECISION is
+   sourced from Salesforce, and the test plane owns no Salesforce tenant —
+   so the only observable behaviour this service adds cannot be driven
+   here (decision 2026-09-02). The direct API contract is the service's
+   own suite regardless (item 8's rule). Unblocked by a test-plane
+   Salesforce sandbox, or by a stub decision source the charm can be
+   pointed at; either becomes one gated scenario.
 8. **hook-service coverage — CLOSED 2026-09-02, scope corrected.** The
    "cover `POST /api/v0/hook/hydra` directly" half was wrong for this repo:
    that route's contract (api-key 401, malformed 400, pool-full 429, authz
