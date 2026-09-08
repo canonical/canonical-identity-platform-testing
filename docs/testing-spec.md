@@ -873,7 +873,7 @@ references** — other documents cite "§10 item N", so renumber nothing.
 | 5 | Attach on real dev/stg | Blocked — prerequisites in the runbook |
 | 6 | CI dry run of the hosts-pinned ingress mode | Staged |
 | 7 | user-verification-service functional coverage | Staged |
-| 8 | Rename `webhook-flow.spec.ts`; cover hook-service directly | Staged |
+| 8 | hook-service coverage | **Closed** 2026-09-02 — direct contract is hook-service's own suite; cross-service claim already covered; duplicate spec deleted, Go file renamed |
 | 9 | OIDC error paths | **Landed** — the `oidc-error` suite |
 | 10 | Device authorization grant | **Landed** — the `device` suite |
 | 11 | Navigation & weird-user-behaviour coverage | Wave 1 landed; wave 2: `resend-code` landed 2026-09-01, rest staged |
@@ -955,9 +955,26 @@ references** — other documents cite "§10 item N", so renumber nothing.
    of the WebAuthn hostname fix — before a pipeline trusts it.
 7. **user-verification-service functional coverage.** Deployed on two profiles
    and only health-pinged; the only service left in that position.
-8. **Rename `webhook-flow.spec.ts`** (it exercises tenant-service's webhooks,
-   not a hook-service webhook) and cover hook-service's sole real route,
-   `POST /api/v0/hook/hydra`, directly.
+8. **hook-service coverage — CLOSED 2026-09-02, scope corrected.** The
+   "cover `POST /api/v0/hook/hydra` directly" half was wrong for this repo:
+   that route's contract (api-key 401, malformed 400, pool-full 429, authz
+   and non-member 403, groups omitted-when-empty, extras merged) is owned
+   by hook-service's own suite — `canonical/hook-service@295273b
+   pkg/hooks/{handlers,middlewares,service}_test.go` plus its podman e2e
+   (`tests/e2e/e2e_test.go`). Single-service contract tests belong to the
+   service; this plane tests the deployed platform. What is ours is the
+   CROSS-SERVICE claim, and it was already covered: hydra calls the hook
+   (preflight `token hook wired`), the hook reads real group/tenant state
+   and it lands in the RP's tokens (`login-carries-group-claim`,
+   `tenantIdFromSeed` on all eight tenant journeys, asserted ABSENT where
+   hook-service is not deployed), and the hook-service ↔ tenant-service
+   Kratos webhooks (Go, `tenant_webhooks_test.go` — renamed from
+   `webhook_test.go`, which read as hook-service coverage).
+   `webhook-flow.spec.ts` was DELETED, not renamed: its health ping is
+   preflight layer 1, and its second test provisioned a tenant through the
+   admin API inside a spec (a seeder-only privilege) to assert exactly what
+   `single-tenant-auto-select` asserts on the same profile with a seeded
+   identity.
 9. **OIDC error paths — landed as the `oidc-error` suite.** Hydra splits
    authorize errors on redirect-URI validity
    (`ory/hydra@34a5fb709607 oauth2/handler.go:1369-1382`):

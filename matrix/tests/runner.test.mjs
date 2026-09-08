@@ -60,7 +60,7 @@ test("tier-A drift is flagged in BOTH directions", () => {
 
 test("tier-B executions are never drift (capability-gated hand-written specs may run)", () => {
   const failures = classifyOutcome(
-    [t("webhook-flow.spec.ts", "hook-service health check", "expected")],
+    [t("recovery-code-abuse.spec.ts", "recovery-code-cross-browser-rejected", "expected")],
     expectedSet([]),
   );
   assert.deepEqual(failures, []);
@@ -77,13 +77,13 @@ test("tier-B skips need a justified reason; real reason shapes pass", () => {
   ];
   for (const reason of justified) {
     assert.deepEqual(
-      classifyOutcome([t("webhook-flow.spec.ts", "x", "skipped", reason)], expectedSet([])),
+      classifyOutcome([t("recovery-code-abuse.spec.ts", "x", "skipped", reason)], expectedSet([])),
       [],
       `reason should be justified: ${reason}`,
     );
   }
   const failures = classifyOutcome(
-    [t("webhook-flow.spec.ts", "x", "skipped", "TODO fix later")],
+    [t("recovery-code-abuse.spec.ts", "x", "skipped", "TODO fix later")],
     expectedSet([]),
   );
   assert.equal(failures.length, 1);

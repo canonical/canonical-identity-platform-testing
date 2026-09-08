@@ -1,5 +1,14 @@
 //go:build e2e
 
+// tenant-service's Kratos webhook routes (/api/v0/webhooks/registration and
+// /login), driven directly. Formerly webhook_test.go, a name that read as
+// hook-service coverage: hook-service's sole route is hydra's token hook,
+// whose contract is owned by hook-service's own suite
+// (canonical/hook-service@295273b pkg/hooks/*_test.go, tests/e2e) — this
+// repo covers only the cross-service claim that the hook's output reaches
+// the RP's tokens (login-carries-group-claim, tenantIdFromSeed) and that
+// hydra is wired to call it (preflight). See docs/testing-spec.md §10 item 8.
+
 package integration
 
 import (

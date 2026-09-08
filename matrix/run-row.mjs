@@ -571,7 +571,7 @@ function jujuEnv() {
     KRATOS_ADMIN_URL: process.env.KRATOS_ADMIN_URL ?? `http://${addr("kratos")}:4434`,
     HYDRA_PUBLIC_URL: process.env.HYDRA_PUBLIC_URL ?? `http://${addr("hydra")}:4444`,
     HYDRA_ADMIN_URL: process.env.HYDRA_ADMIN_URL ?? `http://${addr("hydra")}:4445`,
-    // Tier-B hand-written specs (webhook-flow, uvs) default to compose's
+    // Tier-B hand-written specs (device, recovery-code-abuse) default to compose's
     // localhost ports; on juju they reach the services via cluster IPs -
     // without these the specs run (capabilities gate them on) and then fail
     // on dead sockets.
