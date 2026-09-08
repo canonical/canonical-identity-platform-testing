@@ -1,6 +1,6 @@
-# Matrix row: mx-l0m0v0wnp2t1h1u1ao (generated) — GENERATED, DO NOT EDIT.
+# Matrix row: mx-l0m0v0wnp2t1h1u0aj (generated) — GENERATED, DO NOT EDIT.
 # Source of truth: matrix/config-model.mjs; regenerate with `make matrix-generate`.
-# local_idp=off mfa=off verification=off webauthn=none providers=2 tenant_service=present hook_service=present user_verification=present access_token=opaque
+# local_idp=off mfa=off verification=off webauthn=none providers=2 tenant_service=present hook_service=present user_verification=absent access_token=jwt
 
 services:
   kratos:
@@ -26,7 +26,6 @@ services:
 
   hydra:
     environment:
-      - STRATEGIES_ACCESS_TOKEN=opaque
       # Compose analog of the hydra-token-hook relation (relation-only in charms;
       # hydra fails token issuance when the hook is unreachable, so this block
       # exists only on rows that deploy hook-service).
@@ -38,4 +37,7 @@ services:
       # Charm renders allowed_top_level_claims from the relation's claim list
       # (groups, + tenant_id iff hook↔tenant-service related).
       - OAUTH2_ALLOWED_TOP_LEVEL_CLAIMS=groups,tenant_id
+
+  user-verification-service:
+    scale: 0
 

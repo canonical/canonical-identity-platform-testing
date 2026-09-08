@@ -2,7 +2,7 @@
   "oidc_webauthn_sequencing_enabled": false,
   "base_url": "http://localhost",
   "identifier_first_enabled": true,
-  "multi_tenancy_enabled": true,
+  "multi_tenancy_enabled": false,
   "support_email": "",
   "flags": [
     "password"
@@ -13,7 +13,6 @@
     "login-ui",
     "dex",
     "openfga",
-    "tenant-service",
     "user-verification-service"
   ],
   "methods_1fa": [
@@ -28,7 +27,7 @@
   "account_linking_enabled": false,
   "oidc_providers": [],
   "verification_enabled": false,
-  "access_token_format": "jwt",
+  "access_token_format": "opaque",
   "mail_api": true,
   "backup_code_prompt_on_use": false,
   "device_flow": true

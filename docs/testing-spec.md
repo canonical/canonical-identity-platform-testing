@@ -18,7 +18,7 @@ This spec is the approach and the design. Everything else moved out deliberately
 flowchart LR
   M["matrix/config-model.mjs<br/>the model"] --> R["11 rows"]
   R --> GP["3 pinned rows<br/>= the gate profiles"]
-  R --> MR["2 seed + 6 generated rows"]
+  R --> MR["3 seed + 5 generated rows"]
   GP --> G["the gate<br/>blocking, per-PR"]
   MR --> N["the matrix lane<br/>nightly, non-blocking"]
   G --> V["red = stop the PR"]
@@ -130,15 +130,27 @@ space is what operators can actually produce, not arbitrary env combinations:
 | `tenant_service` | present, absent | Multi-tenancy (tenant selection, tenant claims) |
 | `hook_service` | present, absent | Hydra token hook — claim enrichment (groups, tenant_id) |
 | `user_verification` | present, absent | Registration webhook + its error page |
-| `access_token` | jwt, opaque | Token shape relying parties receive |
+| `access_token` | jwt, opaque | Token shape relying parties receive (opaque‡ only without add-ons) |
 
 † `passwordless` (passkeys as the first factor) is retired from generation by
 constraint: not actively maintained upstream, and the charm-rendered shape 400s
 webauthn-1FA flow creation. The dimension still documents the charm option;
 deleting one constraint re-enables it.
 
-**5 constraints** exclude documented-invalid or aliasing combinations — e.g.
-sequencing without any OIDC provider, or a shape with no login method at all.
+‡ `opaque` never pairs with a present `tenant_service` or `hook_service`:
+both add-ons authenticate their admin APIs by parsing the bearer token as a
+JWT against hydra's JWKS (no introspection path exists in either service or
+charm), so with `jwt_access_tokens=false` every admin call — and therefore
+every seed — answers `401 invalid token`. The nightly was red on every such
+row from 2026-08-27 to 2026-09-08. Retired from generation by two constraints
+(`opaque-tokens-lock-out-tenant-admin`, `opaque-tokens-lock-out-hook-admin`,
+commit-pinned evidence in the model); the upstream finding stays filed in
+`upstreamFindings`, and the constraints are deleted the day either service
+introspects.
+
+**7 constraints** exclude documented-invalid, aliasing or unadministrable
+combinations — e.g. sequencing without any OIDC provider, a shape with no login
+method at all, or opaque tokens with an add-on admin API.
 
 **Invariants:** Login style is not a dimension — identifier-first is the only supported style platform-wide, and the one-step (unified) login flow is deprecated platform-wide (team decision, matching the † precedent above). `capabilities().identifier_first_enabled: true` is an invariant, not a free variable.
 
@@ -146,12 +158,12 @@ sequencing without any OIDC provider, or a shape with no login method at all.
 
 ```mermaid
 flowchart TD
-  M["config-model.mjs<br/>9 dimensions, 5 constraints"] --> P["3 pinned rows<br/>the gate profiles"]
-  M --> S["2 seed rows<br/>permanent regression sentinels"]
+  M["config-model.mjs<br/>9 dimensions, 7 constraints"] --> P["3 pinned rows<br/>the gate profiles"]
+  M --> S["3 seed rows<br/>permanent regression sentinels"]
   M --> G["generate.mjs<br/>deterministic greedy pairwise cover"]
   P -.->|take pair credit| G
   S -.->|never dropped| G
-  G --> X["6 generated rows<br/>fill the remaining pairs"]
+  G --> X["5 generated rows<br/>fill the remaining pairs"]
   P --> R["matrix/rows/NAME/"]
   S --> R
   X --> R
@@ -160,27 +172,38 @@ flowchart TD
   R --> K["capabilities.json<br/>the only gating truth"]
 ```
 
-The two seed rows are the ones worth naming, because each encodes a real-world
+A seed row may declare `backends` — the deployment interfaces (§4) that can
+render its declared truths. `deployed-core-local-mfa` is bound to `urls`: its
+`caps` describe iam.orange.canonical.com (Google provider, no mail, the
+prompt-on-use login-ui fork), which no compose override or juju var-file can
+produce, so the generator emits its `capabilities.json` only, `run-row --all`
+names it as out of scope on every other backend, and a single-row run there
+is refused before deploy. The nightly ran it on compose for two weeks and the
+preflight refused it every night — the right verdict for a row the backend
+could never satisfy, but noise in a lane meant to find defects.
+
+The seed rows are the ones worth naming, because each encodes a real-world
 shape nothing else covered:
 
 | Seed row | Why it is permanent |
 |---|---|
 | `pd931-single-oidc-mt` | The login-ui#931 shape — exactly one first-factor option |
 | `tfdefault-oidc-only` | The charm's own terraform-default shape, which **no profile resembled** |
+| `deployed-core-local-mfa` | The shape of the internal charmed CORE deployments, read off iam.orange.canonical.com; `urls`-bound |
 
 ### Coverage, generated rather than asserted
 
 | Quantity | Value |
 |---|---|
-| Valid rows in the space | 448 |
-| Achievable dimension pairs | **157** |
+| Valid rows in the space | 280 |
+| Achievable dimension pairs | **155** |
 | Rows needed to cover them | **11** — 3 pinned + 3 seed + 5 generated |
-| Pairs covered by the 3 pinned profiles alone | **68 (43.3%)** — the measured gap that motivated the matrix |
-| Further pairs added by the 3 seed rows | 43 |
+| Pairs covered by the 3 pinned profiles alone | **68 (43.9%)** — the measured gap that motivated the matrix |
+| Further pairs added by the 3 seed rows | 35 |
 
 Every number above is generated. Re-derive with `jq .stats matrix/matrix.json`;
 at the current tree that is
-`{"validRows":448,"achievablePairs":157,"coveredByPinned":68,"coveredBySeeds":43,"generatedRows":5,"totalRows":11}`.
+`{"validRows":280,"achievablePairs":155,"coveredByPinned":68,"coveredBySeeds":35,"generatedRows":5,"totalRows":11}`.
 If `matrix/config-model.mjs` changes, run `make matrix-generate && make
 matrix-check` and update this table.
 
@@ -286,21 +309,26 @@ scripts/expected-set.ts ../../matrix/rows/<row>/capabilities.json`.
 
 Whether the seed rows run the full contract green on the charmed stack is a
 live measurement: a `make test-matrix` run establishes it, and this document
-never asserts it.
+never asserts it. On compose the lane runs the two substrate-neutral seeds and
+the generated rows; `deployed-core-local-mfa` is listed in the verdict as out
+of scope (`urls`-bound, §3).
 
-The remaining generated rows are red in two named classes — a kratos-operator
-wedge filed upstream, and the scenario-variant work in §10 item 1 — recorded per
-row. **Red rows here are the lane doing its job:** each failure is a named
-finding, never a silent skip.
+On the charmed backend the generated rows are red in two named classes — a
+kratos-operator wedge filed upstream, and the scenario-variant work in §10
+item 1 — recorded per row. **Red rows here are the lane doing its job:** each
+failure is a named finding, never a silent skip. The two-week compose-nightly
+red of 2026-08-27 → 2026-09-08 was the other kind: rows the backend could never
+satisfy (opaque tokens with an add-on admin API; the `urls`-bound seed on
+compose), now excluded at the model, not at the verdict.
 
 ### Harness self-tests (no cluster, seconds)
 
 | Command | Covers | Count |
 |---|---|---|
-| `make matrix-test` | The matrix runner's pure logic; chained into `matrix-check` | **57** tests |
+| `make matrix-test` | The matrix runner's pure logic; chained into `matrix-check` | **64** tests |
 | `make test-browser-unit` | The suite framework's pure logic — scenario validation, claim assertions, manifest, ownership | **72** tests |
 
-`make matrix-check` also prints `✓ matrix artifacts match the model (11 rows, 157
+`make matrix-check` also prints `✓ matrix artifacts match the model (11 rows, 155
 pairs)`. Both counts rise every time a canary is added, so **the commands are the
 source of truth, not these numbers**:
 `make matrix-test 2>&1 | grep '^# tests'`.
@@ -681,7 +709,7 @@ and `scripts/audit-live-compat.mjs` enforcing the boundary statically.
 |---|---|
 | `matrix/config-model.mjs` | The model (§3). **Source of truth** — everything below is generated from it, and `make matrix-check` fails CI on drift |
 | `matrix/generate.mjs` | Deterministic greedy pairwise cover. Pinned rows take pair credit, seed rows are permanent, generated rows fill the rest |
-| `matrix/rows/<name>/` | Materialized per row: compose override, `capabilities.json` (shaped like the suite's `ActiveConfig`, backend-divergent keys under a `juju` sub-object), and `juju.tfvars.json` for charm-producible rows |
+| `matrix/rows/<name>/` | Materialized per row: compose override, `capabilities.json` (shaped like the suite's `ActiveConfig`, backend-divergent keys under a `juju` sub-object), and `juju.tfvars.json` for charm-producible rows. A `backends`-bound seed row gets `capabilities.json` only |
 
 | Command | Effect |
 |---|---|
@@ -915,10 +943,12 @@ references** — other documents cite "§10 item N", so renumber nothing.
      (`login-carries-group-claim` through the introspected `ext.groups`),
      and removed the same day; opaque rows keep asserting on the ID token
      alone, and `access_token_format` stays a preflight-verified shape fact.
-     (Independently, every opaque row deploys tenant-service or hook-service,
-     whose admin APIs are JWKS-only and refuse opaque service tokens — the
-     2026-08-14 finding, re-measured for hook-service 2026-09-02 — so
-     `--fresh` seeding and the nightly stay red on them regardless.)
+     (Independently, every opaque row then deployed tenant-service or
+     hook-service, whose admin APIs are JWKS-only and refuse opaque service
+     tokens — the 2026-08-14 finding, re-measured for hook-service
+     2026-09-02 — so `--fresh` seeding and the nightly stayed red on them
+     regardless. RESOLVED at the model 2026-09-08: the pair is retired by
+     constraint (§3 ‡) and opaque now runs on add-on-free rows only.)
    - **Exact-shape `requires` — investigated and DROPPED.** No login-ui
      surface forks on provider count: the sole-provider oidc-only row
      (`tfdefault-oidc-only`) renders the identifier-first page with no

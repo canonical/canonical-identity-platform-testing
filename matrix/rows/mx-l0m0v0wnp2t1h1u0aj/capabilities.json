@@ -1,13 +1,10 @@
 {
-  "oidc_webauthn_sequencing_enabled": true,
+  "oidc_webauthn_sequencing_enabled": false,
   "base_url": "http://localhost",
   "identifier_first_enabled": true,
   "multi_tenancy_enabled": true,
   "support_email": "",
   "flags": [
-    "password",
-    "webauthn",
-    "backup_codes",
     "account_linking"
   ],
   "services": [
@@ -16,28 +13,25 @@
     "login-ui",
     "dex",
     "openfga",
-    "tenant-service"
+    "tenant-service",
+    "hook-service"
   ],
   "methods_1fa": [
-    "password",
     "oidc"
   ],
-  "methods_2fa": [
-    "backup_codes",
-    "webauthn"
-  ],
+  "methods_2fa": [],
   "mfa_enforced": false,
-  "webauthn_enabled": true,
+  "webauthn_enabled": false,
   "oidc_enabled": true,
-  "local_users_enabled": true,
+  "local_users_enabled": false,
   "registration_enabled": true,
   "account_linking_enabled": true,
   "oidc_providers": [
     "dex",
     "google"
   ],
-  "verification_enabled": true,
-  "access_token_format": "opaque",
+  "verification_enabled": false,
+  "access_token_format": "jwt",
   "mail_api": true,
   "backup_code_prompt_on_use": false,
   "device_flow": true,

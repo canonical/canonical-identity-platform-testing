@@ -32,7 +32,7 @@ import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { derive, expectedEnv, kratosConfigFiles, jujuTfvars, TOGGLED_SERVICES } from "./lib.mjs";
+import { derive, expectedEnv, kratosConfigFiles, jujuTfvars, rowRunsOn, TOGGLED_SERVICES } from "./lib.mjs";
 import { assertController } from "./controller-guard.mjs";
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PROJECT = process.env.COMPOSE_PROJECT_NAME ?? "identity-platform";
@@ -1073,6 +1073,9 @@ export async function verifyRow(rowName, backend = process.env.MATRIX_BACKEND ??
   const row = matrix.rows.find((r) => r.name === rowName);
   if (!row) throw new Error(`no such row: ${rowName} (see matrix/matrix.json)`);
   if (row.kind === "pinned") throw new Error(`${rowName} is a pinned profile — it runs through \`make gate\`, not the matrix lane`);
+  if (!rowRunsOn(row, backend)) {
+    throw new Error(`${rowName} is bound to the ${row.backends.join("|")} backend — its capabilities describe an external target no ${backend} deployment can render`);
+  }
   const rawCaps = JSON.parse(fs.readFileSync(path.join(HERE, "rows", rowName, "capabilities.json"), "utf-8"));
   // Backend-divergent keys (e.g. the second oidc provider: compose renders
   // dex+google, juju renders dex+dex2) live under a `juju` sub-object -

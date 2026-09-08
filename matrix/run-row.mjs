@@ -33,6 +33,9 @@
 //   urls    — mode 5: no juju, no docker, no substrate access. The row's
 //             contract runs against externally provided URLs; env is the
 //             whole interface (see urlsEnv()). LOGIN_UI_URL is required.
+//   A row may be bound to a backend subset (config-model.mjs `backends`, the
+//   target-bound seed rows): `--all` lists it as out of scope on any other
+//   backend and a single-row run there is refused before deploy.
 
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -40,6 +43,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { assertController } from "./controller-guard.mjs";
 import { JUSTIFIED_SKIP } from "../tests/browser/scripts/skip-allowlist.mjs";
+import { rowRunsOn } from "./lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.dirname(HERE);
@@ -145,6 +149,21 @@ export function classifyOutcome(tests, expected) {
   }
 
   return failures;
+}
+
+/** Pure: which rows a run covers on `backend`. `target === null` is `--all`:
+ *  every non-pinned row (pinned rows run through the gate). Rows bound to
+ *  other backends (config-model.mjs `backends`) come back separately so the
+ *  lane NAMES them as out of scope instead of deploying them to be refused by
+ *  the preflight — and so the verdict's row list stays the full declaration.
+ *  An unknown single target passes through; runRow reports it. */
+export function selectRows(matrix, backend, target) {
+  const candidates = matrix.rows.filter((r) => (target === null ? r.kind !== "pinned" : r.name === target));
+  if (candidates.length === 0) return { rows: [target], outOfScope: [] };
+  return {
+    rows: candidates.filter((r) => rowRunsOn(r, backend)).map((r) => r.name),
+    outOfScope: candidates.filter((r) => !rowRunsOn(r, backend)),
+  };
 }
 
 function deployCompose(rowName) {
@@ -846,7 +865,12 @@ if (args.includes("--attach") && backend !== "juju") {
 }
 
 const matrix = JSON.parse(fs.readFileSync(path.join(HERE, "matrix.json"), "utf-8"));
-const rows = all ? matrix.rows.filter((r) => r.kind !== "pinned").map((r) => r.name) : [target];
+const { rows, outOfScope } = selectRows(matrix, backend, all ? null : target);
+if (outOfScope.length > 0 && !all) {
+  const row = outOfScope[0];
+  console.error(`✗ ${row.name} is bound to the ${row.backends.join("|")} backend (its declared capabilities describe an external target no ${backend} deployment can render) — run it with --backend=${row.backends[0]}`);
+  process.exit(2);
+}
 
 // Juju rows run under the model journal (matrix/watchdog.mjs): an
 // observer-only process that records workload-status changes and stuck units
@@ -894,9 +918,13 @@ try {
   watchdog?.kill("SIGTERM");
 }
 
-if (rows.length > 1) {
+if (all) {
   console.log("\n═══ matrix verdict ═══");
   for (const v of verdicts) console.log(`  ${v.ok ? "✓" : "✗"} ${v.row}`);
+  // Out of scope is not a skip: the row is declared for a backend this run is
+  // not, and it is listed here so the lane's row list always equals the
+  // model's (docs/testing-spec.md §4, the urls interface).
+  for (const r of outOfScope) console.log(`  — ${r.name} (bound to the ${r.backends.join("|")} backend; not a ${backend} row)`);
 }
 process.exit(verdicts.every((v) => v.ok) ? 0 : 1);
 

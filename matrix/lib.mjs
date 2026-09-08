@@ -287,6 +287,28 @@ export function rowName(dims) {
   return `mx-${code}`;
 }
 
+/** The deployment interfaces a row can run through (docs/testing-spec.md §4).
+ *  A row without a `backends` declaration runs on all of them; a target-bound
+ *  seed row (config-model.mjs `backends`) runs on the listed subset only —
+ *  its caps describe one external deployment, which no other backend can
+ *  render, so deploying it anywhere else only buys a preflight refusal. */
+export const BACKENDS = ["compose", "juju", "urls"];
+
+export function rowRunsOn(row, backend) {
+  return !row.backends || row.backends.includes(backend);
+}
+
+/** Which per-backend artifacts a row materializes under matrix/rows/<name>/:
+ *  the compose override and the juju var-file follow the row's backends; a
+ *  juju var-file additionally needs every dim on-model (a null dim is a
+ *  pinned profile's off-charm shape). capabilities.json is unconditional. */
+export function rowArtifacts(row) {
+  return {
+    compose: rowRunsOn(row, "compose"),
+    juju: rowRunsOn(row, "juju") && Object.values(row.dims).every((v) => v !== null),
+  };
+}
+
 /**
  * Juju-backend materialization: model row → terraform variable values for
  * matrix/backends/juju/root. Charm CONFIG here, not service config — the

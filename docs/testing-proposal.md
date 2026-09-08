@@ -208,11 +208,13 @@ We propose modeling **9 operational dimensions** derived directly from charm con
 | `user_verification` | `present`, `absent` | Webhook user approval checks |
 | `access_token` | `jwt`, `opaque` | Relying party token representation |
 
-Using greedy pairwise coverage, **157 reachable configuration pairs** across 448
-valid combinations are covered using just **11 rows** (3 pinned gate profiles + 2
-permanent regression seeds + 6 generated pairwise rows). The number that
+Using greedy pairwise coverage, **155 reachable configuration pairs** across 280
+valid combinations are covered using just **11 rows** (3 pinned gate profiles + 3
+permanent regression seeds + 5 generated pairwise rows). The number that
 motivates the whole exercise: the 3 pinned profiles on their own cover only
-**68 of the 157 pairs (43.3%)**.
+**68 of the 155 pairs (43.9%)**. Opaque access tokens are modelled but never
+paired with a present add-on: both add-on admin APIs parse bearer tokens as
+JWTs only, so the combination cannot be administered or seeded (spec §3 ‡).
 
 \* `passwordless` (passkeys as the first factor) is modelled but retired from
 generation by constraint — it is not actively maintained upstream and the

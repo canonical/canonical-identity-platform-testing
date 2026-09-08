@@ -16,6 +16,7 @@ import {
   classifyOutcome,
   buildAttachImports,
   relationExists,
+  selectRows,
   JUSTIFIED_SKIP,
   TIER_A_FILES,
 } from "../run-row.mjs";
@@ -206,6 +207,41 @@ test("relationExists reads both string and object peer shapes", () => {
   assert.ok(relationExists(objStatus, "a", "ep", "b"));
   assert.ok(relationExists(strStatus, "a", "ep", "b"));
   assert.ok(!relationExists(objStatus, "a", "ep", "c"));
+});
+
+// ── selectRows ───────────────────────────────────────────────────────────────
+// The nightly ran the target-bound seed row (deployed-core-local-mfa, caps read
+// off iam.orange.canonical.com) on compose every night for two weeks, where the
+// preflight refused it on its Google provider — a red row for a shape the
+// backend was never able to render. A row bound to other backends is named as
+// out of scope, never deployed, and never dropped from the verdict silently.
+const MATRIX = {
+  rows: [
+    { name: "core", kind: "pinned", dims: {} },
+    { name: "seed-everywhere", kind: "seed", dims: {} },
+    { name: "seed-target", kind: "seed", dims: {}, backends: ["urls"] },
+    { name: "mx-generated", kind: "generated", dims: {} },
+  ],
+};
+
+test("--all takes every non-pinned row the backend can run and names the rest", () => {
+  const compose = selectRows(MATRIX, "compose", null);
+  assert.deepEqual(compose.rows, ["seed-everywhere", "mx-generated"]);
+  assert.deepEqual(compose.outOfScope.map((r) => r.name), ["seed-target"]);
+
+  const urls = selectRows(MATRIX, "urls", null);
+  assert.deepEqual(urls.rows, ["seed-everywhere", "seed-target", "mx-generated"]);
+  assert.deepEqual(urls.outOfScope, []);
+});
+
+test("a single target bound to another backend is out of scope, not run", () => {
+  assert.deepEqual(selectRows(MATRIX, "compose", "seed-target").rows, []);
+  assert.deepEqual(selectRows(MATRIX, "compose", "seed-target").outOfScope.map((r) => r.name), ["seed-target"]);
+  assert.deepEqual(selectRows(MATRIX, "urls", "seed-target").rows, ["seed-target"]);
+});
+
+test("an unknown single target passes through for runRow's 'no such row'", () => {
+  assert.deepEqual(selectRows(MATRIX, "compose", "nope"), { rows: ["nope"], outOfScope: [] });
 });
 
 // ── TIER_A_FILES vs the expected-set script ──────────────────────────────────

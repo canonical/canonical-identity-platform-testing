@@ -12,7 +12,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { capabilities, rowName } from "../lib.mjs";
+import { capabilities, rowArtifacts, rowName } from "../lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const matrix = JSON.parse(fs.readFileSync(path.join(HERE, "..", "matrix.json"), "utf-8"));
@@ -91,6 +91,36 @@ test("backend-divergent providers: juju override exists iff providers=2 and mirr
 test("webauthn-passwordless is retired from the generated space (upstream unmaintained)", () => {
   for (const row of namedRows) {
     assert.notEqual(row.dims.webauthn, "passwordless", row.name);
+  }
+});
+
+// tenant-service and hook-service authenticate their admin APIs by parsing the
+// bearer token as a JWT (JWKS/issuer, no introspection), so an opaque-token
+// deployment cannot be seeded: the nightly was red on every such row from
+// 2026-08-27 to 2026-09-08 (`401 invalid token` from both services). The pair
+// is retired from generation until the services introspect.
+test("opaque access tokens never pair with a present add-on admin API", () => {
+  for (const row of namedRows.filter((r) => r.dims.access_token === "opaque")) {
+    assert.equal(row.dims.tenant_service, "absent", `${row.name} tenant-service`);
+    assert.equal(row.dims.hook_service, "absent", `${row.name} hook-service`);
+  }
+});
+
+// A target-bound row (config-model.mjs `backends`) materializes no artifact for
+// a backend that cannot render its declared truths — `make matrix-up` refuses
+// on the missing override instead of deploying a row the preflight will refuse.
+test("a row's on-disk artifacts follow its backend binding", () => {
+  for (const row of matrix.rows) {
+    const dir = path.join(HERE, "..", "rows", row.name);
+    const want = rowArtifacts(row);
+    assert.equal(fs.existsSync(path.join(dir, "docker-compose.override.yml")), want.compose, `${row.name} compose override`);
+    assert.equal(fs.existsSync(path.join(dir, "juju.tfvars.json")), want.juju, `${row.name} juju var-file`);
+    assert.ok(fs.existsSync(path.join(dir, "capabilities.json")), `${row.name} capabilities`);
+  }
+  const bound = matrix.rows.filter((r) => r.backends);
+  assert.ok(bound.length > 0, "the model declares at least one target-bound row (deployed-core-local-mfa)");
+  for (const row of bound) {
+    assert.ok(row.kind === "seed", `${row.name}: only seed rows can be target-bound`);
   }
 });
 

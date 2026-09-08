@@ -1,6 +1,6 @@
-# Matrix row: mx-l1m0v0wnp0t1h0u1aj (generated) — GENERATED, DO NOT EDIT.
+# Matrix row: mx-l1m0v0wnp0t0h0u1ao (generated) — GENERATED, DO NOT EDIT.
 # Source of truth: matrix/config-model.mjs; regenerate with `make matrix-generate`.
-# local_idp=on mfa=off verification=off webauthn=none providers=0 tenant_service=present hook_service=absent user_verification=present access_token=jwt
+# local_idp=on mfa=off verification=off webauthn=none providers=0 tenant_service=absent hook_service=absent user_verification=present access_token=opaque
 
 services:
   kratos:
@@ -21,8 +21,13 @@ services:
       - MFA_ENABLED=false
       - OIDC_WEBAUTHN_SEQUENCING_ENABLED=false
       - VERIFICATION_ENABLED=false
-      - MULTI_TENANCY_ENABLED=true
-      - TENANT_SERVICE_GRPC_ADDRESS=tenant-service:50051
+
+  hydra:
+    environment:
+      - STRATEGIES_ACCESS_TOKEN=opaque
+
+  tenant-service:
+    scale: 0
 
   hook-service:
     scale: 0

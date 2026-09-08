@@ -251,8 +251,8 @@ render-manifests: ## Render the juju lane's k8s manifests from root/local.auto.t
 	@echo "Apply with: kubectl apply -f $(JUJU_MANIFESTS)/.rendered/"
 
 matrix-up: ensure-intranet ## Bring up a materialized matrix row: make matrix-up ROW=<name> (tear down with `make down`)
-	@if [ -z "$(ROW)" ] || [ ! -d "matrix/rows/$(ROW)" ]; then \
-	  echo "Usage: make matrix-up ROW=<name>  (rows listed in matrix/matrix.json)"; exit 1; fi
+	@if [ -z "$(ROW)" ] || [ ! -f "matrix/rows/$(ROW)/docker-compose.override.yml" ]; then \
+	  echo "Usage: make matrix-up ROW=<name>  (compose rows listed in matrix/matrix.json — a target-bound row has no compose override)"; exit 1; fi
 	COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) docker compose \
 	  -f $(COMPOSE_INFRA) -f $(COMPOSE_AUTH) -f $(COMPOSE_SERVICES) \
 	  -f matrix/rows/$(ROW)/docker-compose.override.yml up -d --wait
@@ -283,8 +283,8 @@ dev-check: ## Verify required tools are installed (JUJU_LANE=1 also checks the c
 	fi
 
 matrix-baseline: ## Nightly baseline: drop compose volumes so the matrix lane starts from one deterministic state (ROW=<name> selects the override)
-	@if [ -z "$(ROW)" ] || [ ! -d "matrix/rows/$(ROW)" ]; then \
-	  echo "Usage: make matrix-baseline ROW=<name>  (rows listed in matrix/matrix.json)"; exit 1; fi
+	@if [ -z "$(ROW)" ] || [ ! -f "matrix/rows/$(ROW)/docker-compose.override.yml" ]; then \
+	  echo "Usage: make matrix-baseline ROW=<name>  (compose rows listed in matrix/matrix.json — a target-bound row has no compose override)"; exit 1; fi
 	@echo "Resetting compose state (down --volumes) before the matrix lane"
 	-COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) docker compose \
 	  -f $(COMPOSE_INFRA) -f $(COMPOSE_AUTH) -f $(COMPOSE_SERVICES) \

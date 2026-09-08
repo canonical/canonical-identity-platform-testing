@@ -18,7 +18,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { model } from "./config-model.mjs";
-import { DIMS, VALUES, composeOverride, capabilities, jujuTfvars, rowName } from "./lib.mjs";
+import { BACKENDS, DIMS, VALUES, composeOverride, capabilities, jujuTfvars, rowArtifacts, rowName } from "./lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROWS_DIR = path.join(HERE, "rows");
@@ -102,9 +102,20 @@ function build() {
 
   for (const s of model.seeds) {
     if (!isValid(s.dims)) throw new Error(`seed ${s.name} violates a constraint`);
-    // `caps` rides on the row so renderAll() — and matrix.json's readers — see
-    // the same declaration the row is materialized from.
-    rows.push({ name: s.name, kind: "seed", dims: s.dims, ...(s.caps ? { caps: s.caps } : {}), newPairs: cover(s.dims) });
+    if (s.backends && (s.backends.length === 0 || s.backends.some((b) => !BACKENDS.includes(b)))) {
+      throw new Error(`seed ${s.name}: backends must be a non-empty subset of ${BACKENDS.join("|")}`);
+    }
+    // `caps` and `backends` ride on the row so renderAll() — and matrix.json's
+    // readers (verify.mjs, run-row.mjs) — see the same declaration the row is
+    // materialized from.
+    rows.push({
+      name: s.name,
+      kind: "seed",
+      dims: s.dims,
+      ...(s.caps ? { caps: s.caps } : {}),
+      ...(s.backends ? { backends: s.backends } : {}),
+      newPairs: cover(s.dims),
+    });
   }
   const coveredBySeeds = covered.size - coveredByPinned;
 
@@ -149,9 +160,12 @@ function renderAll() {
   files.set(MATRIX_PATH, JSON.stringify(matrix, null, 2) + "\n");
   for (const row of matrix.rows) {
     const dir = path.join(ROWS_DIR, row.name);
-    files.set(path.join(dir, "docker-compose.override.yml"), composeOverride(row.name, row.kind, row.dims) + "\n");
+    const emit = rowArtifacts(row);
+    if (emit.compose) {
+      files.set(path.join(dir, "docker-compose.override.yml"), composeOverride(row.name, row.kind, row.dims) + "\n");
+    }
     files.set(path.join(dir, "capabilities.json"), JSON.stringify(capabilities(row.dims, row.caps), null, 2) + "\n");
-    if (Object.values(row.dims).every((v) => v !== null)) {
+    if (emit.juju) {
       files.set(path.join(dir, "juju.tfvars.json"), JSON.stringify(jujuTfvars(row.dims), null, 2) + "\n");
     }
   }
