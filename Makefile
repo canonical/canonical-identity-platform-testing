@@ -257,6 +257,7 @@ matrix-up: ensure-intranet ## Bring up a materialized matrix row: make matrix-up
 	  -f $(COMPOSE_INFRA) -f $(COMPOSE_AUTH) -f $(COMPOSE_SERVICES) \
 	  -f matrix/rows/$(ROW)/docker-compose.override.yml up -d --wait
 	@echo "✓ Platform running with matrix row: $(ROW)"
+	@echo "  .active-profile is untouched (pinned rows only); run the suite against this row with: make test-browser PROFILE=$(ROW)"
 
 test-matrix-row: ## Deploy, verify, seed and test one matrix row: make test-matrix-row ROW=<name> [BACKEND=compose|juju|urls] [ATTACH=1] [PLAN_ONLY=1]
 	node matrix/run-row.mjs $(ROW) --backend=$(or $(BACKEND),compose) $(if $(ATTACH),--attach) $(if $(PLAN_ONLY),--plan-only)

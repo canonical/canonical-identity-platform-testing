@@ -24,7 +24,7 @@
 # No dex charm exists in the platform; the charm-native piece is the
 # kratos-external-idp-integrator app (provider=generic) pointing at this
 # deployment, whose issuer_url is built from the same node_ip variable
-# (root/main.tf). Config mirrors docker/dex/config.yml (same static test user).
+# (root/main.tf). Config mirrors docker/dex/config.yml (same static test users).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -56,6 +56,35 @@ data:
         hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
         username: "Dex Test User"
         userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
+      # The account-linking collision half (S10 item 15): same email as the
+      # SEEDED KRATOS PASSWORD IDENTITY `link-user` — a dex sign-in for this
+      # address collides with the existing local account, which is the
+      # login-time linking surface. Same test password as dex-user.
+      - email: "link-user@test.example"
+        # bcrypt hash of "dex-password"
+        hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
+        username: "Link Test User"
+        userID: "1b9c795b-ec99-4c84-a1b0-4dd2661f5467"
+      # The settings-linking half: matches the seeded `settings-link-user`
+      # kratos identity, linked and unlinked from /ui/manage_connected_accounts.
+      - email: "settings-link-user@test.example"
+        # bcrypt hash of "dex-password"
+        hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
+        username: "Settings Link User"
+        userID: "2c8d795b-ec99-4c84-a1b0-4dd2661f5468"
+      # Tenant journeys entered through dex (§10 item 1): the seeded
+      # `dex-single-tenant-user` / `dex-multi-tenant-user` identities carry these
+      # subjects; tenant-service memberships are keyed on the email.
+      - email: "dex-single-tenant-user@test.example"
+        # bcrypt hash of "dex-password"
+        hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
+        username: "Dex Single Tenant User"
+        userID: "3d9e795b-ec99-4c84-a1b0-4dd2661f5469"
+      - email: "dex-multi-tenant-user@test.example"
+        # bcrypt hash of "dex-password"
+        hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
+        username: "Dex Multi Tenant User"
+        userID: "4eaf795b-ec99-4c84-a1b0-4dd2661f546a"
     oauth2:
       skipApprovalScreen: true
 ---

@@ -16,7 +16,7 @@ Two families, mirroring the spec's blocking/non-blocking split:
 |---|---|---|---|---|---|
 | PR gate | `pr-gate.yml` | `pull_request`, push to `main` | compose (mode 1) | YES | red blocks merge |
 | Nightly matrix | `nightly-matrix.yml` | cron `0 1 * * *`, dispatch | compose (mode 1) | no | red files/updates a triaged issue |
-| Juju drift gate (yellow) | `juju-remote.yml` | cron `30 2 * * *`, dispatch | juju attach (mode 3), plan-only | no | red files/updates a triaged issue |
+| Juju drift gate | `juju-remote.yml` | cron `30 2 * * *`, dispatch | juju attach (mode 3), plan-only | no | red files/updates a triaged issue |
 | attach-apply | `juju-remote.yml` | dispatch only, `ALLOW_ATTACH_APPLY` env var | juju attach (mode 3), apply | no | experimental — §8 |
 
 `_triage.yml` is the shared reusable triage step (§6).
@@ -54,11 +54,14 @@ debugging and deliberately never touches the issue tracker.
 Runs `make test-matrix-row ROW=<row> BACKEND=juju ATTACH=1 PLAN_ONLY=1`
 against an EXISTING charmed deployment through JIMM:
 
-yellow = `yellow-iam` + `yellow-core`, the test-designated color, owned by
-`cd-identity-core-infrastructure`
-(`environments/juju/prodstack/6/production/yellow-{iam,core}`). Additional
-colors slot in by creating a GitHub environment with the same secret/variable
-names (§5); no workflow change.
+The target deployment is a GitHub **environment** (§5) whose variables name
+the two juju models (`MATRIX_IAM_MODEL`, `MATRIX_CORE_MODEL`) and whose
+secrets hold the JIMM service account. No target environment is provisioned
+yet; wiring the charmed deployment into this lane is staged work (§8). When
+it lands, one environment is created per deployment and the scheduled gate
+targets the one named by `CI_JUJU_ENVIRONMENT`. Additional deployments slot in
+by creating another environment with the same secret/variable names; no
+workflow change.
 
 The scheduled mode is ALWAYS plan-only. What it proves nightly:
 
@@ -165,7 +168,7 @@ promise:
 |---|---|---|
 | JIMM API | yes (proven by the operator repos' deploy workflows) | juju CLI + terraform work |
 | Juju model facades via JIMM | yes | attach discovery works |
-| deployment public ingress (`iam.yellow.canonical.com` — yellow-core.tfvars `external_hostname`) | assumed reachable; verify on first provisioned run | future urls-backend suite leg (§8) |
+| deployment public ingress (the core model's `external_hostname`) | assumed reachable; verify on first provisioned run | future urls-backend suite leg (§8) |
 | kratos/hydra ADMIN APIs | NO — the core models expose no admin ingress by design | no seeding from CI ⇒ no internal-lane suite against the deployment |
 | cluster/pod IPs (`jujuEnv()` discovery addresses) | NO | full juju suite legs cannot run from a hosted runner today |
 | mailslurper / dex NodePorts | absent on the charmed deployments entirely (test-only apps) | mail/dex-dependent scenarios can never run against them |
@@ -176,23 +179,23 @@ shrinks (the anti-pattern `docs/testing-spec.md` exists to prevent).
 
 ## 5. Secrets and variables surface (names only)
 
-Per GitHub **environment** (`yellow`; more colors = more environments),
-consumed by `juju-remote.yml`:
+Per GitHub **environment** (one per target deployment), consumed by
+`juju-remote.yml`:
 
 | Kind | Name | Meaning |
 |---|---|---|
 | secret | `JIMM_CLIENT_ID` | service-account OAuth client id |
 | secret | `JIMM_CLIENT_SECRET` | service-account OAuth client secret |
 | secret | `JIMM_URL` | JIMM controller address, `host:port` |
-| variable | `MATRIX_IAM_MODEL` | IAM model name (`yellow-iam`) |
-| variable | `MATRIX_CORE_MODEL` | core model name (`yellow-core`) |
+| variable | `MATRIX_IAM_MODEL` | IAM model name |
+| variable | `MATRIX_CORE_MODEL` | core model name |
 | variable | `ALLOW_ATTACH_APPLY` | `true` unlocks attach-apply (keep unset — §8) |
 
 Repository-level:
 
 | Kind | Name | Meaning |
 |---|---|---|
-| variable | `CI_JUJU_ENVIRONMENT` | GitHub environment the SCHEDULED drift gate targets (`yellow`); resolve fails loudly when unset |
+| variable | `CI_JUJU_ENVIRONMENT` | GitHub environment the SCHEDULED drift gate targets; resolve fails loudly when unset |
 | secret | `OPENROUTER_API_KEY` | enables LLM triage (optional; verbatim log tail without it) |
 | variable | `CI_TRIAGE_MODEL` | overrides the triage model (default `google/gemini-3.7-flash`, an OpenRouter slug) |
 
@@ -217,8 +220,8 @@ The spec's "non-blocking; failures file issues" contract, made real:
    wedge), quoted evidence lines, one next diagnostic step. The prompt forbids
    speculation beyond the log. Without the key, the issue carries the verbatim
    log tail instead — triage is an enhancement, never a dependency.
-3. One OPEN issue per lane label (`ci-nightly-matrix`, `ci-juju-yellow`,
-   …per environment): first failure creates it, repeats comment on it, and the
+3. One OPEN issue per lane label (`ci-nightly-matrix`, `ci-juju-<environment>`):
+   first failure creates it, repeats comment on it, and the
    next green run comments and closes it. No issue-per-run spam, no silent
    red.
 4. Issue bodies state that the triage may be LLM-generated and must be

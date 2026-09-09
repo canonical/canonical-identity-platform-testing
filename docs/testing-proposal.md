@@ -1,5 +1,7 @@
 # Identity Platform — Browser & E2E Testing Architecture Proposal
 
+> **Status:** Accepted. This is the review-facing RFC for the architecture — narrative and rationale, no contracts. [`docs/testing-spec.md`](testing-spec.md) is authoritative where they disagree.
+
 ## Abstract
 
 The Canonical Identity Platform is a **composition of microservices** (Kratos, Hydra, Login UI, Traefik, Tenant Service, Hook Service, User Verification) rather than a single monolith. What a user experiences depends heavily on four variables:
@@ -65,6 +67,8 @@ We propose strict determinism rules to eliminate test flakiness:
 - **Single Worker (`workers: 1`):** Prevents session and identity state collisions across concurrent runs.
 - **Deterministic Re-Seeding:** Test identities and tenants are re-seeded before every run.
 - **Capability-Based Skips:** Every skip explicitly names a missing deployment capability. Flaky tags or quarantine lists do not exist.
+
+**Why a single worker.** All tests share one stack, and Kratos identities and sessions are global state inside it. Two tests logging in as the same user at the same time invalidate each other's sessions; several scenarios also mutate their user (enrol TOTP, change a password) and clean up afterwards. Interleave those and a failure stops meaning "the product broke" and starts meaning "the tests raced". The whole design buys one property — red means a real bug — and parallel workers inside one stack would sell it back for a few minutes of runtime. The parallelism that pays is one level up: profiles and matrix rows are independent stacks, so CI runs them side by side as separate jobs, which scales with runners instead of with luck. If a single profile's suite ever grows painful, the clean path is per-worker user sets — each worker gets its own seeded identities, so nothing is shared — and the seeder design allows for that later. We pay that complexity when the runtime justifies it, not before.
 
 ---
 
@@ -265,6 +269,15 @@ External OIDC authentication via Google is supported in the declarative scenario
    Google scenarios require real Google Workspace credentials to complete external authorization. In the absence of live Workspace credentials, these scenarios are tracked in the known coverage gaps register rather than failing test runs.
 2. **Nondeterministic Third-Party UI:**
    Google's authentication flow presents variable UI paths (`/v3/signin/challenge/pwd`, `/v3/signin/challenge/totp`, identity confirmation prompts) depending on client IP, device fingerprinting, and risk scoring. The runner maps these via dedicated `provider:google:*` state definitions in the page state detector, but third-party UI variations remain inherently nondeterministic.
+3. **Hostile to CI by construction:**
+   A short spike confirmed the real Google login can be automated end to end, TOTP included, but everything about it works against a blocking gate:
+   - Google refuses automated browsers outright ("This browser or app may not be secure"). The spike got through with the real Chrome binary, a normal user agent and the automation flag disabled — that works today and can stop working any day Google decides so.
+   - It needs a real Workspace account (email, password, TOTP secret) delivered to the test as secrets. That is a credential-management problem, and those values can never live in the repo.
+   - Consumer accounts trigger reCAPTCHA. Workspace accounts from a stable IP do not — but CI runners come from datacenter IP ranges that Google may treat very differently.
+   - Repeated automated logins risk rate limiting and account lockout.
+   - Google's sign-in UI changes without notice and varies by account and region, so selectors rot on Google's schedule, not ours.
+
+   So Google journeys are opt-in: they run only when credentials are provided, and they do not belong in the blocking gate. In the gate, the external-provider role is played by Dex — a provider we run ourselves, which behaves the same on every run. Google coverage becomes a periodic, supervised check against the environments that actually use it.
 
 ---
 
@@ -295,11 +308,11 @@ The suite currently implements end-to-end browser scenarios and E2E checks cover
 
 ### Future Work & Roadmap
 
-Planned extensions for upcoming iterations:
+Status of the extensions this proposal originally listed as planned:
 
-- **Automated PR Gate CI Integration:** Wiring baseline profile validation (`make gate`) as a mandatory, blocking check on GitHub pull requests following initial team adoption.
-- **Device Authorization Grant:** Completing Hydra's device endpoint configuration and wiring end-to-end device code login scenarios (`device-code` and `device-complete`).
-- **Account-Linking Coverage:** Adding login-time OIDC account linking and manage-details connected accounts scenarios.
-- **Wave 2 Resilience Interventions:** Implementing `resend-code`, `back-forward-switch`, `concurrent-session-revoke`, and `expired-token-submit` intervention primitives.
-- **Short-Lifespans Expiry Lanes:** Adding short-lifespan test rows to validate flow expiry terminals and error handling (`error=flow_expired`).
-- **User Verification Service Tests:** Expanding verification decision coverage beyond health-ping probes.
+- **Automated PR Gate CI Integration — implemented.** `.github/workflows/pr-gate.yml` runs `make gate` per baseline profile as a blocking check on pull requests and on pushes to `main`, plus the cross-profile coverage-union check.
+- **Device Authorization Grant — implemented.** `tests/browser/scenarios/device-scenarios.ts` drives the `device-code` → `device-complete` walk end to end, including the replay-rejection post-check and the invalid-user-code failure path.
+- **Account-Linking Coverage — implemented.** `tests/browser/scenarios/account-linking-scenarios.ts` covers login-time OIDC linking (`link-at-login`, `link-at-login-sequencing`) and the connected-accounts link/unlink journey (`settings-link-and-unlink`).
+- **Wave 2 Resilience Interventions — partial.** `resend-code` and `drop-totp-out-of-band` are implemented as intervention primitives (`tests/browser/framework/scenario-types.ts`); `back-forward-switch`, `concurrent-session-revoke`, and `expired-token-submit` are not.
+- **Short-Lifespans Expiry Lanes — open.** No short-lifespan rows exist yet to validate flow expiry terminals and error handling (`error=flow_expired`).
+- **User Verification Service Tests — open.** Verification decision coverage is still limited to presence/health-ping probes.

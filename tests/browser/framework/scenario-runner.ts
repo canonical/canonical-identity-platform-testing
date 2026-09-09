@@ -17,7 +17,6 @@ import { test, expect, Page } from "@playwright/test";
 import { assertPageState } from "../helpers/page-state";
 import type { PageStateType } from "../helpers/page-state";
 import { resolveAction } from "./action-resolver";
-import { validatePath } from "./transition-validator";
 import { runStateIntervention } from "./interventions";
 import { runPostCheck } from "./intervention-checks";
 import { listTenantOptions } from "../helpers/navigation";
@@ -159,17 +158,6 @@ async function runPhase(
   ctx: ActionContext,
   manifest: Manifest,
 ): Promise<OIDCTokens | undefined> {
-  // Validate the expected path before executing
-  const fullPath: (PageStateType | "start")[] = ["start", ...phase.expectedPath];
-  const illegal = validatePath(fullPath);
-  if (illegal.length > 0) {
-    throw new Error(
-      `Scenario phase "${phase.name}" has illegal transitions in expectedPath:\n` +
-      illegal.map((t) => `  ${t}`).join("\n") +
-      `\nUpdate the expectedPath or add the transition to the legal-transition table.`
-    );
-  }
-
   // A phase may demand an unauthenticated starting point. Cookies only: the
   // virtual authenticator lives on the CDP session, so a key enrolled in an
   // earlier phase survives while the platform sees a first-time visitor.
@@ -421,6 +409,33 @@ export async function runScenario(
   if (!satisfiesResult.met) {
     test.skip(true, `Skipped: ${satisfiesResult.reason}`);
     return;
+  }
+
+  // Every hop of every phase must have a driving action BEFORE any browser
+  // work: a typo in phase 3's expectedPath must not surface after phases 1-2
+  // already mutated the deployment. resolveAction is a pure table lookup.
+  // Placed after both skip sources so lane/capability skips still skip, and
+  // before the manifest read and the spec-owned `prepare` hook.
+  const phaseWalks = scenario.phases?.map((p) => ({ label: ` (phase "${p.name}")`, expectedPath: p.expectedPath }))
+    ?? [{ label: "", expectedPath: scenario.expectedPath ?? [] }];
+  const missing: string[] = [];
+  for (const { label, expectedPath } of phaseWalks) {
+    const fullPath: (PageStateType | "start")[] = ["start", ...expectedPath];
+    for (let i = 0; i < fullPath.length - 1; i++) {
+      const to = fullPath[i + 1] as PageStateType;
+      try {
+        resolveAction(fullPath[i], to);
+      } catch {
+        missing.push(`  ${fullPath[i]} → ${to}${label}`);
+      }
+    }
+  }
+  if (missing.length > 0) {
+    throw new Error(
+      `Scenario "${scenario.id}" has transitions in expectedPath with no action in the transition table:\n` +
+      missing.join("\n") +
+      `\nUpdate the expectedPath or add the transition to framework/transitions.ts.`
+    );
   }
 
   // Read the manifest only once the scenario is known to run. Gating must not

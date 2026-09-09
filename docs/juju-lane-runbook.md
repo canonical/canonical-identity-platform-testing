@@ -104,7 +104,8 @@ cluster. Two variables and what they mechanise:
   because it must resolve identically from the kratos pods and the host
   browser; the ingress name would not.
 
-After changing either value: `make render-manifests` (envsubst only, no
+After changing either value (or a `.yaml.tpl` itself — e.g. the dex
+`staticPasswords`): `make render-manifests` (envsubst only, no
 cluster contact) regenerates `manifests/.rendered/` from the `.yaml.tpl`
 sources, then `kubectl apply -f matrix/backends/juju/manifests/.rendered/`
 and `kubectl -n iam-matrix rollout restart deploy/dex`. Terraform picks the

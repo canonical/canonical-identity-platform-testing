@@ -45,15 +45,3 @@ export function resolveAction(
 
   return entry;
 }
-
-/**
- * Check if a transition is defined in the table.
- * Useful for validation without throwing.
- */
-export function isTransitionDefined(
-  fromState: PageStateType | "start",
-  toState: PageStateType,
-): boolean {
-  const key: TransitionKey = `${fromState} → ${toState}`;
-  return key in TRANSITION_TABLE;
-}

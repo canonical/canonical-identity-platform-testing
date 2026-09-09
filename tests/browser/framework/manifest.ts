@@ -86,23 +86,6 @@ export function writeManifest(manifest: Manifest, manifestPath?: string): void {
   fs.writeFileSync(filePath, JSON.stringify(manifest, null, 2), "utf-8");
 }
 
-/**
- * Persist a user's TOTP secret in the manifest.
- *
- * This allows scenarios that rely on pre-configured TOTP users to reuse the
- * generated secret across independent test cases in the same run.
- */
-export function setUserTotpSecret(ref: string, totpSecret: string, manifestPath?: string): void {
-  const manifest = readManifest(manifestPath);
-  const user = manifest.users.find((u) => u.ref === ref);
-  if (!user) {
-    throw new Error(`User ref "${ref}" not found when setting TOTP secret`);
-  }
-  user.totpSecret = totpSecret;
-  user.totpConfigured = true;
-  writeManifest(manifest, manifestPath);
-}
-
 // ---------------------------------------------------------------------------
 // Lookup helpers
 // ---------------------------------------------------------------------------
@@ -160,14 +143,6 @@ export function resolveTenantDisplayName(
     );
   }
   return tenant.name;
-}
-
-/**
- * Get the OAuth2 client credentials from the manifest.
- * Returns undefined if the manifest was created before client seeding was added.
- */
-export function getOauthClients(manifest: Manifest): ManifestOauthClients | undefined {
-  return manifest.oauthClients;
 }
 
 /**

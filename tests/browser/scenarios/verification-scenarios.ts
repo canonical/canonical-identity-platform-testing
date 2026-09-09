@@ -20,7 +20,7 @@ export const verificationScenarios = defineScenarioSuite({
     id: "verify-email-after-registration",
     description: "New user registers, receives verification email, enters code",
     requires: { verificationEnabled: true, localUsersEnabled: true, mailApi: true },
-    user: { ref: "unverified-user", credentials: ["password"], totpConfigured: false, verified: false },
+    user: { ref: "unverified-user", credentials: ["password"], totpConfigured: false },
     expectedPath: [
       "verification",
       "login-email",
@@ -32,7 +32,7 @@ export const verificationScenarios = defineScenarioSuite({
     id: "verify-email-from-login-prompt",
     description: "Unverified user logs in, sees verification prompt, verifies email",
     requires: { verificationEnabled: true, localUsersEnabled: true, mailApi: true },
-    user: { ref: "unverified-user-2", credentials: ["password"], totpConfigured: false, verified: false },
+    user: { ref: "unverified-user-2", credentials: ["password"], totpConfigured: false },
     expectedPath: [
       "verification",
       "login-email",
@@ -44,7 +44,7 @@ export const verificationScenarios = defineScenarioSuite({
     id: "invalid-verification-code",
     description: "User enters an invalid verification code, sees error",
     requires: { verificationEnabled: true, localUsersEnabled: true, mailApi: true },
-    user: { ref: "unverified-user", credentials: ["password"], totpConfigured: false, verified: false },
+    user: { ref: "unverified-user", credentials: ["password"], totpConfigured: false },
     expectedPath: [
       "verification",
       "verification",  // rejected — stays on the verification page
@@ -67,7 +67,7 @@ export const verificationScenarios = defineScenarioSuite({
     description:
       "Resend during the cooldown restarts the countdown, mails a fresh code, and that code verifies",
     requires: { verificationEnabled: true, localUsersEnabled: true, mailApi: true },
-    user: { ref: "unverified-user-3", credentials: ["password"], totpConfigured: false, verified: false },
+    user: { ref: "unverified-user-3", credentials: ["password"], totpConfigured: false },
     expectedPath: [
       "verification",
       "login-email",
@@ -87,7 +87,7 @@ export const verificationScenarios = defineScenarioSuite({
     description:
       "After a resend, the original verification code is rejected visibly",
     requires: { verificationEnabled: true, localUsersEnabled: true, mailApi: true },
-    user: { ref: "unverified-user-4", credentials: ["password"], totpConfigured: false, verified: false },
+    user: { ref: "unverified-user-4", credentials: ["password"], totpConfigured: false },
     expectedPath: [
       "verification",
       "verification",

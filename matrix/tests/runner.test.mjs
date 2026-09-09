@@ -17,6 +17,7 @@ import {
   buildAttachImports,
   relationExists,
   selectRows,
+  ATTACH_INTEGRATIONS,
   JUSTIFIED_SKIP,
   TIER_A_FILES,
 } from "../run-row.mjs";
@@ -217,7 +218,7 @@ test("relationExists reads both string and object peer shapes", () => {
 // out of scope, never deployed, and never dropped from the verdict silently.
 const MATRIX = {
   rows: [
-    { name: "core", kind: "pinned", dims: {} },
+    { name: "core", kind: "pinned", dims: { webauthn: null } },
     { name: "seed-everywhere", kind: "seed", dims: {} },
     { name: "seed-target", kind: "seed", dims: {}, backends: ["urls"] },
     { name: "mx-generated", kind: "generated", dims: {} },
@@ -241,7 +242,32 @@ test("a single target bound to another backend is out of scope, not run", () => 
 });
 
 test("an unknown single target passes through for runRow's 'no such row'", () => {
-  assert.deepEqual(selectRows(MATRIX, "compose", "nope"), { rows: ["nope"], outOfScope: [] });
+  assert.deepEqual(selectRows(MATRIX, "compose", "nope"), { rows: ["nope"], outOfScope: [], noArtifact: [] });
+});
+
+// The scheduled juju-remote gate defaulted to `row=core` for weeks and never
+// ran a plan: core has a null dim (a pinned profile's off-charm shape), so
+// lib.mjs rowArtifacts emits no juju var-file, rowRunsOn admitted it anyway,
+// and the run died at the var-file ENOENT. Rows the backend never materialized
+// an artefact for are refused up front, on their own ground — they carry no
+// `backends`, so the out-of-scope message would TypeError on them. Fixture
+// rows live only here: the predicate is dims-based, never fs.
+test("a row without the backend's artefact is refused, separately from out-of-scope", () => {
+  const single = selectRows(MATRIX, "juju", "core");
+  assert.deepEqual(single.rows, []);
+  assert.deepEqual(single.outOfScope, []);
+  assert.deepEqual(single.noArtifact.map((r) => r.name), ["core"]);
+
+  // A dims-complete row keeps its juju var-file and is admitted.
+  assert.deepEqual(selectRows(MATRIX, "juju", "mx-generated").rows, ["mx-generated"]);
+
+  // urls has no artefact at all (env is the interface): `backends` decides.
+  assert.deepEqual(selectRows(MATRIX, "urls", "seed-target").rows, ["seed-target"]);
+  assert.deepEqual(selectRows(MATRIX, "urls", "seed-target").noArtifact, []);
+
+  // compose's artefact follows `backends` exactly, so nothing new is refused.
+  assert.deepEqual(selectRows(MATRIX, "compose", "core").rows, ["core"]);
+  assert.deepEqual(selectRows(MATRIX, "compose", null).noArtifact, []);
 });
 
 // ── TIER_A_FILES vs the expected-set script ──────────────────────────────────
@@ -260,4 +286,51 @@ test("TIER_A_FILES matches the tier-A table in scripts/expected-set.ts", () => {
   const declared = [...table.matchAll(/"specs\/([^"]+)"/g)].map((m) => m[1]);
   assert.ok(declared.length > 0, "could not read the TIER_A table");
   assert.deepEqual([...TIER_A_FILES].sort(), [...new Set(declared)].sort());
+});
+
+// ── ATTACH_INTEGRATIONS vs backends/juju/root/integrations.tf ────────────────
+// The attach table is the terraform file restated as import addresses, in the
+// provider-canonical ID order verified against live state — which is why it is
+// a hand-written list and not a for_each. A relation added to integrations.tf
+// but not here is destroyed-and-recreated by the first attach apply; a `count`
+// mismatch imports to an address that does not exist. Reading the HCL textually
+// keeps this offline.
+test("ATTACH_INTEGRATIONS matches the juju_integration resources in integrations.tf", () => {
+  const src = fs.readFileSync(
+    path.join(REPO, "matrix", "backends", "juju", "root", "integrations.tf"),
+    "utf-8",
+  );
+  const declared = new Map();
+  for (const m of src.matchAll(/^resource "juju_integration" "([^"]+)" \{([\s\S]*?)^\}/gm)) {
+    declared.set(m[1], /^\s*count\s*=/m.test(m[2]));
+  }
+  assert.ok(declared.size > 0, "could not read integrations.tf");
+
+  const attached = new Map(
+    ATTACH_INTEGRATIONS.map((i) => {
+      const m = /^juju_integration\.([^[]+)(\[0\])?$/.exec(i.addr);
+      assert.ok(m, `unexpected attach address ${i.addr}`);
+      return [m[1], m[2] !== undefined];
+    }),
+  );
+  assert.equal(attached.size, ATTACH_INTEGRATIONS.length, "duplicate attach address");
+  assert.deepEqual([...attached.keys()].sort(), [...declared.keys()].sort());
+  for (const [name, counted] of declared) {
+    assert.equal(attached.get(name), counted, `${name}: count in tf ⇔ [0] in ATTACH_INTEGRATIONS`);
+  }
+
+  // The presence dimensions ARE relations on this backend: every row-toggled
+  // relation matrix/verify.mjs checks must be a resource the attach path knows.
+  const verify = fs.readFileSync(path.join(REPO, "matrix", "verify.mjs"), "utf-8");
+  const table = verify.slice(verify.indexOf("const relations = ["), verify.indexOf("];", verify.indexOf("const relations = [")));
+  const toggled = [...table.matchAll(/\["([^"]+)", "([^"]+)", "([^"]+)", /g)].map((m) => m.slice(1, 4));
+  assert.equal(toggled.length, 7, "could not read the verify.mjs relation table");
+  for (const [app, endpoint, peer] of toggled) {
+    const entry = ATTACH_INTEGRATIONS.find(
+      ({ parts: [a1, e1, a2, e2] }) =>
+        (a1 === app && e1 === endpoint && a2 === peer) || (a2 === app && e2 === endpoint && a1 === peer),
+    );
+    assert.ok(entry, `verify.mjs checks ${app}:${endpoint} ↔ ${peer}, which ATTACH_INTEGRATIONS does not list`);
+    assert.ok(declared.has(entry.addr.replace(/^juju_integration\./, "").replace(/\[0\]$/, "")));
+  }
 });

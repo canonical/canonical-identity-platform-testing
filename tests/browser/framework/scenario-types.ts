@@ -82,16 +82,10 @@ export interface ScenarioUser {
   credentials: string[];
   /** Whether the user has TOTP configured (affects which page states appear). */
   totpConfigured: boolean;
-  /** Whether the user's email is verified (default: true). Set false for verification scenarios. */
-  verified?: boolean;
-  /** Number of tenants the user belongs to (0, 1, or "many"). */
-  tenantCount?: 0 | 1 | "many";
   /** For multi-tenant scenarios: which tenant to select, by manifest ref (or
    *  its seeded display name). The runner resolves it to the name the UI shows,
    *  so scenarios never restate the seeder's naming convention. */
   selectTenant?: string;
-  /** Whether the user has an active session (for session-reuse scenarios). */
-  hasActiveSession?: boolean;
 }
 
 // ---------------------------------------------------------------------------

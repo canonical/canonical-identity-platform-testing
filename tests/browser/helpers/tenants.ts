@@ -176,22 +176,3 @@ export async function provisionUser(
     );
   }
 }
-
-/** Lookup tenants by email or identity_id (unauthenticated). */
-export async function lookupTenants(
-  email: string,
-): Promise<Tenant[]> {
-  const res = await fetch(
-    `${TENANT_SERVICE_URL}/api/v0/tenants/lookup?email=${encodeURIComponent(email)}`,
-  );
-
-  if (!res.ok) {
-    const text = await res.text();
-    throw new Error(
-      `failed to lookup tenants for ${email}: ${res.status} ${text}`,
-    );
-  }
-
-  const data = (await res.json()) as { tenants: Tenant[] };
-  return data.tenants;
-}

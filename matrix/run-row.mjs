@@ -43,7 +43,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn, spawnSync } from "node:child_process";
 import { assertController } from "./controller-guard.mjs";
 import { JUSTIFIED_SKIP } from "../tests/browser/scripts/skip-allowlist.mjs";
-import { rowRunsOn } from "./lib.mjs";
+import { rowArtifacts, rowRunsOn } from "./lib.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const REPO = path.dirname(HERE);
@@ -156,13 +156,20 @@ export function classifyOutcome(tests, expected) {
  *  other backends (config-model.mjs `backends`) come back separately so the
  *  lane NAMES them as out of scope instead of deploying them to be refused by
  *  the preflight — and so the verdict's row list stays the full declaration.
+ *  Rows the backend could run but never materialized an artefact for
+ *  (lib.mjs rowArtifacts: a null dim is a pinned profile's off-charm shape,
+ *  so no juju var-file exists) come back as `noArtifact` — deploying them
+ *  only buys a var-file ENOENT. The urls backend has no artefact: env is its
+ *  whole interface, so it is judged by `backends` alone.
  *  An unknown single target passes through; runRow reports it. */
 export function selectRows(matrix, backend, target) {
   const candidates = matrix.rows.filter((r) => (target === null ? r.kind !== "pinned" : r.name === target));
-  if (candidates.length === 0) return { rows: [target], outOfScope: [] };
+  if (candidates.length === 0) return { rows: [target], outOfScope: [], noArtifact: [] };
+  const runnable = (r) => rowRunsOn(r, backend) && (backend === "urls" || rowArtifacts(r)[backend]);
   return {
-    rows: candidates.filter((r) => rowRunsOn(r, backend)).map((r) => r.name),
+    rows: candidates.filter(runnable).map((r) => r.name),
     outOfScope: candidates.filter((r) => !rowRunsOn(r, backend)),
+    noArtifact: candidates.filter((r) => rowRunsOn(r, backend) && !runnable(r)),
   };
 }
 
@@ -739,10 +746,10 @@ async function runRow(rowName, backend) {
     }
   }
 
-  // Browser journeys on the charmed stack are opt-in while the journey
-  // plumbing matures (docs/testing-spec.md, "The configuration matrix"). Deploy + preflight + seed above are
-  // the deployment-validation contract; the leg's absence is LOUD, never
-  // silent.
+  // Browser journeys on the charmed stack run by default; MATRIX_JUJU_BROWSER=0
+  // opts out (docs/testing-spec.md, "The configuration matrix"). Deploy +
+  // preflight + seed above are the deployment-validation contract; the leg's
+  // absence is LOUD, never silent.
   if (backend === "juju" && process.env.MATRIX_JUJU_BROWSER === "0") {
     console.log("── browser leg: SKIPPED (MATRIX_JUJU_BROWSER=0)");
     console.log(`✓ row ${rowName}: deployed, verified against declaration, seeded (${backend})`);
@@ -775,6 +782,8 @@ async function runRow(rowName, backend) {
   //    from the SAME LANE the run below uses. `getExecutionLane()` reads
   //    BROWSER_TEST_LANE, so computing it in the inherited (internal) lane while
   //    running in `live` compares two different sets and the verdict is noise.
+  //    Runs WITHOUT rowEnv, so MATRIX_BACKEND is not forwarded — harmless while
+  //    every tier-A oidcProviders requirement is ["dex"] (lib.mjs `juju` key).
   const laneEnv = liveLane ? { BROWSER_TEST_LANE: "live" } : {};
   const expectedRaw = sh("npx", ["tsx", "scripts/expected-set.ts", capsPath], {
     cwd: BROWSER_DIR,
@@ -865,10 +874,15 @@ if (args.includes("--attach") && backend !== "juju") {
 }
 
 const matrix = JSON.parse(fs.readFileSync(path.join(HERE, "matrix.json"), "utf-8"));
-const { rows, outOfScope } = selectRows(matrix, backend, all ? null : target);
+const { rows, outOfScope, noArtifact } = selectRows(matrix, backend, all ? null : target);
 if (outOfScope.length > 0 && !all) {
   const row = outOfScope[0];
   console.error(`✗ ${row.name} is bound to the ${row.backends.join("|")} backend (its declared capabilities describe an external target no ${backend} deployment can render) — run it with --backend=${row.backends[0]}`);
+  process.exit(2);
+}
+if (noArtifact.length > 0 && !all) {
+  const row = noArtifact[0];
+  console.error(`✗ ${row.name} has no ${backend} artefact under matrix/rows/${row.name}/ (a null dimension is a pinned profile's off-charm shape the ${backend} lane cannot render — see lib.mjs rowArtifacts) — pick a row whose every dimension is on-model`);
   process.exit(2);
 }
 
@@ -925,6 +939,7 @@ if (all) {
   // not, and it is listed here so the lane's row list always equals the
   // model's (docs/testing-spec.md §4, the urls interface).
   for (const r of outOfScope) console.log(`  — ${r.name} (bound to the ${r.backends.join("|")} backend; not a ${backend} row)`);
+  for (const r of noArtifact) console.log(`  — ${r.name} (no ${backend} artefact materialized; a null dimension is off-charm)`);
 }
 process.exit(verdicts.every((v) => v.ok) ? 0 : 1);
 

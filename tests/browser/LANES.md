@@ -13,9 +13,6 @@ This directory supports two execution lanes:
 - BROWSER_DISABLE_LANE_ENFORCEMENT
   - true disables lane compatibility gating (rollback toggle)
   - default: false
-- WEBAUTHN_ENABLED
-  - true/false runtime toggle for WebAuthn-required scenarios
-  - default: true
 - GOOGLE_TEST_EMAIL
   - Google Workspace email for Google OIDC browser tests
   - required for google-oidc spec

@@ -10,8 +10,7 @@ import { readActiveConfig, type ActiveConfig } from "../framework/active-config"
  * matching the canonical port mapping documented in AGENTS.md.
  *
  * Deployment-capability lookups read the active configuration (see
- * `activeConfig()` below); tests use `requireProfile()` to skip when the
- * deployment doesn't include the required service.
+ * `activeConfig()` below).
  */
 
 /** Read an environment variable or return the default. */
@@ -45,14 +44,6 @@ export function isLiveLane(): boolean {
 }
 
 /**
- * Runtime toggle for WebAuthn-enabled scenarios.
- * Defaults to true to preserve existing behavior.
- */
-export function isWebauthnEnabled(): boolean {
-  return envOr("WEBAUTHN_ENABLED", "true").toLowerCase() === "true";
-}
-
-/**
  * Rollback toggle: disable lane compatibility enforcement.
  * Useful when rollout issues require temporarily restoring legacy behavior.
  */
@@ -73,7 +64,6 @@ export const TENANT_SERVICE_URL = envOr("TENANT_SERVICE_URL", "http://localhost:
 export const HOOK_SERVICE_URL = envOr("HOOK_SERVICE_URL", "http://localhost:8080");
 export const LOGIN_UI_URL = envOr("LOGIN_UI_URL", "http://localhost");
 export const USER_VERIFICATION_URL = envOr("USER_VERIFICATION_URL", "http://localhost:8083");
-export const OPENFGA_URL = envOr("OPENFGA_URL", "http://localhost:8180");
 /** Mailslurper JSON service API. Distinct port from the 4436 web UI. */
 export const MAIL_API_URL = envOr("MAIL_API_URL", "http://localhost:4437");
 export const DEX_URL = envOr("DEX_URL", "http://dex:5556");
@@ -137,20 +127,6 @@ export function isMfaEnforced(): boolean {
 /** Check if an OIDC provider is available in the active deployment. */
 export function isOidcProviderInProfile(provider: string): boolean {
   return (activeConfig().oidc_providers ?? []).includes(provider);
-}
-
-/**
- * Require a service to be in the active deployment.
- * Returns true if available, false if the test should be skipped.
- * Use with: `test.skip(!requireProfile('tenant-service'), 'tenant-service not deployed')`
- */
-export function requireProfile(service: string): boolean {
-  return isServiceInProfile(service);
-}
-
-/** Check if multi-tenancy is enabled on the active deployment. */
-export function isMultiTenancyEnabled(): boolean {
-  return activeConfig().multi_tenancy_enabled === true;
 }
 
 // ---------------------------------------------------------------------------

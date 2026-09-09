@@ -498,39 +498,6 @@ export async function confirmTotpEnrollment(
   }
 }
 
-// ---------------------------------------------------------------------------
-// OTPAuth URI parsing
-// ---------------------------------------------------------------------------
-
-/**
- * Extract the base32 secret from an `otpauth://totp/...` URI.
- *
- * The URI format is:
- *   otpauth://totp/<issuer>:<email>?secret=<base32>&issuer=<issuer>&algorithm=...
- *
- * @param uri — The otpauth:// URI string.
- * @returns The base32 secret string.
- */
-export function extractSecretFromOtpauthUri(uri: string): string {
-  if (!uri.startsWith("otpauth://")) {
-    throw new Error(`not an otpauth URI: ${uri}`);
-  }
-
-  try {
-    const url = new URL(uri);
-    const secret = url.searchParams.get("secret");
-    if (!secret) {
-      throw new Error(`missing "secret" query parameter in otpauth URI: ${uri}`);
-    }
-    return secret;
-  } catch (err) {
-    if (err instanceof TypeError) {
-      throw new Error(`malformed otpauth URI: ${uri}`);
-    }
-    throw err;
-  }
-}
-
 /**
  * Generate backup codes (lookup_secret) for an authenticated user.
  *

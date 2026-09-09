@@ -23,7 +23,6 @@
  * - credentials:    Credential types the user will have (drives seeding logic).
  * - totpConfigured: Whether TOTP is pre-configured (false = set up at first login).
  * - verified:       Whether the user's email is verified (default: true).
- * - tenantCount:    For tenant scenarios: 0, 1, or "many".
  * - dexUserId:      For `oidc/dex` users: the static account's `userID` in
  *                   docker/dex/config.yml (the account's email is the ref's
  *                   email). The seeder derives kratos's federated subject
@@ -37,7 +36,6 @@ export interface UserArchetype {
   credentials: string[];
   totpConfigured: boolean;
   verified?: boolean;
-  tenantCount?: 0 | 1 | "many";
   lowBackupCodes?: boolean;
   dexUserId?: string;
 }
@@ -119,19 +117,16 @@ export const USER_ARCHETYPES: UserArchetype[] = [
     ref: "zero-tenant-user",
     credentials: ["password", "totp"],
     totpConfigured: true,
-    tenantCount: 0,
   },
   {
     ref: "single-tenant-user",
     credentials: ["password", "totp"],
     totpConfigured: true,
-    tenantCount: 1,
   },
   {
     ref: "multi-tenant-user",
     credentials: ["password", "totp"],
     totpConfigured: true,
-    tenantCount: "many",
   },
   // Tenant journeys entered through dex (oidc-only rows have no password
   // user at all): one-tenant auto-select and many-tenant selection.
@@ -139,14 +134,12 @@ export const USER_ARCHETYPES: UserArchetype[] = [
     ref: "dex-single-tenant-user",
     credentials: ["oidc/dex"],
     totpConfigured: false,
-    tenantCount: 1,
     dexUserId: "3d9e795b-ec99-4c84-a1b0-4dd2661f5469",
   },
   {
     ref: "dex-multi-tenant-user",
     credentials: ["oidc/dex"],
     totpConfigured: false,
-    tenantCount: "many",
     dexUserId: "4eaf795b-ec99-4c84-a1b0-4dd2661f546a",
   },
 

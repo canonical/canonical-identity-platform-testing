@@ -40,9 +40,9 @@ tenant/membership arrays come back empty.
 independent of scenario definitions: the seeder never imports scenario files. A scenario
 that references an unknown `user.ref` fails loudly at lookup time.
 
-Each archetype declares its credentials (password / TOTP / backup codes / OIDC link),
-verification state, and tenant count. To make a new kind of user available to scenarios,
-add an archetype — do not provision from inside a spec.
+Each archetype declares its credentials (password / TOTP / backup codes / OIDC link) and
+verification state. To make a new kind of user available to scenarios, add an archetype —
+do not provision from inside a spec.
 
 ## Output
 `tests/browser/manifest.json`, typed by `tests/browser/seeder/manifest-schema.ts`:

@@ -19,6 +19,7 @@ if [[ "${1:-}" == "--json" ]]; then
 fi
 
 COMPOSE_INFRA="$ROOT_DIR/docker/docker-compose.infra.yml"
+COMPOSE_AUTH="$ROOT_DIR/docker/docker-compose.auth.yml"
 COMPOSE_SERVICES="$ROOT_DIR/docker/docker-compose.services.yml"
 
 # Check for required tools
@@ -51,7 +52,7 @@ for profile in "${PROFILES[@]}"; do
   OVERRIDE="$ROOT_DIR/matrix/rows/$profile/docker-compose.override.yml"
 
   # Build compose file arguments
-  COMPOSE_FILES=(-f "$COMPOSE_INFRA" -f "$COMPOSE_SERVICES")
+  COMPOSE_FILES=(-f "$COMPOSE_INFRA" -f "$COMPOSE_AUTH" -f "$COMPOSE_SERVICES")
   if [[ -f "$OVERRIDE" ]]; then
     COMPOSE_FILES+=(-f "$OVERRIDE")
   fi
@@ -59,7 +60,7 @@ for profile in "${PROFILES[@]}"; do
   # Use docker compose config to render the full compose YAML for this profile
   # and extract port mappings with jq
   PORTS_JSON=$(COMPOSE_PROJECT_NAME="audit-$profile" docker compose \
-    "${COMPOSE_FILES[@]}" config --format json 2>/dev/null | \
+    "${COMPOSE_FILES[@]}" config --format json | \
     jq -r '
       .services // {} | to_entries[] |
       .key as $svc |
@@ -73,7 +74,14 @@ for profile in "${PROFILES[@]}"; do
       else
         empty
       end
-    ' 2>/dev/null || echo "")
+    ')
+
+  # A render with zero published ports means the audit inspected nothing;
+  # treat it as a failure rather than reporting a vacuous "no collisions".
+  if [[ -z "$PORTS_JSON" ]]; then
+    echo "ERROR: docker compose config rendered no published ports for profile '$profile'" >&2
+    exit 2
+  fi
 
   # Check for duplicate host ports within this profile
   PORT_LIST=()

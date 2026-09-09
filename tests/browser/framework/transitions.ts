@@ -38,6 +38,7 @@ import { enterNewPassword, fillRegistrationPassword } from "../helpers/password"
 import { startRecoveryFlow, startVerificationFlow, startRegistrationFlow } from "../helpers/kratos";
 import { resendVerificationCode } from "../helpers/resend";
 import { LOGIN_UI_URL } from "../helpers/config";
+import { isDexUrl } from "../helpers/page-state";
 import { DEFAULT_TEST_PASSWORD } from "../helpers/test-credentials";
 import type { ExecutionLane } from "../helpers/config";
 import type { MailCursor } from "../helpers/mail";
@@ -146,6 +147,80 @@ async function submitWrongRecoveryCode(page: Page): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Shared action bodies
+// ---------------------------------------------------------------------------
+//
+// Several keys drive the browser identically and differ only in where the
+// platform lands afterwards — the per-key description says which. One body
+// per group; keys whose bodies differ in any way stay inline.
+
+const startOIDCFlowAction: ActionFunction = async (page, _user, ctx) => {
+  await startOIDCFlowWithParams(page, ctx.flowParams ?? {});
+};
+
+const startAuthorizeErrorAction: ActionFunction = async (page, _user, ctx) => {
+  await startAuthorizeNavigation(page, ctx.flowParams ?? {});
+  await page.waitForLoadState("load");
+};
+
+const enterEmailAction: ActionFunction = async (page, user) => {
+  await enterEmail(page, user.email);
+};
+
+// Always forwards and acknowledges ctx.doubleSubmit: with the flag unset the
+// helper gets `{ double: undefined }`, which is a single click.
+const enterPasswordAction: ActionFunction = async (page, user, ctx) => {
+  await enterPassword(page, user.password!, { doubleSubmit: ctx.doubleSubmit });
+  if (ctx.doubleSubmit) ctx.doubleSubmitConsumed = true;
+};
+
+const selectTenantAction: ActionFunction = async (page, _user, ctx) => {
+  const tenantName = ctx.selectTenant;
+  if (!tenantName) {
+    throw new Error(
+      "Tenant name not specified. Set ctx.selectTenant or user.selectTenant in the scenario."
+    );
+  }
+  await selectTenant(page, tenantName);
+};
+
+const confirmGoogleIdentityAction: ActionFunction = async (page) => {
+  await confirmGoogleIdentity(page);
+};
+
+const verifyBackupCodeAction: ActionFunction = async (page, user, ctx) => {
+  const code = ctx.backupCode ?? user.backupCode;
+  if (!code) {
+    throw new Error(
+      "Backup code not available. Either the user must have backupCode in the manifest, " +
+      "or a previous phase must have set ctx.backupCode."
+    );
+  }
+  await verifyBackupCode(page, code);
+};
+
+/**
+ * The register-key prefix shared by the three setup-passkey transitions: name
+ * the key and click "Add security key". What the page does after the ceremony
+ * differs per key, so each transition waits for its own landing inline.
+ */
+async function registerSecurityKey(page: Page, ctx: ActionContext): Promise<void> {
+  // Ensure the CDP virtual authenticator is active
+  await ctx.webauthn?.setup();
+
+  // Enter a name for the security key
+  const nameInput = page.locator('[name="webauthn_register_displayname"]');
+  await expect(nameInput).toBeVisible({ timeout: 10_000 });
+  await nameInput.fill("Test Security Key");
+
+  // Click "Add security key" — the CDP virtual authenticator with
+  // automaticPresenceSimulation auto-responds to navigator.credentials.create()
+  const addBtn = page.getByRole("button", { name: /add security key/i });
+  await expect(addBtn).toBeVisible({ timeout: 10_000 });
+  await addBtn.click();
+}
+
+// ---------------------------------------------------------------------------
 // Transition table
 // ---------------------------------------------------------------------------
 
@@ -158,9 +233,7 @@ export const TRANSITION_TABLE: TransitionTable = {
 
   "start → login-email": {
     description: "Start OIDC authorization code flow",
-    action: async (page, _user, ctx) => {
-      await startOIDCFlowWithParams(page, ctx.flowParams ?? {});
-    },
+    action: startOIDCFlowAction,
   },
 
   "start → oidc-callback": {
@@ -173,11 +246,16 @@ export const TRANSITION_TABLE: TransitionTable = {
 
   "start → tenant-selection": {
     description: "Start OIDC flow (session exists, multi-tenant — tenant selection)",
-    action: async (page, _user, ctx) => {
-      await startOIDCFlowWithParams(page, ctx.flowParams ?? {});
-    },
+    action: startOIDCFlowAction,
   },
 
+  // A callback carrying `error=` (or a failed code exchange) is where an OAuth
+  // flow DIED; nothing follows it. No mid-journey step may route INTO an error
+  // state — an observed one is reported as an illegal transition. The ONLY
+  // legal way in is from `start`: the oidc-error suite drives deliberately
+  // malformed authorize requests, which terminate on the login-ui error page
+  // (unvalidatable client/redirect) or the RP callback error (everything else).
+  //
   // Error-path starts: a deliberately malformed authorize request. Hydra
   // splits on redirect-URI validity (writeAuthorizeError): an unvalidatable
   // client_id/redirect_uri 302s to urls.error → login-ui /ui/oidc_error,
@@ -186,18 +264,12 @@ export const TRANSITION_TABLE: TransitionTable = {
   // (buildAuthorizeUrl replaces query params via searchParams.set).
   "start → oidc-error-page": {
     description: "Start OIDC flow with a malformed authorize request (unvalidatable client/redirect)",
-    action: async (page, _user, ctx) => {
-      await startAuthorizeNavigation(page, ctx.flowParams ?? {});
-      await page.waitForLoadState("load");
-    },
+    action: startAuthorizeErrorAction,
   },
 
   "start → oidc-callback-error": {
     description: "Start OIDC flow expecting an RP-side error redirect",
-    action: async (page, _user, ctx) => {
-      await startAuthorizeNavigation(page, ctx.flowParams ?? {});
-      await page.waitForLoadState("load");
-    },
+    action: startAuthorizeErrorAction,
   },
 
   // ── Identifier-first transitions ───────────────────────────────────────
@@ -207,16 +279,12 @@ export const TRANSITION_TABLE: TransitionTable = {
 
   "login-email → login-password": {
     description: "Enter email and continue",
-    action: async (page, user) => {
-      await enterEmail(page, user.email);
-    },
+    action: enterEmailAction,
   },
 
   "login-email → tenant-selection": {
     description: "Enter email and continue (tenant selection follows)",
-    action: async (page, user) => {
-      await enterEmail(page, user.email);
-    },
+    action: enterEmailAction,
   },
 
   "login-email → provider:dex:login": {
@@ -245,31 +313,22 @@ export const TRANSITION_TABLE: TransitionTable = {
 
   "login-password → setup-secure": {
     description: "Enter password (first-time login → TOTP setup)",
-    action: async (page, user) => {
-      await enterPassword(page, user.password!);
-    },
+    action: enterPasswordAction,
   },
 
   "login-password → login-totp-verify": {
     description: "Enter password (returning user → TOTP verify)",
-    action: async (page, user, ctx) => {
-      await enterPassword(page, user.password!, { doubleSubmit: ctx.doubleSubmit });
-      if (ctx.doubleSubmit) ctx.doubleSubmitConsumed = true;
-    },
+    action: enterPasswordAction,
   },
 
   "login-password → login-backup-code-verify": {
     description: "Enter password (lookup secret flow → backup code verify)",
-    action: async (page, user) => {
-      await enterPassword(page, user.password!);
-    },
+    action: enterPasswordAction,
   },
 
   "login-password → oidc-callback": {
     description: "Enter password (MFA off → direct callback)",
-    action: async (page, user) => {
-      await enterPassword(page, user.password!);
-    },
+    action: enterPasswordAction,
   },
 
   // Error case: wrong password — stays on login-password. The scenario declares
@@ -345,19 +404,7 @@ export const TRANSITION_TABLE: TransitionTable = {
   "setup-passkey → setup-complete": {
     description: "Register security key on passkey setup page — auto-redirects to setup-complete",
     action: async (page, _user, ctx) => {
-      // Ensure the CDP virtual authenticator is active
-      await ctx.webauthn?.setup();
-
-      // Enter a name for the security key
-      const nameInput = page.locator('[name="webauthn_register_displayname"]');
-      await expect(nameInput).toBeVisible({ timeout: 10_000 });
-      await nameInput.fill("Test Security Key");
-
-      // Click "Add security key" — the CDP virtual authenticator with
-      // automaticPresenceSimulation auto-responds to navigator.credentials.create()
-      const addBtn = page.getByRole("button", { name: /add security key/i });
-      await expect(addBtn).toBeVisible({ timeout: 10_000 });
-      await addBtn.click();
+      await registerSecurityKey(page, ctx);
 
       // Wait for the key to be registered (the page updates to show the key)
       // Then wait for redirect to setup-complete
@@ -368,19 +415,7 @@ export const TRANSITION_TABLE: TransitionTable = {
   "setup-passkey → login-webauthn-verify": {
     description: "Register security key on passkey setup page — redirect to webauthn verify",
     action: async (page, _user, ctx) => {
-      // Ensure the CDP virtual authenticator is active
-      await ctx.webauthn?.setup();
-
-      // Enter a name for the security key
-      const nameInput = page.locator('[name="webauthn_register_displayname"]');
-      await expect(nameInput).toBeVisible({ timeout: 10_000 });
-      await nameInput.fill("Test Security Key");
-
-      // Click "Add security key" — the CDP virtual authenticator with
-      // automaticPresenceSimulation auto-responds to navigator.credentials.create()
-      const addBtn = page.getByRole("button", { name: /add security key/i });
-      await expect(addBtn).toBeVisible({ timeout: 10_000 });
-      await addBtn.click();
+      await registerSecurityKey(page, ctx);
 
       // After the WebAuthn ceremony completes, the settings flow is updated
       // and the page shows the registered key. The PasskeySequencedSignIn
@@ -402,19 +437,7 @@ export const TRANSITION_TABLE: TransitionTable = {
   "setup-passkey → oidc-callback": {
     description: "Register security key on passkey setup page — auto-redirects to OIDC callback",
     action: async (page, _user, ctx) => {
-      // Ensure the CDP virtual authenticator is active
-      await ctx.webauthn?.setup();
-
-      // Enter a name for the security key
-      const nameInput = page.locator('[name="webauthn_register_displayname"]');
-      await expect(nameInput).toBeVisible({ timeout: 10_000 });
-      await nameInput.fill("Test Security Key");
-
-      // Click "Add security key" — the CDP virtual authenticator with
-      // automaticPresenceSimulation auto-responds to navigator.credentials.create()
-      const addBtn = page.getByRole("button", { name: /add security key/i });
-      await expect(addBtn).toBeVisible({ timeout: 10_000 });
-      await addBtn.click();
+      await registerSecurityKey(page, ctx);
 
       // In the OIDC sequencing flow, after the WebAuthn ceremony completes,
       // the login-ui automatically redirects to the OIDC callback.
@@ -574,28 +597,12 @@ export const TRANSITION_TABLE: TransitionTable = {
 
   "tenant-selection → login-password": {
     description: "Select tenant",
-    action: async (page, _user, ctx) => {
-      const tenantName = ctx.selectTenant;
-      if (!tenantName) {
-        throw new Error(
-          "Tenant name not specified. Set ctx.selectTenant or user.selectTenant in the scenario."
-        );
-      }
-      await selectTenant(page, tenantName);
-    },
+    action: selectTenantAction,
   },
 
   "tenant-selection → login-totp-verify": {
     description: "Select tenant (MFA on, TOTP configured → TOTP verify)",
-    action: async (page, _user, ctx) => {
-      const tenantName = ctx.selectTenant;
-      if (!tenantName) {
-        throw new Error(
-          "Tenant name not specified. Set ctx.selectTenant or user.selectTenant in the scenario."
-        );
-      }
-      await selectTenant(page, tenantName);
-    },
+    action: selectTenantAction,
   },
 
   // A dex-credentialed multi-tenant identity: tenant lookup keys on the
@@ -618,15 +625,7 @@ export const TRANSITION_TABLE: TransitionTable = {
 
   "tenant-selection → oidc-callback": {
     description: "Select tenant (session reuse — auto-completes after selection)",
-    action: async (page, _user, ctx) => {
-      const tenantName = ctx.selectTenant;
-      if (!tenantName) {
-        throw new Error(
-          "Tenant name not specified. Set ctx.selectTenant or user.selectTenant in the scenario."
-        );
-      }
-      await selectTenant(page, tenantName);
-    },
+    action: selectTenantAction,
   },
 
   // ── External provider (Dex) transitions ────────────────────────────────
@@ -691,7 +690,7 @@ export const TRANSITION_TABLE: TransitionTable = {
     description: 'Click "Sign in with Dex" on the registration page',
     action: async (page) => {
       await page.getByRole("button", { name: /sign in with dex$/i }).click();
-      await page.waitForURL(/:5556|dex:/, { timeout: 15_000 }).catch(() => {});
+      await page.waitForURL((url) => isDexUrl(url.href), { timeout: 15_000 }).catch(() => {});
     },
   },
 
@@ -714,7 +713,7 @@ export const TRANSITION_TABLE: TransitionTable = {
     description: 'Click Connect on the dex row of /ui/manage_connected_accounts',
     action: async (page) => {
       await page.getByRole("button", { name: "Connect" }).first().click();
-      await page.waitForURL(/:5556|dex:/, { timeout: 15_000 }).catch(() => {});
+      await page.waitForURL((url) => isDexUrl(url.href), { timeout: 15_000 }).catch(() => {});
     },
   },
 
@@ -831,37 +830,27 @@ export const TRANSITION_TABLE: TransitionTable = {
 
   "provider:google:confirm-identity → provider:google:consent": {
     description: "Confirm Google identity (proceed to consent)",
-    action: async (page) => {
-      await confirmGoogleIdentity(page);
-    },
+    action: confirmGoogleIdentityAction,
   },
 
   "provider:google:confirm-identity → provider:google:interstitial": {
     description: "Confirm Google identity (proceed to interstitial)",
-    action: async (page) => {
-      await confirmGoogleIdentity(page);
-    },
+    action: confirmGoogleIdentityAction,
   },
 
   "provider:google:confirm-identity → oidc-callback": {
     description: "Confirm Google identity (direct to callback)",
-    action: async (page) => {
-      await confirmGoogleIdentity(page);
-    },
+    action: confirmGoogleIdentityAction,
   },
 
   "provider:google:confirm-identity → setup-passkey": {
     description: "Confirm Google identity (OIDC sequencing — redirect to passkey setup)",
-    action: async (page) => {
-      await confirmGoogleIdentity(page);
-    },
+    action: confirmGoogleIdentityAction,
   },
 
   "provider:google:confirm-identity → login-webauthn-verify": {
     description: "Confirm Google identity (OIDC sequencing — redirect to webauthn verify)",
-    action: async (page) => {
-      await confirmGoogleIdentity(page);
-    },
+    action: confirmGoogleIdentityAction,
   },
 
   // NOTE: consent and interstitial are handled internally by confirmGoogleIdentity.
@@ -892,16 +881,7 @@ export const TRANSITION_TABLE: TransitionTable = {
 
   "login-backup-code-verify → oidc-callback": {
     description: "Submit backup recovery code",
-    action: async (page, user, ctx) => {
-      const code = ctx.backupCode ?? user.backupCode;
-      if (!code) {
-        throw new Error(
-          "Backup code not available. Either the user must have backupCode in the manifest, " +
-          "or a previous phase must have set ctx.backupCode."
-        );
-      }
-      await verifyBackupCode(page, code);
-    },
+    action: verifyBackupCodeAction,
   },
   // The identity's ONLY second factor is lookup_secret (the post-unlink
   // state): enforced MFA accepts the code and then walks straight into TOTP
@@ -910,16 +890,7 @@ export const TRANSITION_TABLE: TransitionTable = {
   // fresh secret into ctx.totpSecret for later phases.
   "login-backup-code-verify → setup-secure": {
     description: "Submit backup code (no TOTP on the identity — enforced MFA walks into re-enrolment)",
-    action: async (page, user, ctx) => {
-      const code = ctx.backupCode ?? user.backupCode;
-      if (!code) {
-        throw new Error(
-          "Backup code not available. Either the user must have backupCode in the manifest, " +
-          "or a previous phase must have set ctx.backupCode."
-        );
-      }
-      await verifyBackupCode(page, code);
-    },
+    action: verifyBackupCodeAction,
   },
 
   // Error self-transition (R-2 pattern): submit a code an earlier phase
@@ -928,16 +899,7 @@ export const TRANSITION_TABLE: TransitionTable = {
   // the message.
   "login-backup-code-verify → login-backup-code-verify": {
     description: "Submit an already-used backup code (error — stays on the backup code page)",
-    action: async (page, user, ctx) => {
-      const code = ctx.backupCode ?? user.backupCode;
-      if (!code) {
-        throw new Error(
-          "Backup code not available. Either the user must have backupCode in the manifest, " +
-          "or a previous phase must have set ctx.backupCode."
-        );
-      }
-      await verifyBackupCode(page, code);
-    },
+    action: verifyBackupCodeAction,
   },
 
   // No consent-screen transition exists on purpose: login-ui auto-accepts
@@ -1039,6 +1001,8 @@ export const TRANSITION_TABLE: TransitionTable = {
   // transitions. All of them assume a live AAL2 session from an earlier
   // phase; none needs an admin API, so the settings scenarios run on the
   // live lane.
+  //
+  // The settings hub: recovery's terminal, and the settings scenarios' base.
 
   "start → manage-details": {
     description:
@@ -1135,6 +1099,10 @@ export const TRANSITION_TABLE: TransitionTable = {
   //    "backup-codes-deactivated" post check's contract, not this action's —
   //    after deactivation the login UI stops OFFERING the backup-code
   //    method, so no browser walk can reach a rejection.
+  //
+  // Create/regenerate observed 2026-08-27 on iam.orange, deactivate observed
+  // 2026-08-31 on login-ui:stable. First-login backup-code ENROLMENT still
+  // has no driving action and remains covered by specs/use-backup-codes.spec.ts.
   "setup-backup-codes → setup-backup-codes": {
     description: "Create backup codes and capture one (first pass) or deactivate them (second pass)",
     action: async (page, _user, ctx) => {
@@ -1289,6 +1257,8 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
+  // A standalone verification flow is not part of an OIDC journey, so Kratos
+  // returns the browser to the login page once the code is accepted.
   "verification → login-email": {
     description: "Enter the emailed verification code; Kratos returns to login",
     action: async (page, user, ctx) => {
@@ -1350,9 +1320,7 @@ export const TRANSITION_TABLE: TransitionTable = {
 
   "login-password → login-webauthn-verify": {
     description: "Enter password (WebAuthn is the 2FA method)",
-    action: async (page, user) => {
-      await enterPassword(page, user.password!);
-    },
+    action: enterPasswordAction,
   },
 
   "login-webauthn-verify → oidc-callback": {
@@ -1389,16 +1357,7 @@ export const TRANSITION_TABLE: TransitionTable = {
   // Backup code regeneration prompt after using a backup code
   "login-backup-code-verify → backup-code-regenerate": {
     description: "Authenticate with backup code (shows regeneration prompt)",
-    action: async (page, user, ctx) => {
-      const code = ctx.backupCode ?? user.backupCode;
-      if (!code) {
-        throw new Error(
-          "Backup code not available. Either the user must have backupCode in the manifest, " +
-          "or a previous phase must have set ctx.backupCode."
-        );
-      }
-      await verifyBackupCode(page, code);
-    },
+    action: verifyBackupCodeAction,
   },
 
   "backup-code-regenerate → oidc-callback": {

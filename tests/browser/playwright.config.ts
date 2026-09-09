@@ -8,7 +8,7 @@ import { devices } from "@playwright/test";
  * Unified Playwright configuration for the Canonical Identity Platform.
  *
  * Environment variables (all optional, with sensible defaults):
- *   BASE_URL           — Base URL for the login UI (default: http://localhost:4433)
+ *   BASE_URL           — Base URL for login-ui; falls back to LOGIN_UI_URL (default: http://localhost)
  *   OIDC_CONSUMER_URL  — OIDC consumer app URL (default: http://127.0.0.1:4446)
  *   KRATOS_ADMIN_URL   — Kratos admin API (default: http://localhost:4434)
  *   KRATOS_PUBLIC_URL  — Kratos public API (default: http://localhost:4433)
@@ -54,7 +54,7 @@ const config: PlaywrightTestConfig = {
   reporter: [["list"]],
   use: {
     actionTimeout: 10_000,
-    baseURL: process.env.BASE_URL || "http://localhost:4433",
+    baseURL: process.env.BASE_URL || process.env.LOGIN_UI_URL || "http://localhost",
     // TLS verification is ON unless the lane explicitly opts out. The matrix
     // runner sets BROWSER_TEST_INSECURE_TLS=1 only for substrates that really
     // do terminate TLS with a self-signed CA (see insecureTlsEnv() in

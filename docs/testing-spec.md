@@ -523,7 +523,7 @@ runner walks it. Adding coverage means adding a data object.
 flowchart TD
   A["scenarios/*-scenarios.ts — Scenario objects"] --> B["defineScenario: collection-time validation"]
   B --> C["runScenario: lane gate, then satisfies(requires, capabilities)"]
-  C --> D["validatePath over start + expectedPath"]
+  C --> D["resolveAction over start + expectedPath, every phase"]
   D --> E["start action: resolveAction('start', firstState)"]
   E --> F{"next A → B pair"}
   F --> G["transitions.ts: the action for that pair"]
@@ -560,11 +560,13 @@ make and invisible at runtime:
 | Any primitive handed options it does not take | It would silently ignore them |
 | A duplicate scenario `id` within a suite | The id is the test name *and* the expected-set unit |
 
-**2. An illegal path fails before any browser work.** `validatePath`
-(`framework/transition-validator.ts`, called from `scenario-runner.ts:164`) checks
-every pair of `["start", ...expectedPath]` at the *start* of the run and throws
-listing the offending pairs — so an impossible journey never gets a browser, let
-alone fails halfway through one.
+**2. An illegal path fails before any browser work.** `runScenario`
+(`framework/scenario-runner.ts`) resolves every pair of `["start", ...expectedPath]`
+for *every* phase against `TRANSITION_TABLE` before the manifest is read or a
+phase starts, and throws listing the pairs with no action — so an impossible
+journey never gets a browser, let alone fails halfway through one. Legality is
+the key's presence in the table: a pair with no driving action is not a legal
+transition.
 
 **3. Final-state interventions run AFTER the token scrape**, so claim assertions
 and post checks still see the legitimate exchange.
@@ -576,8 +578,7 @@ and post checks still see the legitimate exchange.
 | `scenarios/*-scenarios.ts` | The data. One suite per journey family |
 | `framework/scenario-types.ts` | `defineScenario()` / `defineScenarioSuite()` — validation at collection time |
 | `framework/scenario-runner.ts` | Walks `expectedPath` pairwise; owns the error-message requirement |
-| `framework/transitions.ts` | The action map: one entry per `"stateA → stateB"` pair |
-| `framework/transition-validator.ts` | Which state pairs are legal at all |
+| `framework/transitions.ts` | The action map: one entry per `"stateA → stateB"` pair — a pair is legal iff it has an entry |
 | `framework/interventions.ts` | The executable half of `interventions` |
 | `framework/claim-assertions.ts` | `reauthenticated`, `amrRecords`, `allOf` |
 | `framework/intervention-checks.ts` | Named `postChecks` implementations |

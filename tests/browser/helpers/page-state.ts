@@ -102,7 +102,7 @@ export type PageStateType = PageState["type"];
  * Check if the page is the identifier-first login step (email input only).
  * Signals: title "Sign in" + input[name="identifier"] visible + no password input.
  */
-export async function isIdentifierFirstPage(page: Page): Promise<boolean> {
+async function isIdentifierFirstPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/login")) return false;
 
@@ -128,7 +128,7 @@ export async function isIdentifierFirstPage(page: Page): Promise<boolean> {
  * Check if the page is the password login step (1FA).
  * Signals: password input visible + no TOTP/WebAuthn groups.
  */
-export async function isPasswordPage(page: Page): Promise<boolean> {
+async function isPasswordPage(page: Page): Promise<boolean> {
   const url = page.url();
   // The password page is always under /login in the login-ui
   if (!url.includes("/login")) return false;
@@ -158,7 +158,7 @@ export async function isPasswordPage(page: Page): Promise<boolean> {
  * Check if the page is the TOTP verification step (2FA).
  * Signals: title "Verify your identity" + TOTP input or node group "totp".
  */
-export async function isTotpVerifyPage(page: Page): Promise<boolean> {
+async function isTotpVerifyPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/login")) return false;
 
@@ -192,7 +192,7 @@ export async function isTotpVerifyPage(page: Page): Promise<boolean> {
  * identity. The password guard keeps the first-factor page from being misread
  * if Kratos ever emits a webauthn node alongside it.
  */
-export async function isWebAuthnVerifyPage(page: Page): Promise<boolean> {
+async function isWebAuthnVerifyPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/login")) return false;
 
@@ -213,7 +213,7 @@ export async function isWebAuthnVerifyPage(page: Page): Promise<boolean> {
  * Check if the page is the backup code verification step.
  * Signals: URL param use_backup_code or lookup_secret group visible.
  */
-export async function isBackupCodeVerifyPage(page: Page): Promise<boolean> {
+async function isBackupCodeVerifyPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/login")) return false;
 
@@ -246,7 +246,7 @@ export async function isBackupCodeVerifyPage(page: Page): Promise<boolean> {
  * Check if the page is the recovery email entry form.
  * Signals: URL /reset_email + title "Enter an email to reset your password" + email input.
  */
-export async function isResetEmailPage(page: Page): Promise<boolean> {
+async function isResetEmailPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/reset_email")) return false;
 
@@ -266,7 +266,7 @@ export async function isResetEmailPage(page: Page): Promise<boolean> {
  * Check if the page is the recovery code entry form (after email submitted).
  * Signals: URL /reset_email + title "Enter the code you received via email" + code input.
  */
-export async function isResetEmailCodePage(page: Page): Promise<boolean> {
+async function isResetEmailCodePage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/reset_email")) return false;
 
@@ -286,7 +286,7 @@ export async function isResetEmailCodePage(page: Page): Promise<boolean> {
  * Check if the page is the new password form (after code verified).
  * Signals: URL /reset_password + "New password" + "Confirm New password" inputs.
  */
-export async function isResetPasswordPage(page: Page): Promise<boolean> {
+async function isResetPasswordPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/reset_password")) return false;
 
@@ -310,7 +310,7 @@ export async function isResetPasswordPage(page: Page): Promise<boolean> {
  * Check if the page is the email verification form.
  * Signals: URL /verification + code input + verification heading.
  */
-export async function isVerificationPage(page: Page): Promise<boolean> {
+async function isVerificationPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/verification")) return false;
 
@@ -331,7 +331,7 @@ export async function isVerificationPage(page: Page): Promise<boolean> {
  * Check if the page is the registration email entry form.
  * Signals: URL /register or /register_email + title "Create an account" + email input.
  */
-export async function isRegisterEmailPage(page: Page): Promise<boolean> {
+async function isRegisterEmailPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/register")) return false;
 
@@ -352,7 +352,7 @@ export async function isRegisterEmailPage(page: Page): Promise<boolean> {
  * Signals: URL /register (the real flow URL; /register_password is a static
  * mock the flow never navigates to) + title "Create a password" + password input.
  */
-export async function isRegisterPasswordPage(page: Page): Promise<boolean> {
+async function isRegisterPasswordPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/register")) return false;
 
@@ -372,7 +372,7 @@ export async function isRegisterPasswordPage(page: Page): Promise<boolean> {
  * Check if the page is the registration MFA setup form.
  * Signals: URL /register_secure + title "Secure your account".
  */
-export async function isRegisterSecurePage(page: Page): Promise<boolean> {
+async function isRegisterSecurePage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/register_secure")) return false;
 
@@ -386,7 +386,7 @@ export async function isRegisterSecurePage(page: Page): Promise<boolean> {
  * Check if the page is the registration complete page.
  * Signals: URL /register_complete + title "Account setup complete".
  */
-export async function isRegisterCompletePage(page: Page): Promise<boolean> {
+async function isRegisterCompletePage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/register_complete")) return false;
 
@@ -404,7 +404,7 @@ export async function isRegisterCompletePage(page: Page): Promise<boolean> {
  * Check if the page is the backup code regeneration prompt.
  * Signals: URL /backup_codes_regenerate + title "Backup code sign in successful".
  */
-export async function isBackupCodeRegeneratePage(page: Page): Promise<boolean> {
+async function isBackupCodeRegeneratePage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/backup_codes_regenerate")) return false;
 
@@ -418,7 +418,7 @@ export async function isBackupCodeRegeneratePage(page: Page): Promise<boolean> {
  * Check if the page is the OIDC error page.
  * Signals: URL /oidc_error + title "Sign in failed".
  */
-export async function isOidcErrorPage(page: Page): Promise<boolean> {
+async function isOidcErrorPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/oidc_error")) return false;
 
@@ -436,7 +436,7 @@ export async function isOidcErrorPage(page: Page): Promise<boolean> {
  * Check if the page is the Google sign-in email entry page.
  * Signals: URL accounts.google.com + #identifierId visible.
  */
-export async function isGoogleLoginPage(page: Page): Promise<boolean> {
+async function isGoogleLoginPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("accounts.google.com")) return false;
 
@@ -452,7 +452,7 @@ export async function isGoogleLoginPage(page: Page): Promise<boolean> {
  * Check if the page is the Google sign-in password entry page.
  * Signals: URL /challenge/pwd + password input visible.
  */
-export async function isGooglePasswordPage(page: Page): Promise<boolean> {
+async function isGooglePasswordPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("accounts.google.com")) return false;
   if (!url.includes("/challenge/pwd")) return false;
@@ -470,7 +470,7 @@ export async function isGooglePasswordPage(page: Page): Promise<boolean> {
  * Check if the page is the Google TOTP 2FA challenge page.
  * Signals: URL /challenge/totp + #totpPin visible.
  */
-export async function isGoogleTotpPage(page: Page): Promise<boolean> {
+async function isGoogleTotpPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("accounts.google.com")) return false;
   if (!url.includes("/challenge/totp")) return false;
@@ -487,7 +487,7 @@ export async function isGoogleTotpPage(page: Page): Promise<boolean> {
  * Check if the page is the Google OAuth consent page.
  * Signals: URL /signin/oauth/legacy/consent on accounts.google.com.
  */
-export async function isGoogleConsentPage(page: Page): Promise<boolean> {
+async function isGoogleConsentPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("accounts.google.com")) return false;
   if (!url.includes("/signin/oauth/legacy/consent")) return false;
@@ -500,7 +500,7 @@ export async function isGoogleConsentPage(page: Page): Promise<boolean> {
  * Signals: URL /signin/oauth/id on accounts.google.com.
  * This page appears after TOTP verification in some Google OAuth flows.
  */
-export async function isGoogleConfirmIdentityPage(page: Page): Promise<boolean> {
+async function isGoogleConfirmIdentityPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("accounts.google.com")) return false;
   if (!url.includes("/signin/oauth/id")) return false;
@@ -513,7 +513,7 @@ export async function isGoogleConfirmIdentityPage(page: Page): Promise<boolean> 
  * ("Don't get locked out" page).
  * Signals: URL /interstitials/ + "Don't get locked out" text.
  */
-export async function isGoogleInterstitialPage(page: Page): Promise<boolean> {
+async function isGoogleInterstitialPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("accounts.google.com")) return false;
   if (!url.includes("/interstitials/")) return false;
@@ -532,6 +532,16 @@ export async function isGoogleInterstitialPage(page: Page): Promise<boolean> {
 
 function urlContains(page: Page, substring: string): boolean {
   return page.url().includes(substring);
+}
+
+/**
+ * Is this href on the Dex IdP? Dex may be addressed by compose hostname
+ * (dex:5556, resolved via host-resolver-rules) or by an arbitrary DEX_URL
+ * (charmed lane: a NodePort like http://<node>:30556) — match the configured
+ * base URL too. Shared with the transitions that wait for the Dex landing.
+ */
+export function isDexUrl(href: string): boolean {
+  return href.startsWith(`${DEX_URL}/`) || href === DEX_URL || /:5556|dex:/.test(href);
 }
 
 /** Does the current URL's query carry an OAuth `error` parameter?
@@ -586,12 +596,7 @@ export async function detectPageState(page: Page): Promise<PageState> {
   // --- External OIDC provider pages (check by URL before login-ui) ---
 
   const currentUrl = page.url();
-  // Dex may be addressed by compose hostname (dex:5556, resolved via
-  // host-resolver-rules) or by an arbitrary DEX_URL (charmed lane: a NodePort
-  // like http://<node>:30556) — match the configured base URL too.
-  const has5556 = currentUrl.includes(":5556");
-  const hasDexColon = currentUrl.includes("dex:");
-  const hasDexBase = currentUrl.startsWith(`${DEX_URL}/`) || currentUrl === DEX_URL;
+  const onDex = isDexUrl(currentUrl);
   const hasGoogle = currentUrl.includes("accounts.google.com");
 
   // Google OIDC pages — check specific page type
@@ -618,7 +623,7 @@ export async function detectPageState(page: Page): Promise<PageState> {
     return { type: "unknown" };
   }
 
-  if (has5556 || hasDexColon || hasDexBase) {
+  if (onDex) {
     // On Dex's page — check if it's the login form or consent
     // Use multiple signals: #login input, heading text, or form action
     const hasLoginForm =

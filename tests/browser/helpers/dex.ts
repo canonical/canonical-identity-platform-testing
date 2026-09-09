@@ -12,6 +12,7 @@
 
 import { Page, expect } from "@playwright/test";
 import { DEX_USER_EMAIL, DEX_USER_PASSWORD } from "./test-credentials";
+import { isDexUrl } from "./page-state";
 
 /**
  * Complete the Dex login form (email + password).
@@ -49,7 +50,7 @@ export async function clickDexLoginButton(page: Page): Promise<void> {
   await expect(dexButton).toBeVisible({ timeout: 10_000 });
   // Click and wait for navigation to Dex's page
   await Promise.all([
-    page.waitForURL(/:5556|dex:/, { timeout: 15_000 }).catch(() => {
+    page.waitForURL((url) => isDexUrl(url.href), { timeout: 15_000 }).catch(() => {
       // If the URL pattern doesn't match (e.g., error redirect), just continue
     }),
     dexButton.click(),
