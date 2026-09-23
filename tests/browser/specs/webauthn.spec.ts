@@ -3,7 +3,7 @@
 
 /** WebAuthn keys cannot be seeded: each test registers and uses a key on a CDP virtual authenticator. */
 
-import { test } from "@playwright/test";
+import { test } from "../framework/test";
 import { webauthnScenarios } from "../scenarios/webauthn-scenarios";
 import { runScenario } from "../framework/scenario-runner";
 import { WebAuthnHelper } from "../helpers/webauthn";

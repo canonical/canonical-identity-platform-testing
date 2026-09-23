@@ -1,7 +1,7 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-import { test } from "@playwright/test";
+import { test } from "../framework/test";
 import { oidcErrorScenarios } from "../scenarios/oidc-error-scenarios";
 import { runScenario } from "../framework/scenario-runner";
 

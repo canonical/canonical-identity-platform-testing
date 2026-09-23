@@ -3,7 +3,7 @@
 
 /** In-page Back buttons (FlowBackButton, ResetEmailBackButton); never page.goBack(): flow steps use router.replace, so history is not the state machine. */
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../framework/test";
 import { assertPageState } from "../helpers/page-state";
 import { readManifest } from "../framework/manifest";
 import { buildAuthorizeUrl } from "../helpers/hydra";

@@ -3,7 +3,7 @@
 
 /** Google OIDC scenarios; needs the `google-oidc` project, real Chrome, and GOOGLE_TEST_* env vars. */
 
-import { test } from "@playwright/test";
+import { test } from "../framework/test";
 import { googleOidcScenarios } from "../scenarios/google-oidc-scenarios";
 import { runScenario } from "../framework/scenario-runner";
 import { readManifest } from "../framework/manifest";

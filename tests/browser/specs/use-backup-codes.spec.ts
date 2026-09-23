@@ -3,10 +3,11 @@
 
 /** Backup-code enrolment during TOTP setup, then login with a backup code instead of TOTP. */
 
-import { test, expect } from "@playwright/test";
+import { test, expect } from "../framework/test";
 import { createIdentity, deleteIdentity, deleteIdentitySessions, markVerified } from "../helpers/kratos";
 import { startOIDCFlow, expectOIDCFlowComplete } from "../helpers/oidc";
 import { loginWithPassword } from "../helpers/login";
+import { trackDataRequests } from "../helpers/form";
 import { completeTotpSetup } from "../helpers/totp";
 import { clickButton, verifyBackupCode } from "../helpers/backupCode";
 import { uniqueEmail } from "../helpers/utils";
@@ -76,6 +77,7 @@ test("backup recovery code setup and usage", async ({ browser, page }) => {
 
   // Fresh context: the current one is already authenticated.
   const newContext = await browser.newContext();
+  trackDataRequests(newContext);
   const newPage = await newContext.newPage();
 
   await startOIDCFlow(newPage);

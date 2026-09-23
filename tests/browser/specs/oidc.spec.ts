@@ -3,7 +3,7 @@
 
 /** Suite picked at collection time by sequencing state, so each profile runs exactly one test per journey. */
 
-import { test } from "@playwright/test";
+import { test } from "../framework/test";
 import { oidcScenarios, oidcSequencingScenarios } from "../scenarios/oidc-scenarios";
 import { runScenario } from "../framework/scenario-runner";
 import { isOidcSequencingEnabledSync } from "../helpers/config";

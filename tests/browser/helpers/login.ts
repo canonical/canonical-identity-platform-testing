@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: AGPL-3.0
 
 import { Page, expect } from "@playwright/test";
-import { clickSubmit, fillSettledField } from "./form";
+import { clickSubmit, fillSettledField, waitForDataRequestsSettled } from "./form";
 
 export async function enterEmail(page: Page, email: string): Promise<void> {
-  // `?flow=` reaches the URL only on login-ui > v0.25.0; race it with networkidle
-  // so older versions do not report a healthy deployment as a 15s timeout.
+  // `?flow=` reaches the URL only on login-ui > v0.25.0; race it with the data requests
+  // settling so older versions do not report a healthy deployment as a 15s timeout.
   await Promise.race([
     page.waitForURL(/[?&]flow=/, { timeout: 15_000 }).catch(() => {}),
-    page.waitForLoadState("networkidle"),
+    waitForDataRequestsSettled(page).catch(() => {}),
   ]);
 
   const continueButton = page.getByRole("button", {

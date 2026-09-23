@@ -3,7 +3,7 @@
 
 /** Recovery codes are bound to the issuing flow, not the account; needs two browser contexts, so hand-written. */
 
-import { expect, test } from "@playwright/test";
+import { expect, test } from "../framework/test";
 import { readManifest, findUserByRef } from "../framework/manifest";
 import { startRecoveryFlow } from "../helpers/kratos";
 import { isLiveLane, localUsersEnabled } from "../helpers/config";
