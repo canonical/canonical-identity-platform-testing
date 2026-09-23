@@ -53,7 +53,7 @@ left alone. `--purge` deletes seeded identities and the manifest but not the thr
 | Mode (`seeder/seed.ts`) | Effect | Local shorthand |
 | --- | --- | --- |
 | `--fresh` (default) | Delete the test plane's own records, then re-create them (what the gate and matrix lanes run) | `make seed-test-data-clean` |
-| `--incremental` | Adopt what exists, create what is missing, preserve TOTP secrets | — |
+| `--incremental` | Adopt what exists (each adopted identity gets a new random password), create what is missing, preserve TOTP secrets | — |
 | `--purge` | Delete the test plane's own records and remove the manifest | `make unseed-test-data` |
 
 ```bash

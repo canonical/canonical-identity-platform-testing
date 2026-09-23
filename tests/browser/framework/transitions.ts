@@ -28,7 +28,7 @@ import { startRecoveryFlow, startVerificationFlow, startRegistrationFlow } from 
 import { resendVerificationCode } from "../helpers/resend";
 import { LOGIN_UI_URL } from "../helpers/config";
 import { isDexUrl } from "../helpers/page-state";
-import { DEFAULT_TEST_PASSWORD } from "../helpers/test-credentials";
+import { generateTestPassword } from "../helpers/test-credentials";
 import type { ExecutionLane } from "../helpers/config";
 import type { MailCursor } from "../helpers/mail";
 import type { WebAuthnHelper } from "../helpers/webauthn";
@@ -768,7 +768,7 @@ export const TRANSITION_TABLE: TransitionTable = {
       "return_to=/ui/login, and login-ui bounces an already-authenticated " +
       "session on to ./manage_details",
     action: async (page, user, ctx) => {
-      const newPassword = ctx.newPassword ?? "New-Secure-Password-456!";
+      const newPassword = ctx.newPassword ?? generateTestPassword();
       await enterNewPassword(page, newPassword);
       ctx.newPassword = newPassword;
       user.password = newPassword;
@@ -818,7 +818,7 @@ export const TRANSITION_TABLE: TransitionTable = {
       if (restoring && !ctx.seededPassword) {
         throw new Error("settings restore pass: ctx.seededPassword is unset — the runner must snapshot it");
       }
-      const target = restoring ? ctx.seededPassword! : "Settings-New-Password-789!";
+      const target = restoring ? ctx.seededPassword! : generateTestPassword();
       await newField.fill(target);
       await confirmField.fill(target);
       await expect(changeBtn).toBeEnabled();
@@ -953,9 +953,8 @@ export const TRANSITION_TABLE: TransitionTable = {
     description:
       "Enter valid password and submit — Kratos' verification hook returns " +
       "continue_with[show_verification_ui] and RegisterPassword.tsx follows it",
-    action: async (page, _user, ctx) => {
-      const password = ctx.newPassword ?? DEFAULT_TEST_PASSWORD;
-      await fillRegistrationPassword(page, password);
+    action: async (page, user, ctx) => {
+      await fillRegistrationPassword(page, ctx.newPassword ?? registrationPassword(user));
     },
   },
   // Verification OFF: kratos answers with continue_with[redirect_browser_to → /ui/manage_details]
@@ -963,9 +962,8 @@ export const TRANSITION_TABLE: TransitionTable = {
   "register-password → manage-details": {
     description:
       "Enter valid password and submit — no verification hand-off; the session lands on the settings hub",
-    action: async (page, _user, ctx) => {
-      const password = ctx.newPassword ?? DEFAULT_TEST_PASSWORD;
-      await fillRegistrationPassword(page, password);
+    action: async (page, user, ctx) => {
+      await fillRegistrationPassword(page, ctx.newPassword ?? registrationPassword(user));
     },
   },
 
@@ -1058,3 +1056,10 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 };
+
+/** Registration types the manifest's password, so the identity it creates signs in with what
+ *  later phases read from the manifest. */
+function registrationPassword(user: ManifestUser): string {
+  if (!user.password) throw new Error(`registration: user "${user.ref}" has no password in the manifest`);
+  return user.password;
+}

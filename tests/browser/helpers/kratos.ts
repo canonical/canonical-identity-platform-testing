@@ -8,6 +8,7 @@ import { KRATOS_ADMIN_URL, KRATOS_PUBLIC_URL, LOGIN_UI_URL, envOr } from "./conf
 
 const IDENTITY_SCHEMA_ID = envOr("KRATOS_IDENTITY_SCHEMA_ID", "default");
 import { generateTotpCode } from "./totp";
+import { generateTestPassword } from "./test-credentials";
 
 export interface CreateIdentityOpts {
   email: string;
@@ -547,8 +548,9 @@ export async function createIdentityWithOIDC(
   const body = {
     schema_id: IDENTITY_SCHEMA_ID,
     credentials: {
-      // Password credential makes the email a searchable identifier for identifier-first.
-      password: { config: { password: "oidc-identity-unused-pw" } },
+      // Password credential makes the email a searchable identifier for identifier-first. Random
+      // and unrecorded: nothing signs in with it, and a known value would open the identity.
+      password: { config: { password: generateTestPassword() } },
       oidc: {
         config: {
           providers: [

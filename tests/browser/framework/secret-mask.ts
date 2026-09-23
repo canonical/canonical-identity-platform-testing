@@ -4,10 +4,10 @@
 import type { BrowserContext } from "@playwright/test";
 
 /**
- * Videos of failed tests are uploaded as public CI artifacts (nightly-live.yml). Every seeded
- * user shares DEFAULT_TEST_PASSWORD, which is public in this repo, so anything on screen that
- * works as a second factor or a credential would make those users usable by anyone: the TOTP
- * secret and its QR code, backup codes, and the RP consumer's tokens.
+ * Videos of failed tests are uploaded as public CI artifacts (nightly-live.yml). Passwords are
+ * random per seed and drawn as dots, but anything on screen that works as a second factor or a
+ * credential must not be published either: the TOTP secret and its QR code, backup codes, and
+ * the RP consumer's tokens (a refresh token plus the repo's public client secret is a login).
  *
  * The mask makes that text transparent and those images invisible before the frame is painted
  * (MutationObserver callbacks run before rendering). Nothing is removed from the DOM:

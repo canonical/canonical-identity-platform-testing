@@ -426,15 +426,15 @@ test("collectTests: a failure names its failing step path and the error's first 
 
 test("redact: no manifest credential, token or authorization code survives", () => {
   const manifest = {
-    users: [{ ref: "u", email: "u@test.example", password: "Secure-Password-123!", totpSecret: "RJXCFOHD4RSMLLNM", backupCode: "k3j9x2ab" }],
+    users: [{ ref: "u", email: "u@test.example", password: "Qm7vT2xLp9ZrW4nB8cYd1eFg-Aa1", totpSecret: "RJXCFOHD4RSMLLNM", backupCode: "k3j9x2ab" }],
     oauthClients: { rp: { client_id: "browser-test-rp", client_secret: "browser-test-rp-secret" } },
   };
   const line =
-    "fill Secure-Password-123! then RJXCFOHD4RSMLLNM and k3j9x2ab; secret browser-test-rp-secret; " +
+    "fill Qm7vT2xLp9ZrW4nB8cYd1eFg-Aa1 then RJXCFOHD4RSMLLNM and k3j9x2ab; secret browser-test-rp-secret; " +
     "token eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.sig and ory_rt_Zzp9F5NFhGPl; " +
     "URL: http://127.0.0.1:4447/callback?code=ory_ac_oE3J3zF&state=abc (user u@test.example)";
   const out = redact(line, manifestSecrets(manifest));
-  for (const leaked of ["Secure-Password-123!", "RJXCFOHD4RSMLLNM", "k3j9x2ab", "browser-test-rp-secret", "eyJhbGci", "ory_rt_", "ory_ac_"]) {
+  for (const leaked of ["Qm7vT2xLp9ZrW4nB8cYd1eFg-Aa1", "RJXCFOHD4RSMLLNM", "k3j9x2ab", "browser-test-rp-secret", "eyJhbGci", "ory_rt_", "ory_ac_"]) {
     assert.ok(!out.includes(leaked), `${leaked} leaked: ${out}`);
   }
   // the evidence around the secrets stays readable

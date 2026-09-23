@@ -5,7 +5,8 @@
 // reads instead of calling admin APIs. The manifest is SECRET-BEARING (passwords, TOTP secrets).
 // Usage: npx tsx seeder/seed.ts [--fresh|--incremental|--purge] [--profile <name>]
 //   --fresh        delete the test-plane's own records, then re-create them
-//   --incremental  adopt whatever already exists, create only what is missing
+//   --incremental  adopt whatever already exists (new random password each: Kratos never
+//                  returns one), create only what is missing, keep recorded TOTP secrets
 //   --purge        delete the test-plane's own records and stop (Hydra clients are never deleted)
 // Deletes are scoped by seeder/ownership.ts. Out-of-band: point KRATOS_ADMIN_URL, HYDRA_ADMIN_URL
 // and TENANT_SERVICE_URL at the deployment and set MANIFEST=<path> (tests/browser/LANES.md).
@@ -13,7 +14,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-import { createIdentity, createIdentityWithOIDC, deleteIdentity, deleteIdentityCredentialType, findIdentityByEmail, deleteIdentitySessions, listIdentities, markVerified, createSessionToken, initTotpSettingsFlow, confirmTotpEnrollment, generateBackupCodes, burnBackupCodes } from "../helpers/kratos";
+import { createIdentity, createIdentityWithOIDC, deleteIdentity, deleteIdentityCredentialType, findIdentityByEmail, deleteIdentitySessions, listIdentities, markVerified, createSessionToken, initTotpSettingsFlow, confirmTotpEnrollment, generateBackupCodes, burnBackupCodes, setIdentityPassword } from "../helpers/kratos";
 import { generateTotpCode } from "../helpers/totp";
 import { createTenant, deleteTenant, getServiceToken, listTenants, provisionUser } from "../helpers/tenants";
 import { addUsersToGroup, ensureGroup, getHookAdminToken, listUserGroups } from "../helpers/hooks";
@@ -37,8 +38,8 @@ import { RP_CLIENT_PAYLOAD, SVC_CLIENT_PAYLOAD, HOOKS_ADMIN_CLIENT_PAYLOAD, type
 import type { Manifest, ManifestUser, ManifestTenant, ManifestMembership, ManifestGroup, ManifestOauthClients } from "./manifest-schema";
 
 import {
-  DEFAULT_TEST_PASSWORD,
   DEX_USER_PASSWORD,
+  generateTestPassword,
 } from "../helpers/test-credentials";
 
 // hook-service groups to seed. `returning-mfa` carries membership: no scenario deletes it or
@@ -177,9 +178,10 @@ async function provisionTotp(
 
 async function seedPasswordUser(ref: string, user: UserArchetype): Promise<ManifestUser> {
   const email = archetypeEmail(ref);
+  const password = generateTestPassword();
   const identityId = await createIdentity({
     email,
-    password: DEFAULT_TEST_PASSWORD,
+    password,
     name: "Test",
     surname: ref,
   });
@@ -201,7 +203,7 @@ async function seedPasswordUser(ref: string, user: UserArchetype): Promise<Manif
   } else if (user.totpConfigured || totpUnlinked) {
     try {
       const needsBackupCodes = user.credentials.includes("lookup_secret");
-      const result = await provisionTotp(email, DEFAULT_TEST_PASSWORD, identityId, needsBackupCodes, user.lowBackupCodes ?? false);
+      const result = await provisionTotp(email, password, identityId, needsBackupCodes, user.lowBackupCodes ?? false);
       backupCode = result.backupCode;
       if (totpUnlinked) {
         await deleteIdentityCredentialType(identityId, "totp");
@@ -220,7 +222,7 @@ async function seedPasswordUser(ref: string, user: UserArchetype): Promise<Manif
   return {
     ref,
     email,
-    password: DEFAULT_TEST_PASSWORD,
+    password,
     credentials: user.credentials,
     totpConfigured: user.totpConfigured,
     totpSecret,
@@ -488,10 +490,18 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
           const preservedTotpSecret = existingEntry?.totpSecret ?? null;
           const preservedBackupCode = existingEntry?.backupCode;
 
+          // Kratos never returns a password, so an adopted identity gets a fresh one: the manifest
+          // stays authoritative, and a deployment seeded before passwords were random loses the
+          // public one. OIDC identities carry an unused password credential (the identifier-first
+          // lookup needs it); it is rotated too, and not recorded.
+          const oidcOnly = user.credentials.includes("oidc/dex") || user.credentials.includes("oidc/google");
+          const password = generateTestPassword();
+          await setIdentityPassword(existingId, password);
+
           manifestUser = {
             ref,
             email,
-            password: (user.credentials.includes("oidc/dex") || user.credentials.includes("oidc/google")) ? null : DEFAULT_TEST_PASSWORD,
+            password: oidcOnly ? null : password,
             credentials: user.credentials,
             totpConfigured: user.totpConfigured,
             totpSecret: preservedTotpSecret,
@@ -508,7 +518,7 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
           } else if (user.totpConfigured && !preservedTotpSecret) {
             try {
               const needsBackupCodes = user.credentials.includes("lookup_secret");
-              const result = await provisionTotp(email, DEFAULT_TEST_PASSWORD, existingId, needsBackupCodes, user.lowBackupCodes ?? false);
+              const result = await provisionTotp(email, password, existingId, needsBackupCodes, user.lowBackupCodes ?? false);
               manifestUser.totpSecret = result.totpSecret;
               if (result.backupCode) {
                 manifestUser.backupCode = result.backupCode;
@@ -531,7 +541,7 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
           const totpUnlinked = user.credentials.includes("lookup_secret") && !user.credentials.includes("totp");
           if (totpUnlinked && !preservedBackupCode && localUsersEnabled()) {
             try {
-              const result = await provisionTotp(email, DEFAULT_TEST_PASSWORD, existingId, true, user.lowBackupCodes ?? false);
+              const result = await provisionTotp(email, password, existingId, true, user.lowBackupCodes ?? false);
               await deleteIdentityCredentialType(existingId, "totp");
               if (result.backupCode) {
                 manifestUser.backupCode = result.backupCode;

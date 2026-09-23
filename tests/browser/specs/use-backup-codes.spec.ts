@@ -11,11 +11,11 @@ import { completeTotpSetup } from "../helpers/totp";
 import { clickButton, verifyBackupCode } from "../helpers/backupCode";
 import { uniqueEmail } from "../helpers/utils";
 import { LOGIN_UI_URL, getExecutionLane, isMfaEnforced, isOidcSequencingEnabledSync, activeConfig } from "../helpers/config";
-import { DEFAULT_TEST_PASSWORD } from "../helpers/test-credentials";
+import { generateTestPassword } from "../helpers/test-credentials";
 
 // LIVE_LANE_INTERNAL_ONLY: Runtime identity lifecycle uses admin APIs.
 
-const PASSWORD = DEFAULT_TEST_PASSWORD;
+const PASSWORD = generateTestPassword();
 
 let identityIds: string[] = [];
 
