@@ -49,8 +49,12 @@ preflight and the live-lane subset. Scenarios restore what they mutate, so one s
 night. The Google journeys run when `GOOGLE_TEST_*` are set and the manifest carries `google-user`
 (seed it once: `scripts/seed-in-cluster.sh --env <colour> --incremental` with the Google
 variables exported). The deployments serve the leaf certificate only; a step supplies the Let's
-Encrypt YR1 chain to node and the consumer and fails loudly if the issuer changes. Only the lane
-log is uploaded — traces carry credentials typed into real forms.
+Encrypt YR1 chain to node and the consumer and fails loudly if the issuer changes. Uploads: the
+lane log, whose verdict names each failure's step and first error line with credentials redacted
+(`matrix/verdict.mjs`), and `nightly-live-videos`, one video per failed test with the TOTP secret
+and QR, backup codes and tokens masked on screen (`tests/browser/framework/secret-mask.ts`).
+Traces, page snapshots and `error-context.md` never leave the runner: they record typed
+passwords, cookies and tokens.
 
 **Nightly matrix (`nightly-matrix.yml`)**
 

@@ -3,7 +3,7 @@
 
 /** Recovery codes are bound to the issuing flow, not the account; needs two browser contexts, so hand-written. */
 
-import { expect, test } from "../framework/test";
+import { expect, instrumentContext, test } from "../framework/test";
 import { readManifest, findUserByRef } from "../framework/manifest";
 import { startRecoveryFlow } from "../helpers/kratos";
 import { isLiveLane, localUsersEnabled } from "../helpers/config";
@@ -43,6 +43,7 @@ test.describe("recovery code abuse", () => {
 
     // Waiting for B's own mail proves B is at its own code step before it gets A's code.
     const contextB = await browser.newContext();
+    await instrumentContext(contextB);
     try {
       const pageB = await contextB.newPage();
       const cursorB = await mailCursor(user.email);

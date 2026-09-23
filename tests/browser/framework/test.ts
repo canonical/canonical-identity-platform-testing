@@ -3,14 +3,21 @@
 
 import { test as base, type BrowserContext } from "@playwright/test";
 import { trackDataRequests } from "../helpers/form";
+import { maskSecretsOnScreen } from "./secret-mask";
 
 export { expect } from "@playwright/test";
 
-// Every spec imports `test` from here so each context is tracked before its first
-// navigation; contexts made with `browser.newContext()` call trackDataRequests() themselves.
+/** Request tracking and the on-screen secret mask, before the context's first navigation. */
+export async function instrumentContext(context: BrowserContext): Promise<void> {
+  trackDataRequests(context);
+  await maskSecretsOnScreen(context);
+}
+
+// Every spec imports `test` from here so each context is instrumented before its first
+// navigation; contexts made with `browser.newContext()` call instrumentContext() themselves.
 export const test = base.extend<{ context: BrowserContext }>({
   context: async ({ context }, use) => {
-    trackDataRequests(context);
+    await instrumentContext(context);
     await use(context);
   },
 });

@@ -119,17 +119,30 @@ jobs:
           {
             echo "## Live lane: $ENV_NAME / row $ROW"
             echo '```'
-            grep -E '^(✓|✗) |^    (unexpected|missing|unjustified)' live-log.txt || true
+            grep -E '^(✓|✗) |^    (unexpected|missing|unjustified)|^  failure details|^    [a-z-]+\.spec\.ts › |^      ' live-log.txt || true
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
-      # Log only: traces, videos and page snapshots carry the Google password and seeded
-      # credentials typed into real forms, and artifacts of a public repository are public.
+      # Never traces, page snapshots or error-context.md: they record typed passwords, cookies and
+      # tokens, and artifacts of a public repository are public. The log carries each failure's
+      # step and first error line with credentials redacted (matrix/verdict.mjs redact()).
       - name: Upload lane log
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: nightly-live-log
           path: live-log.txt
+          if-no-files-found: ignore
+          retention-days: 14
+      # Videos of failed tests, uploaded separately so the triage job never reads them. The suite
+      # masks what the screen would leak — TOTP secret and QR, backup codes, tokens — before it is
+      # painted (tests/browser/framework/secret-mask.ts); what remains is emails, dotted passwords
+      # and TOTP codes that expired before the upload.
+      - name: Upload failure videos
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nightly-live-videos
+          path: tests/browser/test-results/**/*.webm
           if-no-files-found: ignore
           retention-days: 14
       - name: Scrub the manifest

@@ -24,7 +24,7 @@ import { spawn, spawnSync } from "node:child_process";
 import { assertController } from "./controller-guard.mjs";
 import { rowArtifacts, rowRunsOn } from "./lib.mjs";
 import { resolveUrls, rowUrlEnv } from "./verify/urls.mjs";
-import { classifyOutcome, collectTests, JUSTIFIED_SKIP, TIER_A_FILES } from "./verdict.mjs";
+import { classifyOutcome, collectTests, JUSTIFIED_SKIP, manifestSecrets, redact, TIER_A_FILES } from "./verdict.mjs";
 import { attachJuju, deployJuju, discoverJujuUrls } from "./juju-backend.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -273,14 +273,38 @@ function suitePhase(rowName, backend, capsPath, rowEnv, liveLane) {
   }
 }
 
-/** Expected-set verdict: executed set vs declaration, every problem named. */
-function verdictPhase(rowName, tests, expected) {
+/** Exact credential values a failure line could echo: the run's manifest and the Google env. */
+function knownSecrets(rowEnv) {
+  const manifestPath = rowEnv.MANIFEST ?? process.env.MANIFEST ?? path.join(BROWSER_DIR, "manifest.json");
+  let fromManifest = [];
+  try {
+    fromManifest = manifestSecrets(JSON.parse(fs.readFileSync(manifestPath, "utf-8")));
+  } catch {
+    // no manifest (nothing seeded yet): token-shape redaction still applies
+  }
+  const google = [process.env.GOOGLE_TEST_PASSWORD, process.env.GOOGLE_TEST_TOTP_SECRET].filter(Boolean);
+  return [...fromManifest, ...google];
+}
+
+/** Expected-set verdict: executed set vs declaration, every problem named, and for each failed
+ *  test where and why it failed — the only evidence the public log (and the LLM triage) gets. */
+function verdictPhase(rowName, tests, expected, rowEnv) {
   const failures = classifyOutcome(tests, expected);
   const executed = tests.filter((t) => t.status !== "skipped").length;
   const skipped = tests.length - executed;
   if (failures.length > 0) {
     console.error(`✗ row ${rowName}: ${failures.length} problem(s) (${executed} executed, ${skipped} skipped):`);
     for (const f of failures) console.error(`    ${f}`);
+    const failed = tests.filter((t) => t.failure);
+    if (failed.length > 0) {
+      const secrets = knownSecrets(rowEnv);
+      console.error("  failure details (first error line; credentials redacted):");
+      for (const t of failed) {
+        console.error(`    ${t.file} › ${t.title}`);
+        if (t.failure.step) console.error(`      at: ${redact(t.failure.step, secrets)}`);
+        console.error(`      ${redact(t.failure.message, secrets)}`);
+      }
+    }
     return false;
   }
   console.log(`✓ row ${rowName}: ${executed} executed (matching the declaration exactly), ${skipped} declared skips, 0 failures`);
@@ -320,7 +344,7 @@ async function runRow(rowName, backend) {
 
   const outcome = suitePhase(rowName, backend, capsPath, rowEnv, liveLane);
   if (!outcome) return false;
-  return verdictPhase(rowName, outcome.tests, outcome.expected);
+  return verdictPhase(rowName, outcome.tests, outcome.expected, rowEnv);
 }
 
 // ── Entry (main-guarded so matrix/tests/ can import the pure functions) ─────

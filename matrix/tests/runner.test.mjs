@@ -11,7 +11,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { classifyOutcome } from "../verdict.mjs";
+import { classifyOutcome, collectTests, manifestSecrets, redact } from "../verdict.mjs";
 import { buildAttachImports, relationExists, classifyDrift, ATTACH_INTEGRATIONS } from "../juju-backend.mjs";
 import { selectRows, JUSTIFIED_SKIP, TIER_A_FILES } from "../run-row.mjs";
 import { JUJU_RELATIONS } from "../verify/substrate.mjs";
@@ -399,4 +399,44 @@ test("classifyDrift: create/delete is drift; a write-only secret is unverifiable
   });
   assert.deepEqual(d.real, ["juju_integration.kratos_database: create"]);
   assert.deepEqual(d.unverifiable, ["module.uvs.juju_application.application: config.salesforce_consumer_secret (sensitive)"]);
+});
+
+// ── failure evidence (the public lane log and LLM triage input) ───────────────
+
+test("collectTests: a failure names its failing step path and the error's first line", () => {
+  const report = { suites: [{ specs: [
+    { file: "specs/login.spec.ts", title: "first-login-mfa", tests: [{ status: "unexpected", results: [{
+      error: { message: "Error: assertPageState: expected \"login-totp-verify\", got \"unknown\"\n\n\u001b[2mexpect(\u001b[22mreceived).toBe(expected)" },
+      steps: [
+        { title: "Phase: default", error: {}, steps: [
+          { title: "start → login-email" },
+          { title: "login-password → login-totp-verify", error: {} },
+        ] },
+      ],
+    }] }] },
+    { file: "specs/login.spec.ts", title: "returning-login-mfa", tests: [{ status: "expected", results: [{ steps: [] }] }] },
+  ] }] };
+  const [failed, passed] = collectTests(report);
+  assert.deepEqual(failed.failure, {
+    step: "Phase: default › login-password → login-totp-verify",
+    message: "Error: assertPageState: expected \"login-totp-verify\", got \"unknown\"",
+  });
+  assert.equal(passed.failure, null);
+});
+
+test("redact: no manifest credential, token or authorization code survives", () => {
+  const manifest = {
+    users: [{ ref: "u", email: "u@test.example", password: "Secure-Password-123!", totpSecret: "RJXCFOHD4RSMLLNM", backupCode: "k3j9x2ab" }],
+    oauthClients: { rp: { client_id: "browser-test-rp", client_secret: "browser-test-rp-secret" } },
+  };
+  const line =
+    "fill Secure-Password-123! then RJXCFOHD4RSMLLNM and k3j9x2ab; secret browser-test-rp-secret; " +
+    "token eyJhbGciOiJSUzI1NiJ9.eyJzdWIiOiJ4In0.sig and ory_rt_Zzp9F5NFhGPl; " +
+    "URL: http://127.0.0.1:4447/callback?code=ory_ac_oE3J3zF&state=abc (user u@test.example)";
+  const out = redact(line, manifestSecrets(manifest));
+  for (const leaked of ["Secure-Password-123!", "RJXCFOHD4RSMLLNM", "k3j9x2ab", "browser-test-rp-secret", "eyJhbGci", "ory_rt_", "ory_ac_"]) {
+    assert.ok(!out.includes(leaked), `${leaked} leaked: ${out}`);
+  }
+  // the evidence around the secrets stays readable
+  assert.match(out, /callback\?code=«redacted»&state=abc \(user u@test\.example\)/);
 });

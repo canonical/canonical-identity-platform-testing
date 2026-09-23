@@ -55,7 +55,7 @@ export async function waitForDataRequestsSettled(page: Page): Promise<void> {
   if (!pending) {
     throw new Error(
       "page's context is not request-tracked: import `test` from framework/test, " +
-        "or call trackDataRequests() on a context made with browser.newContext()",
+        "or call instrumentContext() (framework/test) on a context made with browser.newContext()",
     );
   }
   const deadline = Date.now() + SETTLE_TIMEOUT_MS;
