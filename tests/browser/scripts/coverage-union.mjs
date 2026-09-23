@@ -2,19 +2,8 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * Cross-profile coverage check.
- *
- * Each profile is allowed to skip tests it genuinely cannot support, so no
- * single profile proves the suite is alive. What must hold is that the UNION of
- * what actually executed, across every profile, covers every test the suite
- * collects. A test that skips everywhere is dead weight pretending to be
- * coverage — this is what catches it.
- *
- * Consumes the per-profile files written by `gate.mjs --coverage-out`.
- *
- * Usage: node scripts/coverage-union.mjs <coverage.json>...
- */
+// The UNION of what executed across every profile must cover every collected test; a test that
+// skips everywhere is dead. Consumes the files written by `gate.mjs --coverage-out`.
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
@@ -46,8 +35,7 @@ const known = new Map(gaps.map((g) => [g.test, g]));
 
 const dead = [...collected].filter((id) => !executed.has(id)).sort();
 const unexpectedlyDead = dead.filter((id) => !known.has(id));
-// An entry that has started running again is just as wrong as a missing one:
-// it means the register is stale and is now hiding nothing.
+// A known-gap entry that runs again is a stale register hiding nothing.
 const staleExceptions = [...known.keys()].filter((id) => executed.has(id)).sort();
 
 console.log(`\n═══ Cross-profile coverage (${paths.length} profiles) ═══`);

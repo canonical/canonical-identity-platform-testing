@@ -2,28 +2,10 @@
 # Copyright 2026 Canonical Ltd.
 # SPDX-License-Identifier: AGPL-3.0
 #
-# Seed a REMOTE deployment out of band, then hand the manifest to a test host
-# that has nothing but the public ingress (tests/browser/LANES.md).
-#
-# This is the seeding half of the `urls` matrix backend (docs/testing-spec.md
-# §9). It exists because the prerequisites are not guessable and every one of
-# them, when wrong, fails LATER and misleadingly:
-#
-#   * KRATOS_PUBLIC_URL must be kratos's OWN public API, not the deployment's
-#     ingress. A charmed ingress routes /self-service/* to the login-ui BFF,
-#     which serves no native /self-service/login/api — and TOTP enrolment is a
-#     native login + settings flow. Aimed at the ingress, the seeder writes
-#     `totpSecret: null` and every MFA scenario then dies on "re-seed".
-#   * KRATOS_IDENTITY_SCHEMA_ID is `default` only on the compose stack. A
-#     charmed deployment ships its own schemas (iam.orange.canonical.com:
-#     social_user_v0, admin_v0), and an unknown schema id is a 400 per identity.
-#   * MANIFEST must be set: the manifest carries passwords and TOTP secrets, so
-#     for a real deployment it is credential material and does not belong at the
-#     in-repo default path.
-#   * the deployment must be ABLE to store an identity. A served schema id is
-#     not that proof: teal answered /schemas correctly and then 500'd every
-#     create out of kratos's own INSERT (a workload/database version skew), one
-#     step after --fresh had begun deleting. The probe below writes one.
+# Seed a remote deployment out of band and hand the manifest to a test host
+# that has only the public ingress (the seeding half of the `urls` backend,
+# docs/testing-spec.md §9). Every prerequisite is probed up front because each
+# one, when wrong, fails later and misleadingly.
 #
 # Usage:
 #   KRATOS_ADMIN_URL=…  KRATOS_PUBLIC_URL=…  HYDRA_ADMIN_URL=… \
@@ -31,15 +13,18 @@
 #   MANIFEST=/secure/orange-manifest.json \
 #     scripts/seed-remote.sh [--check] [--purge|--incremental] [--row <name>]
 #
-#   --check   run every prerequisite probe and stop. Creates and deletes exactly
-#             one throwaway @test.example identity — the only way to prove the
-#             deployment accepts one — and mutates nothing else.
-#   --row     matrix row whose capabilities.json declares the deployment
-#             (default: deployed-core-local-mfa)
+#   KRATOS_PUBLIC_URL   kratos's OWN public API, not the ingress (the login-ui
+#                       BFF serves no native /self-service/login/api, and TOTP
+#                       enrolment needs it)
+#   KRATOS_IDENTITY_SCHEMA_ID   `default` only on compose; charmed deployments
+#                       ship their own (e.g. social_user_v0)
+#   MANIFEST            required; holds passwords and TOTP secrets
+#   --check   run every probe and stop. Creates and deletes exactly one
+#             throwaway @test.example identity, mutates nothing else.
+#   --row     matrix row declaring the deployment (deployed-core-local-mfa)
 #
-# TLS: if the deployment's chain is incomplete (orange serves the leaf alone),
-# export NODE_EXTRA_CA_CERTS with the missing intermediates rather than
-# disabling verification — see docs/testing-spec.md §9.
+# Incomplete TLS chain: export NODE_EXTRA_CA_CERTS with the missing
+# intermediates rather than disabling verification (docs/testing-spec.md §9).
 
 set -euo pipefail
 
@@ -67,20 +52,13 @@ for var in KRATOS_ADMIN_URL KRATOS_PUBLIC_URL HYDRA_ADMIN_URL MANIFEST; do
   [[ -n "${!var:-}" ]] || fail "$var is required (see the header of $0)"
 done
 
-# Absolutize BEFORE the `cd tests/browser` below: resolveManifestPath() does
-# path.resolve(MANIFEST), which is relative to the SEEDER's cwd, so a relative
-# MANIFEST silently lands in tests/browser/ instead of where you ran this from.
-# -m: the parent may not exist yet — the seeder mkdirs it.
+# Absolutize before `cd tests/browser`: the seeder resolves MANIFEST against its own cwd.
 MANIFEST="$(realpath -m "$MANIFEST")"
 export MANIFEST
 
 # `json <url> <expr>` prints a field of a JSON response, or the transport error.
-# node, not curl+jq: node is already required (make dev-check) and it honours
-# NODE_EXTRA_CA_CERTS, so a TLS problem here reads the same as in the seeder.
-#
-# The BODY is part of the answer on a non-2xx, not noise: teal's kratos answered
-# 500 here and the bare "HTTP 500" sent the diagnosis down the wrong path for a
-# whole round trip. Truncated, whitespace-collapsed, but present.
+# node rather than curl+jq: it honours NODE_EXTRA_CA_CERTS like the seeder does.
+# On non-2xx the (truncated) body is part of the answer: it names the fault.
 json() {
   node -e '
     const [url, expr] = process.argv.slice(1);
@@ -100,8 +78,7 @@ json() {
 
 echo "── prerequisites"
 
-# 1. Admin APIs answer. Checked first: a half-seeded deployment is the worst
-#    outcome, and both of these fail instantly when they fail at all.
+# 1. Admin APIs answer. First, because a half-seeded deployment is the worst outcome.
 json "$KRATOS_ADMIN_URL/admin/identities?per_page=1" 'Array.isArray(body) ? "ok" : "unexpected body"' >/dev/null \
   || fail "KRATOS_ADMIN_URL does not serve the kratos admin API:
       GET $KRATOS_ADMIN_URL/admin/identities -> $(json "$KRATOS_ADMIN_URL/admin/identities?per_page=1" '"unexpected body"' || true)"
@@ -112,23 +89,14 @@ json "$HYDRA_ADMIN_URL/admin/clients?page_size=1" 'Array.isArray(body) ? "ok" : 
       GET $HYDRA_ADMIN_URL/admin/clients -> $(json "$HYDRA_ADMIN_URL/admin/clients?page_size=1" '"unexpected body"' || true)"
 echo "  ✓ hydra admin   $HYDRA_ADMIN_URL"
 
-# 2. THE load-bearing check: kratos's own native API, not the ingress/BFF.
-#
-# Two failures, opposite meanings, and collapsing them cost a round trip on
-# teal: a 404/HTML answer means this URL is NOT kratos (an ingress fronting the
-# login-ui BFF, whose route table has no native endpoints), while a 5xx means it
-# IS kratos and kratos cannot create a login flow — a deployment fault the
-# seeder can neither route around nor fix.
-# The restart hint is copy-pasteable when the caller knows the cluster
-# (scripts/seed-in-cluster.sh exports it); generic otherwise.
+# 2. Kratos's own native API, not the ingress/BFF. A 404/HTML answer means this
+#    URL is NOT kratos; a 5xx means it IS kratos and cannot create a login flow.
 restart_hint="${KRATOS_RESTART_HINT:-kubectl -n <ns> exec <kratos-pod> -c kratos -- pebble restart kratos}"
 
 if ! flow_type="$(json "$KRATOS_PUBLIC_URL/self-service/login/api" 'body.type')" || [[ "$flow_type" != "api" ]]; then
   case "$flow_type" in
     *nid_fk*)
-      # Observed on teal 2026-08-28. Worth a name of its own: the SQLSTATE points
-      # at a flow table, the cause is process state, and the fix is a restart —
-      # nothing a seeder, a payload or a URL can influence.
+      # SQLSTATE names a flow table, the cause is process state, the fix is a restart.
       fail "kratos is running with a network id its database no longer contains:
       GET /self-service/login/api -> $flow_type
     kratos resolves its nid ONCE, at startup: networkx.Determine() takes the
@@ -178,40 +146,11 @@ esac
 export KRATOS_IDENTITY_SCHEMA_ID="$schema"
 echo "  ✓ identity schema $schema (served: $schemas)"
 
-# 4. The deployment can actually ACCEPT an identity of that schema, credentials
-#    and all. Reading /schemas proves the id exists; it does not prove the write
-#    path works, and on teal it did not: every create returned a 500 from
-#    kratos's own INSERT. Without this probe that surfaces one step too late —
-#    after --fresh has already deleted the previous seed. One throwaway identity
-#    in the reserved @test.example namespace, created and deleted here.
-write_probe="$(node -e '
-  const [admin, schema] = process.argv.slice(1);
-  const email = `preflight-${Date.now().toString(36)}@test.example`;
-  // The payload the seeder itself uses (helpers/kratos.ts createIdentity): a
-  // traits-only probe would miss exactly the credential-identifier write that
-  // fails on a schema/workload version skew.
-  const body = {
-    schema_id: schema,
-    credentials: { password: { config: { password: "Preflight-Probe-9!" } } },
-    traits: { email, name: "Preflight", surname: "Probe" },
-  };
-  (async () => {
-    const res = await fetch(`${admin}/admin/identities`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: AbortSignal.timeout(20000),
-    });
-    const text = await res.text();
-    if (!res.ok) {
-      console.log(`HTTP ${res.status} ${text.replace(/\s+/g, " ").slice(0, 500)}`);
-      process.exit(3);
-    }
-    const id = JSON.parse(text).id;
-    const del = await fetch(`${admin}/admin/identities/${id}`, { method: "DELETE", signal: AbortSignal.timeout(20000) });
-    console.log(del.ok || del.status === 404 ? "ok" : `LEFTOVER ${id} (DELETE returned ${del.status})`);
-  })().catch((e) => { console.log(e.cause?.message ?? e.message); process.exit(3); });
-' "$KRATOS_ADMIN_URL" "$schema")" || {
+# 4. The deployment can ACCEPT an identity of that schema, credentials and all
+#    (a served schema id does not prove the write path, and a write failure would
+#    otherwise surface after --fresh has already deleted the previous seed). Same
+#    helper as the preflight's AAL probe; a traits-only probe would miss the credential write.
+write_probe="$(node "$REPO/matrix/verify/probe-identity.mjs" "$KRATOS_ADMIN_URL" "$schema")" || {
   hint=""
   case "$write_probe" in
     *identity_credential_identifiers*)
@@ -229,8 +168,9 @@ write_probe="$(node -e '
       POST $KRATOS_ADMIN_URL/admin/identities (schema $schema) -> $write_probe$hint"
 }
 case "$write_probe" in
+  ok) echo "  ✓ write probe   one identity created and deleted (schema $schema)" ;;
   LEFTOVER*) echo "  ⚠ write probe    $write_probe — delete it by hand" >&2 ;;
-  *) echo "  ✓ write probe   one identity created and deleted (schema $schema)" ;;
+  *) fail "write probe produced no verdict (got '$write_probe'); refusing to continue" ;;
 esac
 
 echo "  ✓ row $ROW -> $CAPS"
@@ -244,17 +184,12 @@ fi
 echo "── seed ($MODE)"
 cd "$REPO/tests/browser"
 
-# NOT --silent: it hid its own failure, and this step is the one that needs the
-# network. A seeding host inside the cluster reaches the admin APIs and often
-# nothing else, so an unreachable npm registry looked like the script dying
-# after "── seed" with no output at all.
+# NOT --silent: this is the step that needs the registry, and silent hid its failure.
 npm install || fail "npm install failed in tests/browser — the seeding host needs the npm registry
     (proxy: npm config set proxy/https-proxy, or vendor node_modules from a host that has it:
      tar czf nm.tgz -C tests/browser node_modules && untar here)"
 
-# --no-install: resolve tsx from node_modules, never from the registry at run
-# time. Unpinned, `npx tsx` fetched it on every invocation and failed opaquely
-# where egress is blocked.
+# --no-install: resolve tsx from node_modules, never from the registry at run time.
 ACTIVE_PROFILE="$ROW" BROWSER_TEST_CAPABILITIES="$CAPS" \
   npx --no-install tsx seeder/seed.ts "$MODE" --profile "$ROW" \
   || fail "the seeder exited non-zero — see its output above. The manifest may still have been
@@ -262,8 +197,7 @@ ACTIVE_PROFILE="$ROW" BROWSER_TEST_CAPABILITIES="$CAPS" \
 
 [[ "$MODE" == "--purge" ]] && exit 0
 
-# The manifest is credential material; 0600 it before it can be read by anyone
-# else on the seeding host.
+# Credential material: 0600 before anyone else on the host can read it.
 chmod 600 "$MANIFEST"
 
 # Summary only — never the secrets themselves.

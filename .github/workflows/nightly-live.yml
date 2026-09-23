@@ -1,0 +1,143 @@
+# Nightly live lane against a public deployment — design: docs/ci-spec.md §1.
+# Tests only: no terraform, no JIMM, no admin API. The public ingress is the whole interface; one
+# out-of-band seed (SEED_MANIFEST) serves every night because scenarios restore the identities they
+# touch (tests/browser/framework/restore.ts). Only scheduled runs file/close issues.
+name: Nightly live lane
+
+on:
+  schedule:
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'GitHub environment of the target deployment (empty = CI_LIVE_ENVIRONMENT)'
+        type: environment
+        required: false
+
+permissions:
+  contents: read
+  issues: write
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  resolve:
+    name: Resolve target
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      environment: ${{ steps.pick.outputs.environment }}
+    steps:
+      - id: pick
+        env:
+          CFG_ENV: ${{ vars.CI_LIVE_ENVIRONMENT }}
+          IN_ENV: ${{ inputs.environment }}
+        run: |
+          env_name="${IN_ENV:-$CFG_ENV}"
+          if [ -z "$env_name" ]; then
+            echo "::error::no target: set the repo variable CI_LIVE_ENVIRONMENT (docs/ci-spec.md §5) or pass the environment input"
+            exit 1
+          fi
+          echo "environment=$env_name" >> "$GITHUB_OUTPUT"
+
+  live:
+    name: live lane (${{ needs.resolve.outputs.environment }})
+    needs: resolve
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    environment: ${{ needs.resolve.outputs.environment }}
+    concurrency:
+      group: nightly-live-${{ needs.resolve.outputs.environment }}
+      cancel-in-progress: false
+    env:
+      ROW: ${{ vars.MATRIX_ROW }}
+      LOGIN_UI_URL: ${{ vars.LOGIN_UI_URL }}
+      KRATOS_PUBLIC_URL: ${{ vars.LOGIN_UI_URL }}
+      HYDRA_PUBLIC_URL: ${{ vars.LOGIN_UI_URL }}
+      KRATOS_IDENTITY_SCHEMA_ID: ${{ vars.KRATOS_IDENTITY_SCHEMA_ID }}
+      # Absent ⇒ the Google journeys skip with a justified reason; present ⇒ they run.
+      GOOGLE_TEST_EMAIL: ${{ secrets.GOOGLE_TEST_EMAIL }}
+      GOOGLE_TEST_PASSWORD: ${{ secrets.GOOGLE_TEST_PASSWORD }}
+      GOOGLE_TEST_TOTP_SECRET: ${{ secrets.GOOGLE_TEST_TOTP_SECRET }}
+      GOOGLE_TEST_SUBJECT_ID: ${{ secrets.GOOGLE_TEST_SUBJECT_ID }}
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: 22
+      - name: Target configured
+        run: |
+          for v in ROW LOGIN_UI_URL KRATOS_IDENTITY_SCHEMA_ID; do
+            [ -n "${!v}" ] || { echo "::error::environment variable $v is unset (docs/ci-spec.md §5)"; exit 1; }
+          done
+          [ -f "matrix/rows/$ROW/capabilities.json" ] || { echo "::error::no such row: $ROW"; exit 1; }
+      - name: Seed manifest from the environment secret
+        env:
+          SEED_MANIFEST: ${{ secrets.SEED_MANIFEST }}
+        run: |
+          if [ -z "$SEED_MANIFEST" ]; then
+            echo "::error::SEED_MANIFEST secret is empty — seed once out of band (tests/browser/LANES.md) and store the manifest"
+            exit 1
+          fi
+          manifest="$RUNNER_TEMP/manifest.json"
+          umask 077; printf '%s' "$SEED_MANIFEST" > "$manifest"
+          echo "MANIFEST=$manifest" >> "$GITHUB_ENV"
+      # The iam deployments serve the leaf certificate only. Browsers fetch the missing
+      # intermediates themselves; node and the Go consumer do not, so the chain is supplied
+      # explicitly (never by disabling verification — docs/testing-spec.md §9).
+      - name: Complete the TLS chain
+        run: |
+          chain="$RUNNER_TEMP/lechain.pem"
+          curl -fsS http://yr1.i.lencr.org/ | openssl x509 -inform DER > "$chain"
+          curl -fsS http://yr.i.lencr.org/ | openssl x509 -inform DER >> "$chain"
+          host="${LOGIN_UI_URL#https://}"; host="${host%%/*}"
+          curl -fsS -o /dev/null --cacert "$chain" --capath /etc/ssl/certs "$LOGIN_UI_URL/api/v0/app-config" \
+            || { echo "::error::$host does not verify even with the Let's Encrypt YR1 chain — its issuer changed; update this step"; exit 1; }
+          echo "NODE_EXTRA_CA_CERTS=$chain" >> "$GITHUB_ENV"
+      - name: Browser toolchain
+        working-directory: tests/browser
+        run: |
+          npm install --no-audit --no-fund
+          npx playwright install-deps chromium
+          npx playwright install chromium
+      - name: Live lane
+        run: |
+          set -o pipefail
+          make test-matrix-row ROW="$ROW" BACKEND=urls 2>&1 | tee live-log.txt
+      - name: Summarize
+        if: always()
+        env:
+          ENV_NAME: ${{ needs.resolve.outputs.environment }}
+        run: |
+          {
+            echo "## Live lane: $ENV_NAME / row $ROW"
+            echo '```'
+            grep -E '^(✓|✗) |^    (unexpected|missing|unjustified)' live-log.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+      # Log only: traces, videos and page snapshots carry the Google password and seeded
+      # credentials typed into real forms, and artifacts of a public repository are public.
+      - name: Upload lane log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: nightly-live-log
+          path: live-log.txt
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Scrub the manifest
+        if: always()
+        run: rm -f "${MANIFEST:-$RUNNER_TEMP/manifest.json}"
+
+  triage:
+    needs: [resolve, live]
+    if: always() && needs.live.result != 'cancelled' && github.event_name == 'schedule'
+    uses: ./.github/workflows/_triage.yml
+    with:
+      lane: nightly live lane (${{ needs.resolve.outputs.environment }})
+      label: ci-live-${{ needs.resolve.outputs.environment }}
+      artifact: nightly-live-log
+      outcome: ${{ needs.live.result }}
+    secrets: inherit

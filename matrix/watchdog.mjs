@@ -2,24 +2,16 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 //
-// Model journal for the juju matrix lane. THIS TOOL OBSERVES AND JOURNALS; IT
-// NEVER MUTATES.
+// Model journal for the juju matrix lane. OBSERVES AND JOURNALS; NEVER MUTATES.
+// Records every workload-status change plus a periodic line while any unit
+// sits in error or waiting-not-connected, across the phases the settle loops
+// don't watch (seed/test). Those lines are the evidence for the filed
+// kratos-operator wedge (config-model.mjs upstreamFindings) — never silence
+// them. No remediation (no `juju resolved`, no config kick): a deployment-layer
+// retry would launder a novel charm bug into a green row. Manual recovery:
+// docs/juju-lane-runbook.md.
 //
-// It exists to record the frequency and shape of the KNOWN kratos-operator
-// fragility (config-model.mjs upstreamFindings) across the phases the settle
-// loops don't watch (seed/test): every workload-status change, plus a periodic
-// line while any unit sits in error or waiting-not-connected. Those lines are
-// the evidence attached to the filed upstream report — never silence them.
-//
-// No remediation, by decision D-3 (no `juju resolved`, no config kick): an
-// app-agnostic nudge is a retry at the deployment layer — the exact thing
-// `retries: 0` bans one layer up — and it would accelerate a NOVEL charm bug
-// through settle into a green row. Accepted consequence: rows hitting the
-// wedge fail their settle budget and stay red until the upstream fixes land.
-// Manual recovery steps live in docs/juju-lane-runbook.md.
-//
-// Usage: JUJU_CONTROLLER=<ctl> node matrix/watchdog.mjs
-// Auto-spawned by run-row.mjs for juju backends; stop it when the loop ends.
+// Usage: JUJU_CONTROLLER=<ctl> node matrix/watchdog.mjs (auto-spawned by run-row.mjs)
 
 import { spawnSync } from "node:child_process";
 import * as path from "node:path";
@@ -28,15 +20,13 @@ import { assertController } from "./controller-guard.mjs";
 
 const MODEL = process.env.MATRIX_JUJU_MODEL ?? "iam-matrix";
 const POLL_MS = 20_000;
-// While a unit is stuck, re-journal at most this often (the status-change log
-// is silent for a wedge precisely because nothing changes).
+// While a unit is stuck, re-journal at most this often.
 const STUCK_REPORT_MS = 5 * 60_000;
 
 const sh = (args) => spawnSync("juju", args, { encoding: "utf8" });
 const ts = () => new Date().toISOString().slice(11, 19);
 
-/** Pure: flatten a `juju status --format json` document to
- *  unit -> {app, current, message}. */
+/** Flatten a `juju status --format json` document to unit -> {app, current, message}. */
 export function unitStates(statusJson) {
   const states = new Map();
   for (const [app, a] of Object.entries(statusJson?.applications ?? {})) {
@@ -48,14 +38,12 @@ export function unitStates(statusJson) {
   return states;
 }
 
-/** Pure: is this unit in one of the states the upstream wedge presents as? */
+/** Is this unit in one of the states the upstream wedge presents as? */
 export function isStuck({ current, message }) {
   return current === "error" || (current === "waiting" && /not connected/i.test(message));
 }
 
-// ── Entry ───────────────────────────────────────────────────────────────────
-// Main-guarded so matrix/tests/ can import the pure functions above without
-// starting the poll loop (mirrors run-row.mjs).
+// ── Entry (main-guarded so matrix/tests/ can import the pure functions) ─────
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
 

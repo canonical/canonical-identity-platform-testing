@@ -7,8 +7,6 @@
     "test:ui": "npx playwright test --ui",
     "test:headed": "npx playwright test --headed",
     "test:debug": "npx playwright test --debug",
-    "test:live": "node scripts/run-lane-tests.mjs live",
-    "test:internal": "node scripts/run-lane-tests.mjs internal",
     "audit:live": "node scripts/audit-live-compat.mjs",
     "typecheck": "tsc --noEmit",
     "test:unit": "npx tsx --test framework/*.test.ts seeder/*.test.ts"

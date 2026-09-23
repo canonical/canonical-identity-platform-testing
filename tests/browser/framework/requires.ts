@@ -9,11 +9,8 @@ export interface SatisfiesResult {
   reason?: string;
 }
 
-/**
- * Check if a scenario's requirements are satisfied by the discovered ActiveConfig.
- */
+/** Gate predicate shared by `runScenario` and `scripts/expected-set.ts`; the first unmet key is the reason. */
 export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig): SatisfiesResult {
-  // 1. webauthnEnabled
   if (requires.webauthnEnabled !== undefined) {
     const actual = activeConfig.webauthn_enabled ?? false;
     if (actual !== requires.webauthnEnabled) {
@@ -24,7 +21,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 2. multiTenancy
   if (requires.multiTenancy !== undefined) {
     const actual = activeConfig.multi_tenancy_enabled ?? false;
     if (actual !== requires.multiTenancy) {
@@ -35,7 +31,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 3. mfaEnforced
   if (requires.mfaEnforced !== undefined) {
     const actual = activeConfig.mfa_enforced ?? false;
     if (actual !== requires.mfaEnforced) {
@@ -46,7 +41,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 4. oidcSequencing
   if (requires.oidcSequencing !== undefined) {
     const actual = activeConfig.oidc_webauthn_sequencing_enabled ?? false;
     if (actual !== requires.oidcSequencing) {
@@ -57,7 +51,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 5. registrationEnabled
   if (requires.registrationEnabled !== undefined) {
     const actual = activeConfig.registration_enabled ?? false;
     if (actual !== requires.registrationEnabled) {
@@ -68,7 +61,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 6. localUsersEnabled
   if (requires.localUsersEnabled !== undefined) {
     const actual = activeConfig.local_users_enabled ?? false;
     if (actual !== requires.localUsersEnabled) {
@@ -79,7 +71,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 7. oidcEnabled
   if (requires.oidcEnabled !== undefined) {
     const actual = activeConfig.oidc_enabled ?? false;
     if (actual !== requires.oidcEnabled) {
@@ -90,7 +81,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 8. accountLinkingEnabled
   if (requires.accountLinkingEnabled !== undefined) {
     const actual = activeConfig.account_linking_enabled ?? false;
     if (actual !== requires.accountLinkingEnabled) {
@@ -101,7 +91,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 9. mfaEnabled (legacy fallback mapped to presence of "totp" in methods_2fa)
   if (requires.mfaEnabled !== undefined) {
     const actual = activeConfig.methods_2fa?.includes("totp") ?? false;
     if (actual !== requires.mfaEnabled) {
@@ -112,7 +101,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 10. hookService (legacy fallback mapped to hook-service presence)
   if (requires.hookService !== undefined) {
     const actual = activeConfig.services?.includes("hook-service") ?? false;
     if (actual !== requires.hookService) {
@@ -123,7 +111,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 11. oidcProviders
   if (requires.oidcProviders && requires.oidcProviders.length > 0) {
     const missing = requires.oidcProviders.filter(
       (p) =>
@@ -141,7 +128,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 12. firstFactorMethods
   if (requires.firstFactorMethods && requires.firstFactorMethods.length > 0) {
     const missing = requires.firstFactorMethods.filter(
       (m) => !(activeConfig.methods_1fa?.includes(m) ?? false)
@@ -154,7 +140,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 13. secondFactorMethods
   if (requires.secondFactorMethods && requires.secondFactorMethods.length > 0) {
     const missing = requires.secondFactorMethods.filter(
       (m) => !(activeConfig.methods_2fa?.includes(m) ?? false)
@@ -167,7 +152,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 14. Service presence keys "service:<name>"
   for (const key of Object.keys(requires)) {
     if (key.startsWith("service:")) {
       const serviceName = key.substring(8);
@@ -182,9 +166,7 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 15. mailApi (mail_api capability — mailslurper API reachable)
-  // Absent key defaults to true: mail was an unconditional assumption before it
-  // became a capability, and discovery mode always fills it in explicitly.
+  // Absent mail_api defaults to true: mail predates the capability and discovery always sets it.
   if (requires.mailApi !== undefined) {
     const actual = activeConfig.mail_api ?? true;
     if (actual !== requires.mailApi) {
@@ -195,10 +177,7 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 16. backupCodePromptOnUse (backup_code_prompt_on_use capability — the
-  // login-ui version fork on the backup-code sign-in terminal). Absent
-  // defaults to false: the v0.28.0 workload both harness backends run only
-  // prompts when the identity runs low.
+  // Absent backup_code_prompt_on_use defaults to false (the v0.28.0 workload prompts only when running low).
   if (requires.backupCodePromptOnUse !== undefined) {
     const actual = activeConfig.backup_code_prompt_on_use ?? false;
     if (actual !== requires.backupCodePromptOnUse) {
@@ -209,9 +188,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 17. deviceFlow (device_flow capability — hydra's urls.device configured
-  // and login-ui's device pages routed). Absent defaults to false: older
-  // declarations predate the capability.
   if (requires.deviceFlow !== undefined) {
     const actual = activeConfig.device_flow ?? false;
     if (actual !== requires.deviceFlow) {
@@ -222,9 +198,7 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  // 18. verificationEnabled (verification_enabled capability). Absent
-  // defaults to true: verification was an unconditional assumption before
-  // the verification-off registration variant existed.
+  // Absent verification_enabled defaults to true: verification predates the capability.
   if (requires.verificationEnabled !== undefined) {
     const actual = activeConfig.verification_enabled ?? true;
     if (actual !== requires.verificationEnabled) {

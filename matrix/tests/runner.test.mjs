@@ -1,9 +1,8 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 //
-// Offline tests for the matrix runner's pure logic. Every case here was a
-// live-cluster bug first (multi-hour loops, one outage) — these keep the
-// feedback loop for harness changes in milliseconds. Run: `make matrix-test`.
+// Offline tests for the matrix runner's pure logic: the feedback loop for
+// harness changes stays in milliseconds. Run: `make matrix-test`.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -12,22 +11,17 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
-import {
-  classifyOutcome,
-  buildAttachImports,
-  relationExists,
-  selectRows,
-  ATTACH_INTEGRATIONS,
-  JUSTIFIED_SKIP,
-  TIER_A_FILES,
-} from "../run-row.mjs";
+import { classifyOutcome } from "../verdict.mjs";
+import { buildAttachImports, relationExists, classifyDrift, ATTACH_INTEGRATIONS } from "../juju-backend.mjs";
+import { selectRows, JUSTIFIED_SKIP, TIER_A_FILES } from "../run-row.mjs";
+import { JUJU_RELATIONS } from "../verify/substrate.mjs";
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 // ── classifyOutcome ──────────────────────────────────────────────────────────
 // Playwright statuses: "expected" = passed, "unexpected" = FAILED. The
-// `unexpected:` prefix in row output is Playwright DATA, not harness text —
-// this cost a long forensic detour once; the tests pin the semantics.
+// `unexpected:` prefix in row output is Playwright DATA, not harness text;
+// the tests pin the semantics.
 
 const t = (file, title, status, reason = "") => ({ file, title, status, reason });
 const expectedSet = (run) => ({ run: run.map(([file, id]) => ({ file: `specs/${file}`, id })) });
@@ -211,11 +205,8 @@ test("relationExists reads both string and object peer shapes", () => {
 });
 
 // ── selectRows ───────────────────────────────────────────────────────────────
-// The nightly ran the target-bound seed row (deployed-core-local-mfa, caps read
-// off iam.orange.canonical.com) on compose every night for two weeks, where the
-// preflight refused it on its Google provider — a red row for a shape the
-// backend was never able to render. A row bound to other backends is named as
-// out of scope, never deployed, and never dropped from the verdict silently.
+// A row bound to other backends is named as out of scope, never deployed, and
+// never dropped from the verdict silently.
 const MATRIX = {
   rows: [
     { name: "core", kind: "pinned", dims: { webauthn: null } },
@@ -245,13 +236,9 @@ test("an unknown single target passes through for runRow's 'no such row'", () =>
   assert.deepEqual(selectRows(MATRIX, "compose", "nope"), { rows: ["nope"], outOfScope: [], noArtifact: [] });
 });
 
-// The scheduled juju-remote gate defaulted to `row=core` for weeks and never
-// ran a plan: core has a null dim (a pinned profile's off-charm shape), so
-// lib.mjs rowArtifacts emits no juju var-file, rowRunsOn admitted it anyway,
-// and the run died at the var-file ENOENT. Rows the backend never materialized
-// an artefact for are refused up front, on their own ground — they carry no
-// `backends`, so the out-of-scope message would TypeError on them. Fixture
-// rows live only here: the predicate is dims-based, never fs.
+// A row the backend never materialized an artefact for (null dim → no juju
+// var-file) is refused up front, separately from out-of-scope: it carries no
+// `backends`, so the out-of-scope message would TypeError on it.
 test("a row without the backend's artefact is refused, separately from out-of-scope", () => {
   const single = selectRows(MATRIX, "juju", "core");
   assert.deepEqual(single.rows, []);
@@ -271,12 +258,8 @@ test("a row without the backend's artefact is refused, separately from out-of-sc
 });
 
 // ── TIER_A_FILES vs the expected-set script ──────────────────────────────────
-// These two lists are the same fact stated twice. When they diverged (
-// oidc-error.spec.ts and resilience.spec.ts were tier A in expected-set.ts but
-// absent from TIER_A_FILES) every row verdict grew phantom "expected to run but
-// did not" entries for scenarios that had just run, and those suites' runtime
-// skips were held to the tier-B allowlist. Reading the TS table textually keeps
-// this offline and dependency-free.
+// The same fact stated twice; a file missing from TIER_A_FILES yields phantom
+// "expected to run but did not" entries. Read textually to stay offline.
 test("TIER_A_FILES matches the tier-A table in scripts/expected-set.ts", () => {
   const src = fs.readFileSync(
     path.join(REPO, "tests", "browser", "scripts", "expected-set.ts"),
@@ -289,12 +272,9 @@ test("TIER_A_FILES matches the tier-A table in scripts/expected-set.ts", () => {
 });
 
 // ── ATTACH_INTEGRATIONS vs backends/juju/root/integrations.tf ────────────────
-// The attach table is the terraform file restated as import addresses, in the
-// provider-canonical ID order verified against live state — which is why it is
-// a hand-written list and not a for_each. A relation added to integrations.tf
-// but not here is destroyed-and-recreated by the first attach apply; a `count`
-// mismatch imports to an address that does not exist. Reading the HCL textually
-// keeps this offline.
+// The attach table restates the terraform file as import addresses in the
+// provider-canonical order (hence hand-written, not for_each). A relation
+// missing here is destroyed-and-recreated by the first attach apply.
 test("ATTACH_INTEGRATIONS matches the juju_integration resources in integrations.tf", () => {
   const src = fs.readFileSync(
     path.join(REPO, "matrix", "backends", "juju", "root", "integrations.tf"),
@@ -320,17 +300,103 @@ test("ATTACH_INTEGRATIONS matches the juju_integration resources in integrations
   }
 
   // The presence dimensions ARE relations on this backend: every row-toggled
-  // relation matrix/verify.mjs checks must be a resource the attach path knows.
-  const verify = fs.readFileSync(path.join(REPO, "matrix", "verify.mjs"), "utf-8");
-  const table = verify.slice(verify.indexOf("const relations = ["), verify.indexOf("];", verify.indexOf("const relations = [")));
-  const toggled = [...table.matchAll(/\["([^"]+)", "([^"]+)", "([^"]+)", /g)].map((m) => m.slice(1, 4));
-  assert.equal(toggled.length, 7, "could not read the verify.mjs relation table");
-  for (const [app, endpoint, peer] of toggled) {
+  // relation the preflight checks must be a resource the attach path knows.
+  // The size pin stops an emptied table from passing the loop vacuously.
+  assert.equal(JUJU_RELATIONS.length, 7);
+  for (const [app, endpoint, peer] of JUJU_RELATIONS) {
     const entry = ATTACH_INTEGRATIONS.find(
       ({ parts: [a1, e1, a2, e2] }) =>
         (a1 === app && e1 === endpoint && a2 === peer) || (a2 === app && e2 === endpoint && a1 === peer),
     );
-    assert.ok(entry, `verify.mjs checks ${app}:${endpoint} ↔ ${peer}, which ATTACH_INTEGRATIONS does not list`);
+    assert.ok(entry, `the preflight checks ${app}:${endpoint} ↔ ${peer}, which ATTACH_INTEGRATIONS does not list`);
     assert.ok(declared.has(entry.addr.replace(/^juju_integration\./, "").replace(/\[0\]$/, "")));
   }
+});
+
+// ── classifyDrift ────────────────────────────────────────────────────────────
+// The adopt plan always carries a baseline (constraints normalized, charm
+// defaults declared explicitly, computed attributes); only a deployed value
+// that differs from the declaration, a create/delete, or a removed key is drift.
+// `before` omits config keys at the charm default, so the classifier compares
+// against the deployed effective value (`juju config`).
+const change = (address, change) => ({ address, change });
+const update = (address, before, after, extra = {}) =>
+  change(address, { actions: ["update"], before, after, ...extra });
+
+test("classifyDrift: the adopt baseline is not drift", () => {
+  const d = classifyDrift({
+    resource_changes: [
+      change("module.hydra.juju_application.application", { actions: ["no-op"], importing: { id: "x" }, before: {}, after: {} }),
+      update("module.kratos.juju_application.application",
+        { name: "kratos", constraints: "arch=amd64", config: { log_level: "info" }, storage: null, machines: null },
+        { name: "kratos", constraints: "", config: { log_level: "info", enforce_mfa: "true" }, storage: [{ label: "pgdata" }], machines: null },
+        { after_unknown: { machines: true } }),
+    ],
+  }, { kratos: { enforce_mfa: true, log_level: "info" } });
+  assert.equal(d.imported, 1);
+  assert.deepEqual(d.real, []);
+  assert.equal(d.baseline.length, 3, d.baseline.join("; "));
+});
+
+test("classifyDrift: a row overriding a charm default the deployment still runs is drift", () => {
+  const deployed = { kratos: { enable_local_idp: true } };
+  const want = ['module.kratos.juju_application.application: config.enable_local_idp "true" (charm default) -> "false"'];
+  // key absent from before.config
+  assert.deepEqual(classifyDrift({ resource_changes: [
+    update("module.kratos.juju_application.application",
+      { name: "kratos", config: { log_level: "info" } },
+      { name: "kratos", config: { log_level: "info", enable_local_idp: "false" } }),
+  ] }, deployed).real, want);
+  // before.config absent altogether
+  assert.deepEqual(classifyDrift({ resource_changes: [
+    update("module.kratos.juju_application.application",
+      { name: "kratos", config: null },
+      { name: "kratos", config: { enable_local_idp: "false" } }),
+  ] }, deployed).real, want);
+});
+
+test("classifyDrift: an explicit \"\" over a non-empty charm default is drift; a wholly sensitive config is unverifiable", () => {
+  const cleared = classifyDrift({ resource_changes: [
+    update("module.traefik.juju_application.traefik",
+      { name: "traefik-public", config: {} },
+      { name: "traefik-public", config: { external_hostname: "" } }),
+  ] }, { "traefik-public": { external_hostname: "iam.example.com" } });
+  assert.deepEqual(cleared.real, ['module.traefik.juju_application.traefik: config.external_hostname "iam.example.com" (charm default) -> ""']);
+
+  const secret = classifyDrift({ resource_changes: [
+    update("module.uvs.juju_application.application",
+      { name: "user-verification-service", config: { salesforce_consumer_secret: "old" } },
+      { name: "user-verification-service", config: { salesforce_consumer_secret: "new" } },
+      { after_sensitive: { config: true } }),
+  ] });
+  assert.deepEqual(secret.real, []);
+  assert.equal(secret.unverifiable.length, 1);
+});
+
+test("classifyDrift: a deployed value differing from the declaration is drift, named", () => {
+  const d = classifyDrift({
+    resource_changes: [
+      update("module.kratos.juju_application.application",
+        { config: { enforce_mfa: "false", log_level: "info" } },
+        { config: { enforce_mfa: "true" } }),
+    ],
+  });
+  assert.deepEqual(d.real, [
+    'module.kratos.juju_application.application: config.enforce_mfa "false" -> "true"',
+    'module.kratos.juju_application.application: config.log_level "info" -> <removed>',
+  ]);
+});
+
+test("classifyDrift: create/delete is drift; a write-only secret is unverifiable, not drift", () => {
+  const d = classifyDrift({
+    resource_changes: [
+      change("juju_integration.kratos_database", { actions: ["create"], before: null, after: {} }),
+      update("module.uvs.juju_application.application",
+        { config: { salesforce_consumer_secret: "old" } },
+        { config: { salesforce_consumer_secret: "new" } },
+        { after_sensitive: { config: { salesforce_consumer_secret: true } } }),
+    ],
+  });
+  assert.deepEqual(d.real, ["juju_integration.kratos_database: create"]);
+  assert.deepEqual(d.unverifiable, ["module.uvs.juju_application.application: config.salesforce_consumer_secret (sensitive)"]);
 });

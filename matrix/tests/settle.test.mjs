@@ -1,15 +1,14 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 //
-// Settle/journal pure logic. Both modules are observer-only after decision
-// D-3, so these tests pin the DIAGNOSTIC surface that replaced the removed
-// remediation: which status lines a settle timeout reports, and which unit
-// states the journal calls stuck. No process is spawned.
+// Settle/journal pure logic. Both modules are observer-only, so these tests
+// pin the DIAGNOSTIC surface: which status lines a settle timeout reports, and
+// which unit states the journal calls stuck. No process is spawned.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { nonCleanLines } from "../run-row.mjs";
+import { nonCleanLines } from "../juju-backend.mjs";
 import { unitStates, isStuck } from "../watchdog.mjs";
 
 const STATUS_SHORT = [

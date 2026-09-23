@@ -9,12 +9,7 @@ const root = process.cwd();
 const specsDir = path.join(root, "specs");
 const scenariosDir = path.join(root, "scenarios");
 
-/**
- * Simple live-lane compatibility audit.
- *
- * It intentionally focuses on active specs (excluding archive/) and checks
- * for known unsafe patterns in live runs.
- */
+// Patterns unsafe in live runs, checked over active specs (archive/ excluded).
 const forbiddenPatterns = [
   {
     name: "hardcoded localhost URL",

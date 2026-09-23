@@ -1,135 +1,29 @@
 # Skill: Run E2E Scenario
 
-## Name
-run-e2e-scenario
+## When
+"run e2e scenario", "test the flow where", "validate that": a one-off natural-language scenario
+run against a deployed profile, with a report. Optionally promoted to a permanent test afterwards.
 
-## Description
-Accept a natural language description of a test scenario, deploy the
-appropriate profile, seed test data, run the scenario (browser MCP for UI,
-HTTP for API), capture results, and generate a report. Optionally produce
-a permanent test from the successful scenario.
+## Steps
+1. Parse: profile (from the capabilities the flow needs — read `matrix/rows/<name>/capabilities.json`),
+   seeder archetypes (`tests/browser/seeder/archetypes.ts`), ordered steps, assertions.
+   `multi_tenancy_enabled` is `true` on `canonical-portal` only and no profile combines it with
+   WebAuthn sequencing (`tests/browser/known-coverage-gaps.json`); report that shape as blocked, do not improvise.
+2. Deploy and seed:
+   ```bash
+   make profile-set PROFILE=<name> && make up && make test-smoke
+   make seed-test-data-clean
+   ```
+3. Execute. UI steps: drive the browser from `http://localhost/` (or the RP at `http://127.0.0.1:4446`),
+   screenshot at key points. API steps: obtain a token, call the endpoint, assert status and body.
+4. Report as a table — `# | Step | Type (Setup/UI/API) | Result | Details` — with a one-line verdict.
+   Quote the exact error for any failed step.
+5. Promote if it passed: a browser scenario becomes a `defineScenario` entry via `generate-browser-test`;
+   an API-heavy scenario becomes a Go test under `tests/e2e/`.
 
-## Trigger Phrases
-- "run e2e scenario"
-- "test the flow where"
-- "validate that"
-- "run a scenario for"
+## Success
+- Every step has a pass/fail row and the report names the profile it ran on.
+- A blocked scenario is reported as blocked with the missing capability, not worked around.
 
-## Input Format
-
-```
-Run an E2E scenario: a returning user logs in with password + TOTP, and the
-issued access token carries their hook-service group claim.
-```
-
-Or more structured:
-
-```
-Test the following scenario:
-1. Deploy the canonical-internal profile
-2. Seed test data
-3. Start the authorization_code flow from the OIDC consumer app
-4. Log in as the `returning-mfa` archetype (password, then TOTP)
-5. Verify the redirect lands on oidc-callback
-6. Verify the access token carries groups: ["platform-testers"]
-7. Verify the token carries no tenant_id
-```
-
-> **Capability check first.** A scenario can only be run where the profile
-> declares the capability it needs — read
-> `matrix/rows/<profile>/capabilities.json`. Notably `multi_tenancy_enabled`
-> is `false` on **every** profile today, so tenant scenarios cannot be
-> executed anywhere; they are parked in
-> `tests/browser/known-coverage-gaps.json`. Report that as a blocked scenario
-> rather than improvising a workaround.
-
-## Workflow
-
-### Step 1: Parse the Scenario
-
-Extract:
-- **Profile**: Which profile to deploy (infer from services mentioned)
-- **Test data**: which seeder archetypes (`tests/browser/seeder/archetypes.ts`) are needed
-- **Steps**: Ordered sequence of actions
-- **Assertions**: Expected outcomes at each step
-
-### Step 2: Deploy the Platform
-
-```bash
-make profile-set PROFILE=<profile>
-make up
-make test-smoke  # Wait for health
-```
-
-### Step 3: Seed Test Data
-
-```bash
-make seed-test-data
-```
-
-### Step 4: Execute the Scenario
-
-#### UI Steps (Browser MCP)
-For steps involving the browser:
-1. Open the starting URL
-2. Navigate through the flow
-3. Capture screenshots at key points
-4. Record network requests
-5. Assert expected outcomes
-
-#### API Steps (HTTP)
-For steps involving API calls:
-1. Get authentication token (via Kratos or STS)
-2. Make the API call
-3. Assert response status and body
-4. Capture response data for subsequent steps
-
-### Step 5: Capture Results
-
-Record:
-- Step-by-step pass/fail
-- Screenshots (for UI steps)
-- Response data (for API steps)
-- Error messages
-- Timing information
-
-### Step 6: Generate Report
-
-```markdown
-## E2E Scenario Report
-
-**Scenario:** <description>
-**Profile:** <profile>
-**Date:** <date>
-**Result:** ✅ PASS / ❌ FAIL
-
-### Steps
-
-| # | Step | Type | Result | Details |
-|---|------|------|--------|---------|
-| 1 | Deploy platform | Setup | ✅ | All services healthy |
-| 2 | Seed test data | Setup | ✅ | archetypes seeded, manifest.json written |
-| 3 | Start authorization_code flow | UI | ✅ | login-email |
-| 4 | Password | UI | ✅ | login-password |
-| 5 | TOTP | UI | ✅ | login-totp-verify |
-| 6 | Redirect | UI | ✅ | oidc-callback |
-| 7 | Group claim present | API | ✅ | groups: ["platform-testers"] |
-| 8 | No tenant_id | API | ✅ | claim absent (expected) |
-
-### Summary
-All steps passed. Scenario validated successfully.
-```
-
-### Step 7: Optionally Promote to a Permanent Test
-
-If the scenario passes, offer to promote it. The suite is scenario-as-data:
-a permanent browser test is a `defineScenario({...})` entry in
-`tests/browser/scenarios/`, **not** a hand-written spec. Use the
-`generate-browser-test` skill, which carries the template and the
-`requires:`/archetype invariants. For API-heavy scenarios, a Go test under
-`tests/e2e/` is the right home.
-
-## Related Skills
-- `generate-browser-test` — Generate a permanent Playwright test
-- `spin-up-platform` — Deploy the platform
-- `seed-test-data` — Create test data
+## Related
+`generate-browser-test`, `spin-up-platform`, `seed-test-data`.

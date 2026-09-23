@@ -46,11 +46,8 @@ services:
       - "traefik.enable=true"
       - "traefik.http.services.kratos-public.loadbalancer.server.port=4433"
       - "traefik.http.services.kratos-admin.loadbalancer.server.port=4434"
-      # Kratos public and admin routes are defined in
-      # docker/traefik/login-ui-routes.yml with proper priority ordering so
-      # that the OIDC callback, webauthn.js, and schemas go directly to
-      # Kratos while other /self-service paths are proxied through login-ui.
-      # Only admin routes remain as Docker labels (no priority conflicts).
+      # Public routes live in docker/traefik/login-ui-routes.yml (priority
+      # ordering); only admin routes remain as labels.
       - "traefik.http.routers.kratos-admin.rule=PathPrefix(`/admin/identities`) || PathPrefix(`/admin/recovery`) || PathPrefix(`/admin/sessions`)"
       - "traefik.http.routers.kratos-admin.entryPoints=web"
       - "traefik.http.routers.kratos-admin.service=kratos-admin"

@@ -1,30 +1,16 @@
-# Dex test IdP for the charmed matrix lane.
-#
-# Substrate identity is not baked in here. The applyable copy is rendered from
-# dex.yaml.tpl plus root/local.auto.tfvars (gitignored — the same values
-# terraform reads):
+# Dex test IdP for the charmed matrix lane (no dex charm exists; the
+# kratos-external-idp-integrator app in root/main.tf points here).
+# Rendered from this template plus root/local.auto.tfvars (gitignored):
 #
 #   make render-manifests            # repo root; envsubst, no cluster contact
 #   kubectl apply -f matrix/backends/juju/manifests/.rendered/
 #   kubectl -n iam-matrix rollout restart deploy/dex
 #
 # The rendered output is gitignored: no tracked file may carry this machine's
-# node IP or ingress hostname (they are substrate identity, not configuration).
-# Placeholders (envsubst is restricted to exactly these two names, so the
-# bcrypt hash below survives rendering). Both come from root/local.auto.tfvars:
-#   NODE_IP           <- node_ip; the issuer URL uses node IP + NodePort so
-#                        ONE URL is valid from both the kratos pods and the
-#                        host browser (the same single-issuer problem the
-#                        compose stack solves with host-resolver-rules).
-#   INGRESS_HOSTNAME  <- ingress_hostname; kratos derives its oidc callback
-#                        from the ingress, so the staticClient redirectURIs
-#                        must match it. WebAuthn rows need the hostname
-#                        form — see root/variables.tf.
-#
-# No dex charm exists in the platform; the charm-native piece is the
-# kratos-external-idp-integrator app (provider=generic) pointing at this
-# deployment, whose issuer_url is built from the same node_ip variable
-# (root/main.tf). Config mirrors docker/dex/config.yml (same static test users).
+# node IP or ingress hostname. envsubst is restricted to exactly these names, so the bcrypt hashes below survive rendering:
+#   NODE_IP           issuer URL = node IP + NodePort, valid from pods and host browser alike
+#   INGRESS_HOSTNAME  kratos derives its oidc callback from the ingress (root/variables.tf)
+# Config mirrors docker/dex/config.yml (same static test users).
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -50,38 +36,28 @@ data:
         redirectURIs:
           - https://${INGRESS_HOSTNAME}/self-service/methods/oidc/callback/dex2
     enablePasswordDB: true
+    # All hashes are bcrypt of "dex-password" (same as the compose stack).
     staticPasswords:
       - email: "dex-user@test.example"
-        # bcrypt hash of "dex-password" (same as the compose stack)
         hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
         username: "Dex Test User"
         userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
-      # The account-linking collision half (S10 item 15): same email as the
-      # SEEDED KRATOS PASSWORD IDENTITY `link-user` — a dex sign-in for this
-      # address collides with the existing local account, which is the
-      # login-time linking surface. Same test password as dex-user.
+      # Same email as the seeded kratos password identity `link-user`: the login-time linking collision.
       - email: "link-user@test.example"
-        # bcrypt hash of "dex-password"
         hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
         username: "Link Test User"
         userID: "1b9c795b-ec99-4c84-a1b0-4dd2661f5467"
-      # The settings-linking half: matches the seeded `settings-link-user`
-      # kratos identity, linked and unlinked from /ui/manage_connected_accounts.
+      # Matches the seeded `settings-link-user`, linked/unlinked from /ui/manage_connected_accounts.
       - email: "settings-link-user@test.example"
-        # bcrypt hash of "dex-password"
         hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
         username: "Settings Link User"
         userID: "2c8d795b-ec99-4c84-a1b0-4dd2661f5468"
-      # Tenant journeys entered through dex (§10 item 1): the seeded
-      # `dex-single-tenant-user` / `dex-multi-tenant-user` identities carry these
-      # subjects; tenant-service memberships are keyed on the email.
+      # Tenant journeys entered through dex: seeded `dex-*-tenant-user` identities carry these subjects.
       - email: "dex-single-tenant-user@test.example"
-        # bcrypt hash of "dex-password"
         hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
         username: "Dex Single Tenant User"
         userID: "3d9e795b-ec99-4c84-a1b0-4dd2661f5469"
       - email: "dex-multi-tenant-user@test.example"
-        # bcrypt hash of "dex-password"
         hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
         username: "Dex Multi Tenant User"
         userID: "4eaf795b-ec99-4c84-a1b0-4dd2661f546a"

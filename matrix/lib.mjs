@@ -1,11 +1,9 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 //
-// Shared row math for the config matrix: dimension order, the charm-faithful
-// derivation (mirrors kratos-operator/templates/kratos.yaml.j2 — citations in
-// config-model.mjs), the compose materializer, and the capabilities manifest.
-// Used by generate.mjs (emit) and verify.mjs (assert the same expectations
-// against a live deployment).
+// Shared row math: dimension order, the charm-faithful derivation (mirrors
+// kratos-operator/templates/kratos.yaml.j2; citations in config-model.mjs),
+// the compose materializer, and the capabilities manifest.
 
 import { model } from "./config-model.mjs";
 
@@ -13,12 +11,8 @@ export const DIMS = model.dimensions.map((d) => d.id);
 export const VALUES = Object.fromEntries(model.dimensions.map((d) => [d.id, d.values]));
 
 /** Charm-faithful derivation of service-level settings from model coordinates.
- *
- *  `webauthn: null` (pinned gate profiles only) is the documented off-model
- *  shape: kratos webauthn ENABLED as a pure second factor (passwordless:false,
- *  no sequencing). kratos-operator cannot produce it (j2:257-265), so it earns
- *  no pair credit, but the materializer renders it faithfully — null !== "none"
- *  → enabled; null is neither "passwordless" nor "sequencing" → both false. */
+ *  `webauthn: null` (pinned gate profiles) is the off-model pure-second-factor
+ *  shape: enabled, neither passwordless nor sequencing. */
 export function derive(d) {
   const local = d.local_idp === "on";
   const mfa = d.mfa === "enforced";
@@ -44,8 +38,7 @@ export function derive(d) {
 
 const B = (b) => (b ? "true" : "false");
 
-/** The exact env the materializer sets on each service — single source for
- *  the override emitter AND the compose-layer verifier. */
+/** The exact env the materializer sets on each service; the compose-layer verifier asserts the same. */
 export function expectedEnv(dims) {
   const v = derive(dims);
   const kratos = {
@@ -161,18 +154,10 @@ export const TOGGLED_SERVICES = {
   user_verification: "user-verification-service",
 };
 
-// Ground-truth capability manifest, shaped like the suite's ActiveConfig
-// (tests/browser/framework/active-config.ts) plus two extra keys. This is what
-// the deployment ACTUALLY is — comparing it against the live /api/v0/app-config
-// response is itself a test of PD-5.
-//
-// `overrides` is a row's `caps` block (seed rows only): row-level truths that
-// are NOT dimensions because no charm option or relation produces them — a
-// target with no mailslurper and no dex is a property of that deployment, not
-// of the platform's configuration space. It is a SHALLOW override, and it is
-// checked rather than trusted: an unknown key is a typo and a no-op value is
-// dead weight, so both throw at generation time instead of silently shaping the
-// executed set.
+// Capability manifest, shaped like the suite's ActiveConfig
+// (tests/browser/framework/active-config.ts) plus extra keys; the preflight
+// compares it against the live /api/v0/app-config. `overrides` is a seed row's
+// `caps` block: a shallow override, checked (unknown key or no-op value throws).
 export function capabilities(dims, overrides = {}) {
   const v = derive(dims);
   const services = ["kratos", "hydra", "login-ui", "dex", "openfga"];
@@ -188,8 +173,7 @@ export function capabilities(dims, overrides = {}) {
   const methods_2fa = [];
   if (v.totp) methods_2fa.push("totp");
   if (v.lookup) methods_2fa.push("backup_codes");
-  // webauthn is a second factor under sequencing, and on the off-model
-  // (webauthn: null) gate profiles whenever a second factor is enforced.
+  // webauthn is a second factor under sequencing, and on the webauthn: null profiles whenever MFA is enforced.
   if (dims.webauthn === "sequencing" || (dims.webauthn === null && dims.mfa === "enforced")) {
     methods_2fa.push("webauthn");
   }
@@ -204,10 +188,7 @@ export function capabilities(dims, overrides = {}) {
   const caps = {
     oidc_webauthn_sequencing_enabled: dims.webauthn === "sequencing",
     base_url: "http://localhost",
-    // An INVARIANT, not a free variable: every row declares identifier-first
-    // and the preflight's layer-2 `login style identifier-first` check reads
-    // the shape off the live login flow (kratos's `selfservice.flows.login.style`),
-    // failing on the deprecated one-step shape in every backend (§10 item 14).
+    // Invariant: the preflight's `login style identifier-first` check reads the live flow shape.
     identifier_first_enabled: true,
     multi_tenancy_enabled: v.tenant,
     support_email: "",
@@ -224,40 +205,16 @@ export function capabilities(dims, overrides = {}) {
     oidc_providers: dims.providers === "0" ? [] : dims.providers === "1" ? ["dex"] : ["dex", "google"],
     verification_enabled: v.verificationFlow,
     access_token_format: dims.access_token,
-    // Mail is a declared capability, not an assumption: both backends deploy
-    // mailslurper today, so every dims-derived row is true. A row whose TARGET
-    // has no mail API declares `caps: { mail_api: false }` in the model and the
-    // suite gates mail-dependent scenarios off at runtime (requires.mailApi).
+    // Declared, not assumed: a mail-less target overrides `caps: { mail_api: false }` (requires.mailApi gates).
     mail_api: true,
-    // login-ui VERSION fork, observed on both sides: the v0.28.0 workload the
-    // compose/juju stacks run only offers the backup-code regeneration prompt
-    // when the identity is running low (≤3 unused codes — fresh 12, burn 1 →
-    // straight to the callback, measured 2026-08-31 on ghcr :stable), while
-    // iam.orange.canonical.com (login-ui ≥ v0.27, measured 2026-08-27 and
-    // 2026-08-31) renders the prompt after EVERY backup-code sign-in — and its
-    // "I don't need new codes" resumption is broken there (session suite
-    // note), so the prompt is a terminal on that target. Rows whose target
-    // behaves the old way declare `caps: { backup_code_prompt_on_use: true }`;
-    // the suite gates the prompt-terminal vs callback-terminal scenario
-    // variants on it (requires.backupCodePromptOnUse).
+    // v0.28.0 prompts for backup-code regeneration only at ≤3 unused codes;
+    // newer login-ui prompts after every backup-code sign-in (requires.backupCodePromptOnUse).
     backup_code_prompt_on_use: false,
-    // RFC 8628 device authorization grant, wired end-to-end on every backend:
-    //  - compose: shared docker/hydra/hydra.yml sets urls.device.verification/
-    //    success and traefik routes PUT /api/device to login-ui (full journey
-    //    measured 2026-08-31: device/auth → /ui/device_code → login →
-    //    /ui/device_complete → token poll returns access+id+refresh);
-    //  - juju: hydra-operator renders urls.device from the login-ui relation
-    //    (canonical/hydra-operator@f7e000b templates/hydra.yaml.j2:61-63,
-    //    src/integrations.py:145-151), which every row relates;
-    //  - iam.orange: measured 2026-08-31 — /oauth2/device/auth issues codes
-    //    through the public ingress and /ui/device_code renders.
-    // The seeded RP carries the device grant URN (C-13).
+    // RFC 8628 device grant is wired on every backend (compose: docker/hydra/hydra.yml +
+    // traefik; juju: canonical/hydra-operator@f7e000b templates/hydra.yaml.j2:61-63).
     device_flow: true,
-    // Backend-divergent keys: the juju lane renders its second provider as
-    // a second dex client (idp-dex2 integrator - google needs real
-    // credentials the harness lacks), so providers=2 rows offer [dex, dex2]
-    // there, not [dex, google]. Consumers flatten `juju` over the base by
-    // MATRIX_BACKEND (matrix/verify.mjs, framework/global-setup.ts).
+    // Backend-divergent keys: juju renders the second provider as a second dex
+    // client (google needs real credentials). Consumers flatten by MATRIX_BACKEND.
     ...(dims.providers === "2" ? { juju: { oidc_providers: ["dex", "dex2"] } } : {}),
   };
 
@@ -287,21 +244,16 @@ export function rowName(dims) {
   return `mx-${code}`;
 }
 
-/** The deployment interfaces a row can run through (docs/testing-spec.md §4).
- *  A row without a `backends` declaration runs on all of them; a target-bound
- *  seed row (config-model.mjs `backends`) runs on the listed subset only —
- *  its caps describe one external deployment, which no other backend can
- *  render, so deploying it anywhere else only buys a preflight refusal. */
+/** Deployment interfaces a row can run through (docs/testing-spec.md §4). A
+ *  row without `backends` runs on all; a target-bound seed row on its subset. */
 export const BACKENDS = ["compose", "juju", "urls"];
 
 export function rowRunsOn(row, backend) {
   return !row.backends || row.backends.includes(backend);
 }
 
-/** Which per-backend artifacts a row materializes under matrix/rows/<name>/:
- *  the compose override and the juju var-file follow the row's backends; a
- *  juju var-file additionally needs every dim on-model (a null dim is a
- *  pinned profile's off-charm shape). capabilities.json is unconditional. */
+/** Per-backend artifacts under matrix/rows/<name>/. A juju var-file needs
+ *  every dim on-model (null = off-charm). capabilities.json is unconditional. */
 export function rowArtifacts(row) {
   return {
     compose: rowRunsOn(row, "compose"),
@@ -309,15 +261,9 @@ export function rowArtifacts(row) {
   };
 }
 
-/**
- * Juju-backend materialization: model row → terraform variable values for
- * matrix/backends/juju/root. Charm CONFIG here, not service config — the
- * operators render kratos.yaml/hydra.yaml themselves; that is the point of
- * the charmed lane. Presence dimensions become relation toggles (all add-on
- * apps stay deployed), and provider count toggles the integrators' own
- * `enabled` config (the charm's supported disable path) rather than churning
- * relations.
- */
+/** Juju materialization: charm CONFIG, not service config (the operators
+ *  render kratos.yaml/hydra.yaml). Presence dims become relation toggles;
+ *  provider count toggles the integrators' own `enabled` config. */
 export function jujuTfvars(dims) {
   const v = derive(dims);
   return {

@@ -8,3 +8,5 @@ imports.attach.tf.json
 terraform.tfstate.d/
 attach.tfvars.json
 terraform.tfstate.*.backup
+# terraform plan files embed the same cleartext secrets as state
+*.tfplan

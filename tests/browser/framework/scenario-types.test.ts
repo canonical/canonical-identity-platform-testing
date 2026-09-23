@@ -1,18 +1,7 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * `defineScenario()`'s import-time guards, pinned.
- *
- * The constructor is the only thing standing between a malformed declaration
- * and a test that passes for the wrong reason. `expectError` is the sharp case
- * (R-2): it is enforced at self-transitions, so a scenario that declares it on
- * a path with no repeated state gets a green run and asserts nothing about the
- * error it claims to test. That has to fail at collection, not at runtime.
- *
- * Run: npx tsx --test framework/scenario-types.test.ts  (or `npm run
- * test:unit`). No stack, no browser.
- */
+/** `defineScenario()`'s import-time guards, pinned. */
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

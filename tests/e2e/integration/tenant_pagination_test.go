@@ -8,6 +8,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/canonical/canonical-identity-platform/tests/e2e/internal/harness"
 )
 
 const (
@@ -15,14 +17,10 @@ const (
 	paginationNumTenants = 5
 )
 
-// TestListTenantsPagination verifies cursor-based pagination for ListTenants:
-//   - Each page (except the last) contains exactly paginationPageSize items
-//   - No tenant ID is returned more than once across all pages
-//   - Every tenant created by this test appears exactly once in the results
-//
-// This directly guards against off-by-one bugs in cursor-based pagination.
+// TestListTenantsPagination: every non-final page is exactly paginationPageSize,
+// no tenant ID repeats across pages, and every created tenant appears exactly once.
 func TestListTenantsPagination(t *testing.T) {
-	requireService(t, "tenant-service")
+	requireService(t, harness.TenantService)
 
 	client, err := NewHTTPTenantClient()
 	if err != nil {
@@ -35,7 +33,6 @@ func TestListTenantsPagination(t *testing.T) {
 
 	prefix := fmt.Sprintf("e2e-pg-%d-", time.Now().UnixNano())
 
-	// Create N tenants and record their IDs
 	createdIDs := make(map[string]struct{}, paginationNumTenants)
 	for i := 0; i < paginationNumTenants; i++ {
 		name := fmt.Sprintf("%s%03d", prefix, i+1)
@@ -45,7 +42,6 @@ func TestListTenantsPagination(t *testing.T) {
 		}
 		createdIDs[id] = struct{}{}
 
-		// Register cleanup
 		cleanupID := id
 		t.Cleanup(func() {
 			cleanCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
@@ -56,7 +52,6 @@ func TestListTenantsPagination(t *testing.T) {
 		})
 	}
 
-	// Walk every page and collect tenant IDs that belong to this test run
 	seen := make(map[string]struct{})
 	pageToken := ""
 	for pageNum := 1; ; pageNum++ {

@@ -1,70 +1,29 @@
 # Skill: Seed Test Data
 
-## Name
-seed-test-data
+## When
+"seed test data", "reset test data", "create test fixtures", before any browser run.
+Creates Kratos identities (real TOTP enrolment + backup codes), Hydra OAuth2 clients
+(`browser-test-rp`, `browser-test-svc`, `browser-test-hooks`) and — on `canonical-portal` only — tenants and memberships.
 
-## Description
-Seed deterministic test data for the active deployment profile. Creates Kratos
-identities with real TOTP enrolment and backup codes, Hydra OAuth2 clients, and
-tenants plus memberships when the profile includes `tenant-service` — which no
-profile does today (`multi_tenancy_enabled` is `false` on all three), so the
-tenant/membership arrays come back empty.
-
-## Trigger Phrases
-- "seed test data"
-- "create test fixtures"
-- "set up test data for profile X"
-- "reset test data"
-
-## Workflow
-
-1. Determine the active profile (from `.active-profile` or `--profile <name>`).
-2. Run the TypeScript seeder:
-   ```bash
-   make seed-test-data-clean     # wipe and re-seed (strict; what the gate runs)
-   make seed-test-data           # same thing — see the note below
-   ```
-   They delegate to `cd tests/browser && npx tsx seeder/seed.ts [--fresh] --profile <name>`.
-
-   > **Both make targets seed fresh.** `seed.ts` defaults to `mode = "fresh"`
-   > when no mode flag is passed, and `make seed-test-data` passes none — so
-   > the two targets are behaviourally identical today. For a genuinely
-   > incremental seed, invoke the flag directly:
-   > `cd tests/browser && npx tsx seeder/seed.ts --incremental --profile <name>`.
-
-3. The seeder writes `tests/browser/manifest.json` — the only contract between
-   provisioning and the specs.
-
-## Which users get created
-`tests/browser/seeder/archetypes.ts` is the **sole source of truth**. It is deliberately
-independent of scenario definitions: the seeder never imports scenario files. A scenario
-that references an unknown `user.ref` fails loudly at lookup time.
-
-Each archetype declares its credentials (password / TOTP / backup codes / OIDC link) and
-verification state. To make a new kind of user available to scenarios, add an archetype —
-do not provision from inside a spec.
-
-## Output
-`tests/browser/manifest.json`, typed by `tests/browser/seeder/manifest-schema.ts`:
-```json
-{
-  "profile": "canonical-portal",
-  "seededAt": "...",
-  "users": [{"ref": "returning-mfa", "email": "...", "identityId": "...", "totpSecret": "..."}],
-  "tenants": [{"ref": "alpha", "name": "Alpha Inc", "id": "..."}],
-  "memberships": [{"userRef": "multi-tenant-user", "tenantRef": "alpha", "role": "owner"}],
-  "oauthClients": {"rp": {...}, "svc": {...}}
-}
+## Commands
+```bash
+make seed-test-data-clean     # wipe the test plane's own records and re-seed; strict; what the gate runs
+make seed-test-data           # same behaviour today: seed.ts defaults to fresh mode when no flag is passed
+make unseed-test-data         # delete the test plane's own records and the manifest, create nothing
+cd tests/browser && npx tsx seeder/seed.ts --incremental --profile <name>   # adopt existing, create only what is missing
 ```
+Fresh mode exits non-zero on any cleanup or seeding failure; incremental is lenient and preserves
+prior TOTP secrets and backup codes. `MANIFEST=<path>` relocates the manifest (seeding host may
+differ from the test host — `tests/browser/LANES.md`, "Seeding an Existing Deployment").
+
+## Success
+- `tests/browser/manifest.json` exists, typed by `seeder/manifest-schema.ts`: `profile`, `seededAt`,
+  `users[]` (ref, email, identityId, totpSecret), `tenants[]`, `memberships[]`, `oauthClients`.
+- Every MFA user has a non-null `totpSecret`; the seeder fails otherwise.
 
 ## Invariants
-- The seeder owns **all** admin-API access. Specs are browser-only and read the manifest.
-- TOTP is enrolled for real through the public settings flow, not injected — so the
-  secrets in the manifest are usable by the tests.
-- `--incremental` preserves existing TOTP secrets and backup codes from the prior manifest.
-- Hydra clients (`browser-test-rp`, `browser-test-svc`) are upserted deterministically so
-  the `oidc-consumer` container can boot before seeding runs.
-
-## Make Targets
-- `make seed-test-data` — seed the active profile (fresh; no mode flag passed)
-- `make seed-test-data-clean` — explicit `--fresh` wipe and re-seed
+- `tests/browser/seeder/archetypes.ts` is the sole source of users; the seeder never imports scenario files.
+  A scenario naming an unknown `user.ref` fails at lookup. New kind of user → new archetype, never a spec.
+- The seeder owns all admin-API access; specs are browser-only and read the manifest.
+- Deletion is scoped by `seeder/ownership.ts` (`@test.example`, `iam-test ` tenants, manifest ids); foreign
+  records are counted, reported and left alone.

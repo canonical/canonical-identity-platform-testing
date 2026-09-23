@@ -1,24 +1,9 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * Manage hook-service groups via its `/api/v0/authz` gRPC-gateway API.
- *
- * hook-service is what makes the `groups` profile observably different from
- * `core`: Hydra calls its token hook on every token issuance, and hook-service
- * enriches the token with a `groups` claim built from its own store. Hydra
- * surfaces access-token session extras under the `ext` claim.
- *
- * Group membership is keyed on the user's *email* (see
- * `StorageHookGroupsClient.FetchUserGroups` — it uses `user.Email`, or
- * `user.ClientId` for service accounts), so members are recorded by email,
- * not by Kratos identity ID.
- *
- * The `/api/v0/authz` router is behind JWT auth: hook-service verifies the
- * issuer (`http://localhost:4444`) against Hydra's JWKS and requires the
- * `hook-service:admin` scope. Tokens therefore come from Hydra's *public*
- * port (4444), not the admin port.
- */
+// Manage hook-service groups via `/api/v0/authz`. Membership is keyed on email
+// (`StorageHookGroupsClient.FetchUserGroups` uses `user.Email`). The router needs a
+// `hook-service:admin` JWT issued by Hydra's public port (4444), not the admin port.
 
 import { HOOK_SERVICE_URL, HYDRA_PUBLIC_URL } from "./config";
 import type { Manifest } from "../seeder/manifest-schema";
@@ -26,7 +11,6 @@ import type { Manifest } from "../seeder/manifest-schema";
 /** Scope hook-service requires on the JWT for `/api/v0/authz` (AUTHENTICATION_REQUIRED_SCOPE). */
 export const HOOK_ADMIN_SCOPE = "hook-service:admin";
 
-/** A group as returned by hook-service. */
 export interface HookGroup {
   id: string;
   name: string;
@@ -35,13 +19,7 @@ export interface HookGroup {
   type?: string;
 }
 
-/**
- * Obtain a client-credentials JWT carrying the `hook-service:admin` scope.
- *
- * Mirrors `getServiceToken` in helpers/tenants.ts — same exchange, different
- * scope. Hydra is configured with `strategies.scope: exact`, so the requested
- * scope must match the client's registered scope verbatim.
- */
+// Hydra runs `strategies.scope: exact`: the requested scope must match the client's registered scope verbatim.
 export async function getHookAdminToken(
   clientId?: string,
   clientSecret?: string,
@@ -80,7 +58,6 @@ export async function getHookAdminToken(
   return data.access_token;
 }
 
-/** Envelope every `/api/v0/authz` response uses. */
 interface AuthzEnvelope<T> {
   data?: T;
   status: number;
@@ -121,19 +98,13 @@ async function authzOk<T>(token: string, method: string, path: string, body?: un
   return envelope.data;
 }
 
-/** List all groups. */
 export async function listGroups(token: string): Promise<HookGroup[]> {
   // proto3 omits empty repeated fields, so `data` is absent when there are none.
   return (await authzOk<HookGroup[]>(token, "GET", "/groups")) ?? [];
 }
 
-/**
- * Create the named group, or return the existing one.
- *
- * Idempotent two ways: it looks the group up first, and it still tolerates the
- * 409 hook-service returns on a duplicate name (the unique index is on
- * `(tenant_id, name)`), which closes the race between concurrent seeders.
- */
+// Tolerates the 409 on a duplicate name (unique index on `(tenant_id, name)`) to
+// close the race between concurrent seeders.
 export async function ensureGroup(token: string, name: string, description: string): Promise<HookGroup> {
   const existing = (await listGroups(token)).find((g) => g.name === name);
   if (existing) return existing;
@@ -161,19 +132,13 @@ export async function ensureGroup(token: string, name: string, description: stri
   return created;
 }
 
-/** List the member IDs (emails) of a group. */
+/** Member IDs are emails. */
 export async function listUsersInGroup(token: string, groupId: string): Promise<string[]> {
   const users = (await authzOk<Array<{ id: string }>>(token, "GET", `/groups/${groupId}/users`)) ?? [];
   return users.map((u) => u.id);
 }
 
-/**
- * Add the given user IDs (emails) to a group, skipping members already present.
- *
- * The insert underneath has no upsert, so re-adding an existing member can come
- * back as 409 "user already in group". Filtering first keeps a re-seed clean.
- * Returns the IDs actually added.
- */
+// No upsert underneath (re-adding a member returns 409), so filter first. Returns the IDs actually added.
 export async function addUsersToGroup(token: string, groupId: string, userIds: string[]): Promise<string[]> {
   const current = new Set(await listUsersInGroup(token, groupId));
   const missing = userIds.filter((id) => !current.has(id));
@@ -183,7 +148,6 @@ export async function addUsersToGroup(token: string, groupId: string, userIds: s
   return missing;
 }
 
-/** List the groups a user (by email) belongs to. */
 export async function listUserGroups(token: string, userId: string): Promise<HookGroup[]> {
   return (await authzOk<HookGroup[]>(token, "GET", `/users/${encodeURIComponent(userId)}/groups`)) ?? [];
 }

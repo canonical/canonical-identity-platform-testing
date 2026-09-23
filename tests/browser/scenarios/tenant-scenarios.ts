@@ -2,15 +2,8 @@
 // SPDX-License-Identifier: AGPL-3.0
 
 /**
- * Tenant scenario suite — multi-tenancy flows.
- *
- * Covers: zero-tenant, single-tenant (auto-selected), multi-tenant
- * (manual selection), and multi-tenant session reuse — entered with a
- * password, and entered through dex (§10 item 1: the oidc-only rows have no
- * password user at all, so without the dex-entered pair no tenant journey
- * runs there). Tenant lookup keys on the identifier, so the dex identity
- * sees the same selection page BEFORE its credential page (observed
- * 2026-09-02, canonical-portal).
+ * Multi-tenancy: zero/single/multi-tenant login and session reuse, entered by password and by dex.
+ * Tenant lookup keys on the identifier, so a dex identity sees the selection page before its credential page.
  */
 
 import { defineScenario, defineScenarioSuite } from "../framework/scenario-types";
@@ -19,7 +12,6 @@ export const tenantScenarios = defineScenarioSuite({
   name: "tenant",
   defaultLanes: ["live", "internal"],
   scenarios: [
-  // ── Zero-tenant user ──────────────────────────────────────────────────
   defineScenario({
     id: "zero-tenant-login",
     description: "User with no tenants completes login without tenant selection",
@@ -34,7 +26,6 @@ export const tenantScenarios = defineScenarioSuite({
     assertions: { noTenantId: true },
   }),
 
-  // ── Single-tenant user (auto-selected) ────────────────────────────────
   defineScenario({
     id: "single-tenant-auto-select",
     description: "User with one tenant — auto-selected, no selection screen",
@@ -49,7 +40,6 @@ export const tenantScenarios = defineScenarioSuite({
     assertions: { tenantIdFromSeed: true },
   }),
 
-  // ── Multi-tenant user (manual selection) ──────────────────────────────
   defineScenario({
     id: "multi-tenant-selection",
     description: "User with multiple tenants must select one",
@@ -70,7 +60,6 @@ export const tenantScenarios = defineScenarioSuite({
     assertions: { tenantIdFromSeed: true },
   }),
 
-  // ── Multi-tenant session reuse ────────────────────────────────────────
   defineScenario({
     id: "multi-tenant-session-reuse",
     description: "Session exists but multi-tenant user must re-select tenant",
@@ -104,10 +93,7 @@ export const tenantScenarios = defineScenarioSuite({
     assertions: { tenantIdFromSeed: true },
   }),
 
-  // ── Dex-entered tenant journeys ───────────────────────────────────────
-  // Same shapes as above, no password anywhere: these are what run on the
-  // oidc-only multi-tenant rows. Sequencing rows fork the post-dex step into
-  // the passkey enrolment (the variants below).
+  // The dex-entered shapes are what run on oidc-only multi-tenant rows, which have no password user at all.
   defineScenario({
     id: "dex-single-tenant-auto-select",
     description: "Dex-credentialed user with one tenant — auto-selected, no selection screen",

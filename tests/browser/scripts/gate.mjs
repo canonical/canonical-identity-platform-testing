@@ -2,35 +2,11 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * The browser-suite gate for one profile.
- *
- * Runs the full suite twice against an already-running stack, re-seeding before
- * each run, and enforces the acceptance criteria on the reporter's own counts:
- *
- *   - zero unexpected failures
- *   - zero flaky (a test that only passes on retry is a failure; retries are
- *     pinned to 0 in playwright.config.ts, so this should be structurally
- *     impossible — it is asserted anyway)
- *   - zero UNJUSTIFIED skips
- *   - the same set of tests executed in both runs
- *
- * On skips: a profile deliberately deploys a subset of the platform, so a
- * scenario that needs hook-service cannot run on `core`, and one that needs a
- * credential nobody supplied cannot run anywhere. Those are the `requires:`
- * system working. What must never happen is a test skipping for a reason that
- * is really a quarantine — a disabled assertion, an unimplemented flow, a guard
- * that always fires. So a skip is allowed only when its reason matches a
- * declared capability gate, and `scripts/coverage-union.mjs` separately proves
- * that every test executes on at least one profile.
- *
- * Static checks cannot substitute for this: `--list` never runs beforeEach, so
- * it cannot see runtime `test.skip(condition, ...)` calls, and grepping the
- * source cannot tell a capability gate from a quarantine tag. Only the executed
- * run knows what actually happened.
- *
- * Usage: node scripts/gate.mjs [--runs N] [--coverage-out FILE] [-- <playwright args>]
- */
+// Runs the suite `--runs` times (default 2) against a running stack, re-seeding before each run.
+// Exit 1 on any unexpected failure, any flaky test (retries are pinned to 0), any skip whose reason
+// is not in JUSTIFIED_SKIP, an executed set or seed shape that differs between runs, or collection
+// drift from expected-tests.json. Exit 2 on bad arguments.
+// Usage: node scripts/gate.mjs [--runs N] [--coverage-out FILE] [-- <playwright args>]
 
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
@@ -69,9 +45,6 @@ function collectTests(report) {
           ...(testCase.annotations ?? []),
           ...(testCase.results ?? []).flatMap((r) => r.annotations ?? []),
         ];
-        // Failure evidence rides along: without it a run-1-only failure
-        // leaves nothing behind once run 2 has overwritten test-results/
-        // (S-10 lost three instances that way).
         const failed = (testCase.results ?? []).filter((r) => r.status !== "passed" && r.status !== "skipped");
         results.push({
           id: `${spec.file} › ${spec.title}`,
@@ -96,13 +69,9 @@ function collectTests(report) {
   return results;
 }
 
-// ── Expected-collection manifest ────────────────────────────────────────────
-// The reporter's own numbers only describe the tests that WERE collected, and
-// the matrix's declaration-drift check covers tier A alone — so a tier-B spec
-// that stops being collected (a bad `testMatch`, a file rename, a top-level
-// throw during load) disappears from every count without failing anything.
-// `expected-tests.json` is the checked-in answer to "how many tests should this
-// tree collect, per file", and the gate diffs against it.
+// --- Expected-collection manifest ---
+// A tier-B spec that stops being collected (bad `testMatch`, rename, load throw) vanishes from
+// every count; expected-tests.json is the checked-in per-file count the gate diffs against.
 
 /** Per-spec-file collected-test counts, from the whole collected set. */
 export function countByFile(tests) {
@@ -114,14 +83,7 @@ export function countByFile(tests) {
   return counts;
 }
 
-/** Differences between the collected set and expected-tests.json, one line each.
- *
- *  An expected value may be a NUMBER (the file collects the same set on every
- *  profile) or an ARRAY of numbers (the file's collection legitimately varies —
- *  `oidc.spec.ts` picks its scenario suite at collection time from the declared
- *  `oidc_webauthn_sequencing_enabled`, so it collects one count with sequencing
- *  off and a different one with it on). An array still catches what this exists
- *  to catch: a file collecting 0, or any count nobody declared. */
+/** Drift lines vs expected-tests.json; a value is a number or an array of allowed counts. */
 export function manifestDrift(tests, manifestPath) {
   const expected = JSON.parse(readFileSync(manifestPath, "utf8")).files;
   const actual = countByFile(tests);
@@ -139,9 +101,8 @@ export function manifestDrift(tests, manifestPath) {
   return drift;
 }
 
-// ── Entry ───────────────────────────────────────────────────────────────────
-// Main-guarded so tests can import this module (and its allow-list) without
-// running a gate (mirrors matrix/run-row.mjs).
+// --- Entry ---
+// Main-guarded so tests can import the allow-list without running a gate.
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
 
@@ -151,12 +112,8 @@ const runResults = [];
 for (let attempt = 1; attempt <= runs; attempt++) {
   console.log(`\n── browser run ${attempt}/${runs} ──`);
 
-  // Re-seed before every run. Several scenarios permanently mutate their
-  // identity — verification marks it verified, registration deletes and
-  // recreates it — so a second run against the first run's leftovers is not a
-  // repeat of the same experiment. The suite's contract is that the seeder owns
-  // all admin-API state and specs are browser-only, so resetting belongs here
-  // rather than in per-scenario cleanup hooks.
+  // Re-seed before every run: several scenarios permanently mutate their identity, so a run
+  // against the previous run's leftovers is not the same experiment.
   const seed = spawnSync(
     "npx",
     ["tsx", "seeder/seed.ts", "--fresh", "--profile", profile],
@@ -170,16 +127,8 @@ for (let attempt = 1; attempt <= runs; attempt++) {
   }
   console.log(`seeded profile ${profile}`);
 
-  // Fingerprint the SHAPE of the seed each run consumes. When two runs
-  // disagree the first question is always "did they see the same seeded
-  // state?", and re-deriving that afterwards is guesswork.
-  //
-  // Hashing the file itself is useless: every `--fresh` seed mints new
-  // identity UUIDs, so the bytes differ on every run by design. What must NOT
-  // differ is the shape the scenarios gate on — which archetypes exist and
-  // which credentials each one carries. `totpSecret` present-vs-null is
-  // precisely the kind of difference that once produced an unexplained
-  // one-run divergence, so it is projected here.
+  // Fingerprint the seed SHAPE (which archetypes exist, which credentials they carry), not the
+  // bytes: every `--fresh` seed mints new identity UUIDs.
   let manifestFingerprint = "<unreadable>";
   try {
     const manifest = JSON.parse(
@@ -201,17 +150,13 @@ for (let attempt = 1; attempt <= runs; attempt++) {
   }
   console.log(`manifest shape ${manifestFingerprint}`);
 
-  // Each run keeps its own artifact directory: Playwright wipes its output
-  // dir on start, so with a shared one run 2 destroys run 1's traces —
-  // exactly the evidence a run-1-only failure needs.
+  // Per-run output dir: Playwright wipes its output dir on start.
   const run = spawnSync(
     "npx",
     ["playwright", "test", "--reporter=json", `--output=test-results/run-${attempt}`, ...extraArgs],
     { env: process.env, encoding: "utf8", maxBuffer: 64 * 1024 * 1024 },
   );
-  // The raw report is the whole evidence for a run-1-vs-run-2 comparison
-  // (per-test durations, error bodies, attachment paths); keep it beside
-  // the run's artifacts.
+  // Keep the raw report beside the run's artifacts.
   const reportStart = run.stdout?.indexOf("{") ?? -1;
   if (reportStart !== -1) {
     mkdirSync(`test-results/run-${attempt}`, { recursive: true });
@@ -222,8 +167,7 @@ for (let attempt = 1; attempt <= runs; attempt++) {
 
   let report;
   try {
-    // Playwright's JSON reporter writes to stdout, but tooling noise can precede
-    // it — parse from the first brace rather than assuming the whole stream.
+    // Tooling noise can precede the JSON report; parse from the first brace.
     const start = run.stdout?.indexOf("{") ?? -1;
     report = JSON.parse(start === -1 ? "{}" : run.stdout.slice(start));
   } catch {
@@ -302,12 +246,7 @@ if (new Set(executedSets).size > 1) {
   );
 }
 
-// A differing seed SHAPE between runs breaks the premise of running twice: the
-// two runs are then not the same experiment, and any executed-set difference
-// above would be explained by the input rather than by nondeterminism in the
-// suite. Identity UUIDs legitimately change per seed and are excluded from the
-// fingerprint; what is compared is which archetypes exist and what credentials
-// they carry.
+// A differing seed shape means the runs are not the same experiment.
 const fingerprints = runResults.map((r) => r.manifestFingerprint);
 if (new Set(fingerprints).size > 1) {
   failures.push(
@@ -316,9 +255,7 @@ if (new Set(fingerprints).size > 1) {
   );
 }
 
-// Pass-through playwright args (--project, --grep, a file path) deliberately
-// narrow collection, so the manifest cannot describe that run. The Makefile
-// path passes none, which is the path CI gates on.
+// Pass-through playwright args narrow collection, so the manifest cannot describe that run.
 if (extraArgs.length > 0) {
   console.log(`manifest diff skipped — custom playwright args narrow collection (${extraArgs.join(" ")})`);
 } else {

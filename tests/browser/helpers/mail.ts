@@ -1,18 +1,8 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * Mailslurper helpers.
- *
- * Reads mail from Mailslurper's JSON service API (:4437) instead of driving
- * its web UI (:4436): no browser page, no fixed sleeps.
- *
- * Mailslurper keeps mail for the lifetime of the stack and the recovery
- * scenarios reuse one identity on every run, so "newest message for this
- * address" is not sufficient — a stale code would be submitted and rejected.
- * Callers take a `mailCursor()` before triggering the send and pass it back
- * in, turning the wait into "a message that did not exist yet".
- */
+// Reads Mailslurper's JSON API (:4437). Mail persists for the stack's lifetime and
+// identities are reused, so callers snapshot a `mailCursor()` before the send.
 
 import { expect } from "@playwright/test";
 import { MAIL_API_URL } from "./config";
@@ -28,7 +18,6 @@ interface MailItem {
   body: string;
 }
 
-/** Newest-first messages addressed to `recipient`. */
 async function listMail(recipient: string): Promise<MailItem[]> {
   const res = await fetch(`${MAIL_API_URL}/mail`, {
     headers: { Accept: "application/json" },
@@ -43,24 +32,12 @@ async function listMail(recipient: string): Promise<MailItem[]> {
     .sort((a, b) => b.dateSent.localeCompare(a.dateSent));
 }
 
-/**
- * Snapshot the mailbox for `recipient`. Take this *before* the action that
- * triggers the email, and pass the result to getRecoveryCode /
- * getVerificationCode so stale mail from earlier runs is skipped.
- */
 export async function mailCursor(recipient: string): Promise<MailCursor> {
   return new Set((await listMail(recipient)).map((m) => m.id));
 }
 
-/**
- * Poll until a message to `recipient` matching `subject` arrives that is not
- * in `seen`, then return its numeric code.
- *
- * The code is taken from the SUBJECT ("Use code NNNNNN to …"), which contains
- * exactly one number. Bodies are not reliable: some carry a second unrelated
- * 6-digit value alongside the code, so a body regex can silently return the
- * wrong one and the flow then rejects it as "Verification code incorrect".
- */
+// Code is taken from the subject ("Use code NNNNNN to …"); bodies can carry a
+// second unrelated 6-digit value, so a body regex may return the wrong one.
 export async function waitForMailCode(opts: {
   recipient: string;
   subject: RegExp;
@@ -91,10 +68,7 @@ export async function waitForMailCode(opts: {
   return code!;
 }
 
-/** Kratos courier subjects, as sent by the running stack. */
 export const MAIL_SUBJECTS: Record<"recovery" | "verification", RegExp> = {
-  // "Use code NNNNNN to recover access to your account"
   recovery: /recover access to your account/i,
-  // "Use code NNNNNN to verify your account"
   verification: /verify your account/i,
 };

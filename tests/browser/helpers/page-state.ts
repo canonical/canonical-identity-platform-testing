@@ -1,38 +1,16 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * Page state detection for the Identity Platform login UI.
- *
- * The login-ui serves multiple page states on the same URL (/ui/login?flow=...).
- * This module provides pure async functions that detect the current page state
- * by inspecting the DOM using multiple signals: URL, page title, Kratos UI
- * node groups, and input names.
- *
- * Moved from machines/page-detectors.ts as part of removing the XState
- * model-based testing layer. The detection logic is still useful for
- * writing assertions in regular Playwright tests.
- */
+/** DOM-based page-state detection for login-ui, which serves many states on one URL (/ui/login?flow=...). */
 
 import { Page, expect } from "@playwright/test";
 import { DEX_URL } from "./config";
 
-// ---------------------------------------------------------------------------
-// Probes
-// ---------------------------------------------------------------------------
+// --- Probes ---
 
-/**
- * Read the page title (<h1>) with a hard bound.
- *
- * detectPageState() runs inside assertPageState()'s toPass() poll loop, so a
- * probe must sample and fail fast, never wait. An unbounded locator call
- * inherits `use.actionTimeout` (10s), which is exactly the poll deadline — so
- * a single missing <h1> consumes the entire budget, the predicate never
- * completes even once, and the error reports the initialisers ("unknown", an
- * empty URL) rather than anything observed. The OIDC consumer callback page
- * has no <h1> at all, so every transition ending there could hang a probe that
- * started on the page being navigated away from. Waiting is toPass()'s job.
- */
+// Probes run inside assertPageState()'s toPass() poll, so they must sample and fail fast: an
+// unbounded locator call inherits actionTimeout (10s), the whole poll deadline. The OIDC
+// consumer callback page has no <h1> at all.
 const TITLE_PROBE_TIMEOUT_MS = 500;
 
 async function pageTitleText(page: Page): Promise<string> {
@@ -45,9 +23,7 @@ async function pageTitleText(page: Page): Promise<string> {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Page State Types (discriminated union)
-// ---------------------------------------------------------------------------
+// --- Page state types ---
 
 export type PageState =
   | { type: "login-email" }
@@ -88,20 +64,11 @@ export type PageState =
   | { type: "manage-details" }
   | { type: "unknown" };
 
-/**
- * String literal union of all page state type values.
- * Useful for scenario definitions and the action resolver.
- */
 export type PageStateType = PageState["type"];
 
-// ---------------------------------------------------------------------------
-// Individual detection helpers
-// ---------------------------------------------------------------------------
+// --- Login-page detectors (/ui/login) ---
 
-/**
- * Check if the page is the identifier-first login step (email input only).
- * Signals: title "Sign in" + input[name="identifier"] visible + no password input.
- */
+/** "Sign in" title + email input, no password input. */
 async function isIdentifierFirstPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/login")) return false;
@@ -109,7 +76,6 @@ async function isIdentifierFirstPage(page: Page): Promise<boolean> {
   const titleText = await pageTitleText(page);
   if (!titleText?.includes("Sign in")) return false;
 
-  // Identifier-first has the email input but NOT the password input
   const hasIdentifier = await page
     .getByLabel(/e-?mail|identifier/i)
     .first()
@@ -124,13 +90,9 @@ async function isIdentifierFirstPage(page: Page): Promise<boolean> {
   return hasIdentifier && !hasPassword;
 }
 
-/**
- * Check if the page is the password login step (1FA).
- * Signals: password input visible + no TOTP/WebAuthn groups.
- */
+/** Password input visible, no TOTP input or security-key button. */
 async function isPasswordPage(page: Page): Promise<boolean> {
   const url = page.url();
-  // The password page is always under /login in the login-ui
   if (!url.includes("/login")) return false;
 
   const hasPassword = await page
@@ -140,7 +102,6 @@ async function isPasswordPage(page: Page): Promise<boolean> {
     .catch(() => false);
   if (!hasPassword) return false;
 
-  // Make sure it's not a TOTP or WebAuthn verify page (same URL, different UI)
   const hasTotpInput = await page
     .getByLabel(/totp|authenticator|authentication code/i)
     .first()
@@ -154,10 +115,7 @@ async function isPasswordPage(page: Page): Promise<boolean> {
   return !hasTotpInput && !hasWebAuthnBtn;
 }
 
-/**
- * Check if the page is the TOTP verification step (2FA).
- * Signals: title "Verify your identity" + TOTP input or node group "totp".
- */
+/** "Verify your identity" title + TOTP input or data-group="totp". */
 async function isTotpVerifyPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/login")) return false;
@@ -165,7 +123,6 @@ async function isTotpVerifyPage(page: Page): Promise<boolean> {
   const titleText = await pageTitleText(page);
   if (!titleText?.includes("Verify your identity")) return false;
 
-  // Check for TOTP-specific elements
   const hasTotpInput = await page
     .getByLabel(/totp|authenticator|authentication code/i)
     .first()
@@ -179,19 +136,8 @@ async function isTotpVerifyPage(page: Page): Promise<boolean> {
   return hasTotpInput || hasTotpGroup;
 }
 
-/**
- * Check if the page is the WebAuthn verification step (2FA).
- *
- * Detects the Kratos node, not its label. The second-factor trigger is
- * `<button name="webauthn_login_trigger">`, whose text comes from a Kratos
- * message that login-ui only rewrites when OIDC sequencing is on — so no fixed
- * label string is reliable across profiles.
- *
- * The h1 is deliberately not checked: it reads "Verify your identity" only when
- * the flow also carries a TOTP node, and names the client for a webauthn-only
- * identity. The password guard keeps the first-factor page from being misread
- * if Kratos ever emits a webauthn node alongside it.
- */
+/** `<button name="webauthn_login_trigger">` with no password input. The button label and
+ *  the h1 both vary by profile/flow, so neither is checked. */
 async function isWebAuthnVerifyPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/login")) return false;
@@ -209,19 +155,14 @@ async function isWebAuthnVerifyPage(page: Page): Promise<boolean> {
     .catch(() => false);
 }
 
-/**
- * Check if the page is the backup code verification step.
- * Signals: URL param use_backup_code or lookup_secret group visible.
- */
+/** URL param use_backup_code, or a lookup_secret input / data-group. */
 async function isBackupCodeVerifyPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/login")) return false;
 
-  // Check URL parameter
   const urlObj = new URL(url);
   if (urlObj.searchParams.get("use_backup_code")) return true;
 
-  // Check for lookup_secret group elements
   const hasLookupSecret = await page
     .getByLabel(/backup|recovery|lookup/i)
     .first()
@@ -229,7 +170,6 @@ async function isBackupCodeVerifyPage(page: Page): Promise<boolean> {
     .catch(() => false);
   if (hasLookupSecret) return true;
 
-  // Also check for data-group attribute
   const hasLookupGroup = await page
     .locator('[data-group="lookup_secret"]')
     .isVisible()
@@ -238,14 +178,9 @@ async function isBackupCodeVerifyPage(page: Page): Promise<boolean> {
   return hasLookupGroup;
 }
 
-// ---------------------------------------------------------------------------
-// Recovery flow detection helpers
-// ---------------------------------------------------------------------------
+// --- Recovery flow detectors ---
 
-/**
- * Check if the page is the recovery email entry form.
- * Signals: URL /reset_email + title "Enter an email to reset your password" + email input.
- */
+/** /reset_email + "Enter an email to reset your password" + email input. */
 async function isResetEmailPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/reset_email")) return false;
@@ -262,10 +197,7 @@ async function isResetEmailPage(page: Page): Promise<boolean> {
   return hasEmailInput;
 }
 
-/**
- * Check if the page is the recovery code entry form (after email submitted).
- * Signals: URL /reset_email + title "Enter the code you received via email" + code input.
- */
+/** /reset_email + "Enter the code you received via email" + code input. */
 async function isResetEmailCodePage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/reset_email")) return false;
@@ -282,10 +214,7 @@ async function isResetEmailCodePage(page: Page): Promise<boolean> {
   return hasCodeInput;
 }
 
-/**
- * Check if the page is the new password form (after code verified).
- * Signals: URL /reset_password + "New password" + "Confirm New password" inputs.
- */
+/** /reset_password + "New password" and "Confirm New password" inputs. */
 async function isResetPasswordPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/reset_password")) return false;
@@ -302,14 +231,9 @@ async function isResetPasswordPage(page: Page): Promise<boolean> {
   return hasNewPassword && hasConfirmPassword;
 }
 
-// ---------------------------------------------------------------------------
-// Verification flow detection helper
-// ---------------------------------------------------------------------------
+// --- Verification flow detector ---
 
-/**
- * Check if the page is the email verification form.
- * Signals: URL /verification + code input + verification heading.
- */
+/** /verification + code input. */
 async function isVerificationPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/verification")) return false;
@@ -323,14 +247,9 @@ async function isVerificationPage(page: Page): Promise<boolean> {
   return hasCodeInput;
 }
 
-// ---------------------------------------------------------------------------
-// Registration flow detection helpers
-// ---------------------------------------------------------------------------
+// --- Registration flow detectors ---
 
-/**
- * Check if the page is the registration email entry form.
- * Signals: URL /register or /register_email + title "Create an account" + email input.
- */
+/** /register + "Create an account" / "Create your account" + email input. */
 async function isRegisterEmailPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/register")) return false;
@@ -347,11 +266,7 @@ async function isRegisterEmailPage(page: Page): Promise<boolean> {
   return hasEmailInput;
 }
 
-/**
- * Check if the page is the registration password creation form.
- * Signals: URL /register (the real flow URL; /register_password is a static
- * mock the flow never navigates to) + title "Create a password" + password input.
- */
+/** /register (not /register_password, a static mock) + "Create a password" + password input. */
 async function isRegisterPasswordPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/register")) return false;
@@ -368,10 +283,7 @@ async function isRegisterPasswordPage(page: Page): Promise<boolean> {
   return hasPasswordInput;
 }
 
-/**
- * Check if the page is the registration MFA setup form.
- * Signals: URL /register_secure + title "Secure your account".
- */
+/** /register_secure + "Secure your account". */
 async function isRegisterSecurePage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/register_secure")) return false;
@@ -382,10 +294,7 @@ async function isRegisterSecurePage(page: Page): Promise<boolean> {
   return true;
 }
 
-/**
- * Check if the page is the registration complete page.
- * Signals: URL /register_complete + title "Account setup complete".
- */
+/** /register_complete + "Account setup complete". */
 async function isRegisterCompletePage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/register_complete")) return false;
@@ -396,14 +305,9 @@ async function isRegisterCompletePage(page: Page): Promise<boolean> {
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// Other page detection helpers
-// ---------------------------------------------------------------------------
+// --- Other login-ui detectors ---
 
-/**
- * Check if the page is the backup code regeneration prompt.
- * Signals: URL /backup_codes_regenerate + title "Backup code sign in successful".
- */
+/** /backup_codes_regenerate + "Backup code sign in successful". */
 async function isBackupCodeRegeneratePage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/backup_codes_regenerate")) return false;
@@ -414,10 +318,7 @@ async function isBackupCodeRegeneratePage(page: Page): Promise<boolean> {
   return true;
 }
 
-/**
- * Check if the page is the OIDC error page.
- * Signals: URL /oidc_error + title "Sign in failed".
- */
+/** /oidc_error + "Sign in failed". */
 async function isOidcErrorPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("/oidc_error")) return false;
@@ -428,14 +329,9 @@ async function isOidcErrorPage(page: Page): Promise<boolean> {
   return true;
 }
 
-// ---------------------------------------------------------------------------
-// Google OIDC detection helpers
-// ---------------------------------------------------------------------------
+// --- Google OIDC detectors ---
 
-/**
- * Check if the page is the Google sign-in email entry page.
- * Signals: URL accounts.google.com + #identifierId visible.
- */
+/** accounts.google.com + #identifierId. */
 async function isGoogleLoginPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("accounts.google.com")) return false;
@@ -448,10 +344,7 @@ async function isGoogleLoginPage(page: Page): Promise<boolean> {
   return hasIdentifier;
 }
 
-/**
- * Check if the page is the Google sign-in password entry page.
- * Signals: URL /challenge/pwd + password input visible.
- */
+/** accounts.google.com/challenge/pwd + visible password input. */
 async function isGooglePasswordPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("accounts.google.com")) return false;
@@ -466,10 +359,7 @@ async function isGooglePasswordPage(page: Page): Promise<boolean> {
   return hasPassword;
 }
 
-/**
- * Check if the page is the Google TOTP 2FA challenge page.
- * Signals: URL /challenge/totp + #totpPin visible.
- */
+/** accounts.google.com/challenge/totp + #totpPin. */
 async function isGoogleTotpPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("accounts.google.com")) return false;
@@ -483,10 +373,7 @@ async function isGoogleTotpPage(page: Page): Promise<boolean> {
   return hasTotpPin;
 }
 
-/**
- * Check if the page is the Google OAuth consent page.
- * Signals: URL /signin/oauth/legacy/consent on accounts.google.com.
- */
+/** accounts.google.com/signin/oauth/legacy/consent. */
 async function isGoogleConsentPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("accounts.google.com")) return false;
@@ -495,11 +382,7 @@ async function isGoogleConsentPage(page: Page): Promise<boolean> {
   return true;
 }
 
-/**
- * Check if the page is the Google OAuth identity confirmation page.
- * Signals: URL /signin/oauth/id on accounts.google.com.
- * This page appears after TOTP verification in some Google OAuth flows.
- */
+/** accounts.google.com/signin/oauth/id (identity confirmation after TOTP). */
 async function isGoogleConfirmIdentityPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("accounts.google.com")) return false;
@@ -508,11 +391,7 @@ async function isGoogleConfirmIdentityPage(page: Page): Promise<boolean> {
   return true;
 }
 
-/**
- * Check if the page is the Google Workspace interstitial
- * ("Don't get locked out" page).
- * Signals: URL /interstitials/ + "Don't get locked out" text.
- */
+/** accounts.google.com/interstitials/ + "Don't get locked out". */
 async function isGoogleInterstitialPage(page: Page): Promise<boolean> {
   const url = page.url();
   if (!url.includes("accounts.google.com")) return false;
@@ -526,27 +405,18 @@ async function isGoogleInterstitialPage(page: Page): Promise<boolean> {
   return hasText;
 }
 
-// ---------------------------------------------------------------------------
-// URL-based detection for distinct-URL pages
-// ---------------------------------------------------------------------------
+// --- URL-based detection ---
 
 function urlContains(page: Page, substring: string): boolean {
   return page.url().includes(substring);
 }
 
-/**
- * Is this href on the Dex IdP? Dex may be addressed by compose hostname
- * (dex:5556, resolved via host-resolver-rules) or by an arbitrary DEX_URL
- * (charmed lane: a NodePort like http://<node>:30556) — match the configured
- * base URL too. Shared with the transitions that wait for the Dex landing.
- */
+/** Matches the compose hostname (dex:5556) or the configured DEX_URL (charmed lane NodePort). */
 export function isDexUrl(href: string): boolean {
   return href.startsWith(`${DEX_URL}/`) || href === DEX_URL || /:5556|dex:/.test(href);
 }
 
-/** Does the current URL's query carry an OAuth `error` parameter?
- *  RFC 6749 §4.1.2.1 puts it in the query for the authorization-code flow;
- *  implicit-style responses put it in the fragment, so check both. */
+/** OAuth `error` in the query (RFC 6749 §4.1.2.1) or the fragment. */
 function hasCallbackError(page: Page): boolean {
   let url: URL;
   try {
@@ -559,9 +429,7 @@ function hasCallbackError(page: Page): boolean {
   return new URLSearchParams(fragment).has("error");
 }
 
-/** The hydra CLI consumer's tokenUserError template: `<h1>An error occurred</h1>`
- *  plus the error name/description. Rendered for exchange failures, where the
- *  URL still carries `?code=` rather than `?error=`. */
+/** hydra CLI consumer tokenUserError template: `<h1>An error occurred</h1>`; URL still has `?code=`. */
 async function callbackBodyShowsError(page: Page): Promise<boolean> {
   return (
     (await page
@@ -571,27 +439,9 @@ async function callbackBodyShowsError(page: Page): Promise<boolean> {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main detection function
-// ---------------------------------------------------------------------------
+// --- Main detection ---
 
-/**
- * Detect the current page state by inspecting the DOM.
- *
- * Uses a multi-signal strategy:
- * 1. URL-based detection for pages with distinct URLs
- * 2. Title + DOM inspection for pages sharing /ui/login
- *
- * Returns a discriminated union with a `type` field for exhaustive checking.
- *
- * @example
- * ```ts
- * const state = await detectPageState(page);
- * if (state.type === "login-email") {
- *   // on the identifier-first page
- * }
- * ```
- */
+/** Order matters: URL-distinct pages first, then title/DOM for states sharing /ui/login. */
 export async function detectPageState(page: Page): Promise<PageState> {
   // --- External OIDC provider pages (check by URL before login-ui) ---
 
@@ -599,7 +449,6 @@ export async function detectPageState(page: Page): Promise<PageState> {
   const onDex = isDexUrl(currentUrl);
   const hasGoogle = currentUrl.includes("accounts.google.com");
 
-  // Google OIDC pages — check specific page type
   if (hasGoogle) {
     if (await isGoogleTotpPage(page)) {
       return { type: "provider:google:totp" };
@@ -619,13 +468,10 @@ export async function detectPageState(page: Page): Promise<PageState> {
     if (await isGoogleLoginPage(page)) {
       return { type: "provider:google:login" };
     }
-    // On Google but can't identify the specific page
     return { type: "unknown" };
   }
 
   if (onDex) {
-    // On Dex's page — check if it's the login form or consent
-    // Use multiple signals: #login input, heading text, or form action
     const hasLoginForm =
       (await page
         .locator("#login")
@@ -643,15 +489,9 @@ export async function detectPageState(page: Page): Promise<PageState> {
   // --- Distinct-URL pages (check first, they're unambiguous) ---
 
   if (urlContains(page, "/callback?")) {
-    // A callback carrying `error=` is an OAuth FAILURE, not a completed flow.
-    // Detecting it as `oidc-callback` made `/callback?error=access_denied`
-    // satisfy every final-state check, so a consent/accept failure at the last
-    // step recorded a pass. Distinct terminal state instead.
+    // `?error=` (RFC 6749) or the consumer's rendered error page (a code replay keeps
+    // `?code=`) is an OAuth failure, not a completed flow.
     if (hasCallbackError(page)) return { type: "oidc-callback-error" };
-    // Second error presentation: a code REPLAY keeps `?code=` in the URL but
-    // the consumer fails the exchange and renders its error page ("Unable to
-    // exchange code…", "States do not match"). URL sniffing alone misread
-    // that as a completed flow — check the rendered surface too.
     if (await callbackBodyShowsError(page)) return { type: "oidc-callback-error" };
     return { type: "oidc-callback" };
   }
@@ -661,10 +501,8 @@ export async function detectPageState(page: Page): Promise<PageState> {
   }
 
   if (urlContains(page, "/ui/setup_secure")) {
-    // Two DOM shapes share this URL (observed 2026-08-31 on login-ui:stable):
-    // TOTP already linked renders only the "Unlink TOTP Authenticator App"
-    // button; enrolment renders the QR + "Verify code" form. URL alone cannot
-    // split them, and the unlink journey needs both as distinct states.
+    // TOTP already linked renders only the "Unlink TOTP Authenticator App" button;
+    // enrolment renders the QR + "Verify code" form.
     const unlinkVisible = await page
       .getByRole("button", { name: "Unlink TOTP Authenticator App" })
       .isVisible()
@@ -687,30 +525,19 @@ export async function detectPageState(page: Page): Promise<PageState> {
     return { type: "setup-complete" };
   }
 
-  // ── Device flow pages (RFC 8628) ─────────────────────────────────────────
-  // /ui/device_code: "Enter code to continue" + the user-code textbox (the
-  // code arrives prefilled via hydra's verification_uri_complete).
-  // /ui/device_complete: "Sign in successful … successfully connected".
   if (urlContains(page, "/ui/device_code")) {
     return { type: "device-code" };
   }
   if (urlContains(page, "/ui/device_complete")) {
     return { type: "device-complete" };
   }
-  // Connected accounts (settings nav): own URL, two shapes — per-provider
-  // "Connect" when nothing is linked, "Disconnect" rows when something is
-  // (S10 item 15; observed 2026-09-01).
   if (urlContains(page, "/ui/manage_connected_accounts")) {
     return { type: "connected-accounts" };
   }
-  // No /ui/consent detection: login-ui auto-accepts every consent request
-  // (remember=true, all scopes), so the page is unreachable and coverage was
-  // decided against (docs/testing-spec.md §10 item 12). The provider consent
-  // states above are third-party IdP surfaces, not this page.
+  // No /ui/consent state: login-ui auto-accepts every consent request, so the page is
+  // unreachable (docs/testing-spec.md §10 item 12).
 
-  // Self-serve account page. login-ui lands here whenever a flow is initialised
-  // while a satisfying session already exists (handleFlowError:
-  // session_already_available -> ./manage_details).
+  // login-ui lands here when a flow is initialised with a satisfying session already present.
   if (urlContains(page, "/ui/manage_details")) {
     return { type: "manage-details" };
   }
@@ -765,7 +592,6 @@ export async function detectPageState(page: Page): Promise<PageState> {
 
   // --- Same-URL pages (/ui/login) ---
 
-  // Tenant selection: distinct heading
   const hasTenantHeading = await page
     .getByRole("heading", { name: "Select a tenant" })
     .isVisible()
@@ -774,27 +600,22 @@ export async function detectPageState(page: Page): Promise<PageState> {
     return { type: "tenant-selection" };
   }
 
-  // Backup code verify: URL param or lookup_secret elements
   if (await isBackupCodeVerifyPage(page)) {
     return { type: "login-backup-code-verify" };
   }
 
-  // TOTP verify: "Verify your identity" + TOTP input
   if (await isTotpVerifyPage(page)) {
     return { type: "login-totp-verify" };
   }
 
-  // WebAuthn verify: "Verify your identity" + WebAuthn button
   if (await isWebAuthnVerifyPage(page)) {
     return { type: "login-webauthn-verify" };
   }
 
-  // Identifier-first: "Sign in" + email input, no password
   if (await isIdentifierFirstPage(page)) {
     return { type: "login-email" };
   }
 
-  // Password: password input visible
   if (await isPasswordPage(page)) {
     return { type: "login-password" };
   }
@@ -802,33 +623,19 @@ export async function detectPageState(page: Page): Promise<PageState> {
   return { type: "unknown" };
 }
 
-// ---------------------------------------------------------------------------
-// State assertion helper
-// ---------------------------------------------------------------------------
+// --- State assertion ---
 
-/**
- * Assert that the page is in the expected state.
- *
- * @example
- * ```ts
- * await assertPageState(page, "login-email");
- * ```
- */
 export async function assertPageState(
   page: Page,
   expected: PageState["type"],
 ): Promise<void> {
-  // The login-ui is a React SPA — after navigation the shell loads first,
-  // then React mounts and renders the form.  Use Playwright's toPass()
-  // to poll the detection function until the SPA has rendered enough
-  // to be identifiable.  No fixed sleeps.
+  // login-ui is a React SPA: poll until it has rendered enough to identify; no fixed sleeps.
   let lastActual: string = "unknown";
   let lastUrl: string = "";
   let lastError: string = "";
   try {
     await expect(async () => {
-      // Capture the URL FIRST. If detection ever stalls, the error must still
-      // report where the browser actually was rather than the initialisers.
+      // Capture the URL first so a stalled detection still reports where the browser was.
       try {
         lastUrl = page.url().substring(0, 100);
       } catch {

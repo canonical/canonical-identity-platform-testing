@@ -1,8 +1,7 @@
 services:
   hook-service-migrate:
     image: ghcr.io/canonical/hook-service:stable
-    # The migrate subcommand takes --dsn as a flag; it does not read the DSN
-    # env var the serve command uses.
+    # `migrate` takes --dsn as a flag; it does not read the serve command's DSN env var.
     command: exec hook-service migrate --dsn postgres://hooks:hooks@postgres:5432/hooks?sslmode=disable
     depends_on:
       postgres:
@@ -30,9 +29,7 @@ services:
       - AUTHENTICATION_ISSUER=http://localhost:4444
       - AUTHENTICATION_JWKS_URL=http://hydra:4444/.well-known/jwks.json
       - AUTHENTICATION_REQUIRED_SCOPE=hook-service:admin
-      # Shared secret for Hydra's token hook. hook-service only installs its
-      # hook auth middleware when this is non-empty; the value must match
-      # oauth2.token_hook.auth.config.value in docker/hydra/hydra.yml.
+      # Token-hook shared secret; must match oauth2.token_hook.auth.config.value in docker/hydra/hydra.yml.
       - API_TOKEN=hook-service-token
     depends_on:
       hook-service-migrate:
@@ -68,13 +65,12 @@ services:
       - KRATOS_PUBLIC_URL=http://kratos:4433
       - KRATOS_ADMIN_URL=http://kratos:4434
       - HYDRA_ADMIN_URL=http://hydra:4445
-      # No trailing slash: login-ui builds its CSP by concatenating BASE_URL with
-      # "/.well-known/webauthn.js", so a trailing slash yields a double-slashed
-      # script-src that cannot match the real script URL — silently CSP-blocking
-      # Ory's WebAuthn helper and breaking every security-key ceremony. Matches
-      # identity-platform-login-ui-operator, which sets scheme://host with no path.
+      # No trailing slash: login-ui builds its CSP script-src by concatenating
+      # BASE_URL with "/.well-known/webauthn.js"; a double slash silently
+      # CSP-blocks Ory's WebAuthn helper and breaks every security-key ceremony.
       - BASE_URL=http://localhost
       - PORT=4455
+      # Throwaway local-stack secret: this compose stack is never exposed beyond localhost.
       - COOKIES_ENCRYPTION_KEY=WrfOcYmVBwyduEbKYTUhO4X7XVaOQ1wF
       - LOG_LEVEL=debug
       - TRACING_ENABLED=false
@@ -126,15 +122,13 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.services.user-verification-service.loadbalancer.server.port=8080"
-      # The service registers /api/v0/verify (and /ui/registration_error);
-      # PathPrefix(/api/v0/verification) matches nothing it serves (C-14).
+      # The service registers /api/v0/verify; PathPrefix(/api/v0/verification) matches nothing.
       - "traefik.http.routers.user-verification-service.rule=PathPrefix(`/api/v0/verify`)"
       - "traefik.http.routers.user-verification-service.entryPoints=web"
       - "traefik.http.routers.user-verification-service.service=user-verification-service"
 
   tenant-service-migrate:
-    # tenant-service ships no auto-migration; without this, fresh volumes 500
-    # with SQLSTATE 42P01. Same PD-1 digest pin as the service.
+    # tenant-service ships no auto-migration; fresh volumes 500 (SQLSTATE 42P01) without this.
     image: ghcr.io/canonical/tenant-service:v0.3.1@sha256:2aef7ec80703d7f460665413a0a9d0d9f2c872c5c25076c262d035813a0ed62d
     command: exec tenant-service migrate --dsn postgres://tenants:tenants@postgres:5432/tenants?sslmode=disable
     depends_on:
@@ -147,11 +141,9 @@ services:
       - "traefik.enable=false"
 
   tenant-service:
-    # v0.3.1 is the earliest release containing canonical/tenant-service@e2cb03b
-    # "fix: add interceptors" — cmd/serve.go:194-196 excludes
-    # /identity.platform.api.tenant.TenantService/LookupTenants from the auth interceptor, which
-    # login-ui's credential-less gRPC client needs. Anything older 500s every
-    # login when multi-tenancy is on (PD-1). Never pin below it.
+    # Never pin below v0.3.1: it is the first release excluding LookupTenants
+    # from the gRPC auth interceptor (canonical/tenant-service@e2cb03b
+    # cmd/serve.go:194-196), which login-ui's credential-less client needs.
     image: ghcr.io/canonical/tenant-service:v0.3.1@sha256:2aef7ec80703d7f460665413a0a9d0d9f2c872c5c25076c262d035813a0ed62d
     ports:
       - "8081:8000"
@@ -208,11 +200,11 @@ services:
     command: dex serve /etc/dex/config.yml
     # dex reads its static accounts ONCE at start, and a bind-mounted file's
     # content change never recreates the container (compose v5 implements
-    # file `configs:` as bind mounts too and does not hash their content —
-    # measured 2026-09-02), so a newly added dex account stayed invisible
-    # until a manual `docker restart`. The Makefile stamps the config's
-    # content hash into the environment; a changed hash is a changed service
-    # definition, which `up` recreates.
+    # file `configs:` as bind mounts too and does not hash their content), so
+    # a newly added dex account stays invisible until the container is
+    # recreated. The Makefile stamps the config's content hash into the
+    # environment; a changed hash is a changed service definition, which
+    # `up` recreates.
     environment:
       - DEX_CONFIG_SHA=${DEX_CONFIG_SHA:-unset}
     healthcheck:

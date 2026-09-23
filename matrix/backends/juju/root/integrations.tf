@@ -1,12 +1,8 @@
-# Relation topology, copied from iam-bundle-integration/examples/multitenancy
-# (always-on set) plus examples/user-verification (UVS set). Row-toggled
-# relations carry `count` driven by the row variables — these ARE the
-# presence dimensions in the juju backend.
-#
-# Optional-app infra relations are additionally gated by `apps_present`
-# (attach mode: never create relations for apps a shared cluster lacks).
-# Row toggles conjoin with presence; the runner refuses row/cluster
-# mismatches loudly before terraform ever runs.
+# Relation topology from iam-bundle-integration/examples/multitenancy plus
+# examples/user-verification. Row-toggled relations carry `count` driven by
+# the row variables: these ARE the presence dimensions in the juju backend.
+# Optional-app relations are additionally gated by `apps_present` (attach mode
+# never creates relations for apps a shared cluster lacks).
 
 # ─── Core offers ─────────────────────────────────────────────────────────────
 
@@ -427,8 +423,7 @@ resource "juju_integration" "hook_service_hydra_token_hook" {
   }
 }
 
-# tenant_id claim: hook-service widens its claim list iff it can see
-# tenant-service — the cross-charm pair the survey flagged.
+# hook-service widens its claim list with tenant_id iff it can see tenant-service.
 resource "juju_integration" "hook_service_tenant_service_info" {
   count      = var.relate_tenant && var.relate_hook && var.apps_present.tenant_service && var.apps_present.hook_service ? 1 : 0
   model_uuid = juju_model.iam.uuid

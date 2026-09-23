@@ -2,30 +2,17 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 //
-// Controller guard for the juju matrix lane.
-//
-// This workstation has a PRODUCTION JIMM controller registered alongside the
-// local microk8s one. A presence-only `JUJU_CONTROLLER` check is not enough:
-//
-//   1. terraform-provider-juju never reads JUJU_CONTROLLER. With none of
-//      JUJU_CONTROLLER_ADDRESSES/JUJU_USERNAME/JUJU_PASSWORD/JUJU_CA_CERT/
-//      JUJU_CLIENT_ID/JUJU_CLIENT_SECRET set it shells out to
-//      `juju show-controller`, so the controller is bound TRANSITIVELY
-//      through the CLI's own resolution order.
-//   2. That order is JUJU_MODEL > JUJU_CONTROLLER > `juju switch` state, so a
-//      stray JUJU_MODEL silently outranks a correctly exported
-//      JUJU_CONTROLLER.
-//   3. JUJU_CONTROLLER_ADDRESSES bypasses the CLI fallback entirely — the
-//      provider then talks to whatever that env names, and no CLI-visible
-//      state reflects it.
-//
-// So the guard checks the RESOLVED name (from `juju show-controller`) against
-// an allowlist of one (MATRIX_ALLOWED_CONTROLLER, default microk8s-localhost)
-// and refuses the two envs that can route around the check.
-//
-// Everything except the single spawnSync below is pure and unit-tested
-// (matrix/tests/controller-guard.test.mjs) — reject-paths are NEVER proven by
-// running a real entrypoint against a disallowed controller.
+// Controller guard for the juju matrix lane. This workstation has a PRODUCTION
+// JIMM controller registered alongside the local microk8s one, and a
+// presence-only JUJU_CONTROLLER check is not enough:
+//   1. terraform-provider-juju never reads JUJU_CONTROLLER; without the
+//      JUJU_CONTROLLER_ADDRESSES/JUJU_USERNAME/... envs it shells out to
+//      `juju show-controller`, binding the controller through the CLI's order.
+//   2. That order is JUJU_MODEL > JUJU_CONTROLLER > `juju switch` state.
+//   3. JUJU_CONTROLLER_ADDRESSES bypasses the CLI fallback entirely.
+// So the guard checks the RESOLVED name against an allowlist of one
+// (MATRIX_ALLOWED_CONTROLLER, default microk8s-localhost) and refuses the two
+// envs that route around it. Reject paths are unit-tested, never proven live.
 //
 // Read-only self-test:  JUJU_CONTROLLER=<ctl> node matrix/controller-guard.mjs --check
 
@@ -35,8 +22,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 
 export const DEFAULT_ALLOWED_CONTROLLER = "microk8s-localhost";
 
-/** Pure: env preconditions, checked BEFORE any process is spawned.
- *  Returns {ok, reason}. */
+/** Env preconditions, checked BEFORE any process is spawned. */
 export function validateControllerEnv(env) {
   if (!env.JUJU_CONTROLLER) {
     return {
@@ -65,10 +51,8 @@ export function validateControllerEnv(env) {
   return { ok: true, reason: "" };
 }
 
-/** Pure: check the resolved controller name against the allowlist of one.
- *  `showControllerJson` is the parsed `juju show-controller --format=json`
- *  document; its single top-level key IS the resolved controller name.
- *  Malformed or empty documents fail closed. */
+/** The single top-level key of `juju show-controller --format=json` IS the
+ *  resolved controller name. Malformed or empty documents fail closed. */
 export function assertControllerPure(showControllerJson, allowed) {
   if (showControllerJson === null || typeof showControllerJson !== "object" || Array.isArray(showControllerJson)) {
     return { ok: false, resolved: null, reason: "could not parse `juju show-controller --format=json` output — failing closed" };
@@ -92,9 +76,8 @@ export function assertControllerPure(showControllerJson, allowed) {
   return { ok: true, resolved, reason: "" };
 }
 
-/** Impure wrapper: env preconditions first (no process spawned on failure),
- *  then one read-only `juju show-controller`. Exits 2 on any failure.
- *  Returns the resolved controller name. */
+/** Env preconditions, then one read-only `juju show-controller`. Exits 2 on
+ *  any failure; returns the resolved controller name. */
 export function assertController() {
   const envCheck = validateControllerEnv(process.env);
   if (!envCheck.ok) {

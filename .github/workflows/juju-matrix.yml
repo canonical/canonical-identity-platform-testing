@@ -1,0 +1,143 @@
+# Multi-configuration lane against an owned charmed deployment — design: docs/ci-spec.md §1.
+# For each row: terraform attach-apply transitions the deployment, the preflight verifies it,
+# the browser suite runs through the public ingress in the live lane with ONE out-of-band seed
+# (the SEED_MANIFEST secret); scenarios restore the identities they touch (tests/browser/framework/restore.ts).
+# Mutates the deployment: dispatch-only, behind the environment's ALLOW_ATTACH_APPLY.
+name: Juju matrix
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'Target GitHub environment (an owned deployment; never dev/stg shared with people)'
+        type: environment
+        required: true
+      rows:
+        description: 'Comma-separated rows; each needs a juju.tfvars.json and no app the deployment lacks'
+        type: string
+        required: false
+        default: 'tfdefault-oidc-only,mx-l1m1v1wsp2t0h0u0ao'
+      restore_row:
+        # Default = the shape the nightly drift gate (juju-remote.yml) plans against.
+        description: 'Row to leave the deployment on afterwards (empty = last row)'
+        type: string
+        required: false
+        default: 'canonical-internal'
+
+permissions:
+  contents: read
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  matrix:
+    name: rows on ${{ inputs.environment }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 240
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: juju-remote-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      JUJU_CONTROLLER: jimm
+      MATRIX_ALLOWED_CONTROLLER: jimm
+      MATRIX_JUJU_MODEL: ${{ vars.MATRIX_IAM_MODEL }}
+      MATRIX_JUJU_CORE_MODEL: ${{ vars.MATRIX_CORE_MODEL }}
+      JUJU_CLIENT_ID: ${{ secrets.JIMM_CLIENT_ID }}
+      JUJU_CLIENT_SECRET: ${{ secrets.JIMM_CLIENT_SECRET }}
+      TF_VAR_jimm_url: ${{ secrets.JIMM_URL }}
+      TF_VAR_jimm_client_id: ${{ secrets.JIMM_CLIENT_ID }}
+      TF_VAR_jimm_client_secret: ${{ secrets.JIMM_CLIENT_SECRET }}
+      # The public surface is the whole test interface: no admin URL ⇒ live lane, nothing seeded.
+      MATRIX_JUJU_PUBLIC: "1"
+      LOGIN_UI_URL: ${{ vars.LOGIN_UI_URL }}
+      KRATOS_PUBLIC_URL: ${{ vars.LOGIN_UI_URL }}
+      HYDRA_PUBLIC_URL: ${{ vars.LOGIN_UI_URL }}
+      KRATOS_IDENTITY_SCHEMA_ID: ${{ vars.KRATOS_IDENTITY_SCHEMA_ID }}
+      ROWS: ${{ inputs.rows }}
+      RESTORE_ROW: ${{ inputs.restore_row }}
+    steps:
+      - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3.1.2
+        with:
+          terraform_wrapper: false
+      - name: Install juju
+        run: sudo snap install juju --channel=3.6/stable
+      - name: Toolchain check
+        run: JUJU_LANE=1 make dev-check
+      - name: Enforce the attach-apply opt-in
+        env:
+          ALLOW: ${{ vars.ALLOW_ATTACH_APPLY }}
+        run: |
+          if [ "$ALLOW" != "true" ]; then
+            echo "::error::this lane transitions the deployment; set ALLOW_ATTACH_APPLY=true on an environment you own (docs/ci-spec.md §8)"
+            exit 1
+          fi
+      - name: Seed manifest from the environment secret
+        env:
+          SEED_MANIFEST: ${{ secrets.SEED_MANIFEST }}
+        run: |
+          if [ -z "$SEED_MANIFEST" ]; then
+            echo "::error::SEED_MANIFEST secret is empty — seed once out of band (tests/browser/LANES.md) and store the manifest"
+            exit 1
+          fi
+          # `runner` context is unavailable in job-level env: derive the path here and export it.
+          manifest="$RUNNER_TEMP/manifest.json"
+          umask 077; printf '%s' "$SEED_MANIFEST" > "$manifest"
+          echo "MANIFEST=$manifest" >> "$GITHUB_ENV"
+      - name: Browser toolchain
+        run: make test-browser-setup
+      - name: Register JIMM controller
+        run: |
+          target="${TF_VAR_jimm_url#*://}"
+          target="${target%%/*}"
+          juju login "$target" -c jimm
+      - name: Controller guard self-check
+        run: node matrix/controller-guard.mjs --check
+      - name: Terraform init
+        run: terraform -chdir=matrix/backends/juju/root init -input=false
+      - name: Rows
+        run: |
+          set -o pipefail
+          failed=""
+          IFS=, read -ra rows <<< "$ROWS"
+          for row in "${rows[@]}"; do
+            row="${row// /}"
+            if [ ! -f "matrix/rows/$row/juju.tfvars.json" ]; then
+              echo "::error::row '$row' has no juju artefact"; failed="$failed $row"; continue
+            fi
+            echo "::group::row $row"
+            if ! make test-matrix-row ROW="$row" BACKEND=juju ATTACH=1 2>&1 | tee -a juju-matrix-log.txt; then
+              failed="$failed $row"
+            fi
+            echo "::endgroup::"
+          done
+          if [ -n "$RESTORE_ROW" ]; then
+            echo "::group::restore deployment to $RESTORE_ROW (transition + preflight, no suite)"
+            if ! MATRIX_JUJU_BROWSER=0 make test-matrix-row ROW="$RESTORE_ROW" BACKEND=juju ATTACH=1 2>&1 | tee -a juju-matrix-log.txt; then
+              failed="$failed restore:$RESTORE_ROW"
+            fi
+            echo "::endgroup::"
+          fi
+          {
+            echo "## Juju matrix: ${{ inputs.environment }}"
+            echo '```'
+            grep -E '^(✓|✗) row|^    (unexpected|missing|unjustified)' juju-matrix-log.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          if [ -n "$failed" ]; then echo "::error::red rows:$failed"; exit 1; fi
+      - name: Upload lane log
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: juju-matrix-log
+          path: juju-matrix-log.txt
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Scrub attach artifacts and the manifest
+        if: always()
+        run: |
+          rm -rf matrix/backends/juju/root/terraform.tfstate.d
+          rm -f matrix/backends/juju/root/attach.tfvars.json matrix/backends/juju/root/imports.attach.tf.json matrix/backends/juju/root/*.tfplan "${MANIFEST:-$RUNNER_TEMP/manifest.json}"

@@ -1,15 +1,7 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * Backup recovery code setup and usage — browser E2E test.
- *
- * Ported from login-ui/ui/tests/use-backup-codes.spec.ts.
- * Tests the backup code flow: login → TOTP setup → backup codes →
- * login with backup code instead of TOTP.
- *
- * Works with any profile that includes Kratos + Hydra + login-ui.
- */
+/** Backup-code enrolment during TOTP setup, then login with a backup code instead of TOTP. */
 
 import { test, expect } from "@playwright/test";
 import { createIdentity, deleteIdentity, deleteIdentitySessions, markVerified } from "../helpers/kratos";
@@ -30,21 +22,14 @@ let identityIds: string[] = [];
 test.beforeEach(async () => {
   test.skip(
     getExecutionLane() === "live",
-    // Wording is load-bearing: the justified-skip allow-list recognises
-    // "Internal-only spec in live lane" (tests/browser/scripts/skip-allowlist.mjs),
-    // and this spec is tier B, so an off-pattern reason fails the row.
+    // Wording is load-bearing: scripts/skip-allowlist.mjs recognises "Internal-only spec in live lane".
     "Internal-only spec in live lane: runtime identity lifecycle needs the admin API",
   );
-  // Backup codes are issued as part of TOTP enrolment, which login-ui only
-  // forces where MFA is enforced — so this flow does not exist on a no-MFA
-  // profile.
   test.skip(
     !isMfaEnforced(),
     "requires MFA enforcement but profile does not enforce a second factor",
   );
-  // The flow drives TOTP enrolment specifically: it requires totp in the
-  // deployment's 2FA methods, and NOT webauthn sequencing (there the
-  // post-1FA step-up is security-key setup, so the TOTP path never renders).
+  // Needs totp in methods_2fa and no webauthn sequencing, or the TOTP path never renders.
   const m2 = activeConfig().methods_2fa ?? [];
   test.skip(
     isOidcSequencingEnabledSync() || !m2.includes("totp"),
@@ -63,13 +48,11 @@ test.afterEach(async () => {
   }
 });
 
-test("backup recovery code setup and usage", async ({ browser, context, page }) => {
+test("backup recovery code setup and usage", async ({ browser, page }) => {
   const email = uniqueEmail("backup");
   const id = await createIdentity({ email, password: PASSWORD });
   identityIds.push(id);
-  // Admin-created identities are unverified; on verification-enabled
-  // deployments the post-password login is intercepted by the
-  // "Check your email" page instead of proceeding to MFA setup.
+  // Admin-created identities are unverified; verification-enabled profiles would intercept the login.
   await markVerified(id);
 
   await startOIDCFlow(page);
@@ -77,8 +60,7 @@ test("backup recovery code setup and usage", async ({ browser, context, page }) 
   await completeTotpSetup(page);
   await expectOIDCFlowComplete(page);
 
-  // Navigate to backup codes setup via the login-ui (Traefik on port 80),
-  // not the relative path which would resolve to Kratos on port 4433.
+  // Go through login-ui (Traefik :80); a relative path would resolve to Kratos :4433.
   await page.goto(`${LOGIN_UI_URL}/ui/setup_backup_codes`);
   await clickButton(page, "Create backup codes");
 
@@ -92,7 +74,7 @@ test("backup recovery code setup and usage", async ({ browser, context, page }) 
 
   await expect(page.getByText("Account setup complete")).toBeVisible();
 
-  // Start login in a new context as user is already authenticated within the current context
+  // Fresh context: the current one is already authenticated.
   const newContext = await browser.newContext();
   const newPage = await newContext.newPage();
 

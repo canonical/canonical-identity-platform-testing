@@ -1,33 +1,20 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * Manage tenants via the tenant-service API.
- *
- * Ported from tenant-service/tests/browser/helpers/tenants.ts.
- * Uses the canonical port mapping (tenant-service on :8081).
- * For protected endpoints we need a JWT from Hydra's client-credentials flow.
- */
-
 import { TENANT_SERVICE_URL, HYDRA_PUBLIC_URL, AUTH_CLIENT_ID, AUTH_CLIENT_SECRET, requireEnv } from "./config";
 import type { Manifest, ManifestOauthClientSvc } from "../seeder/manifest-schema";
 import { getSvcClient as getManifestSvcClient } from "../framework/manifest";
 
-/**
- * Get the service (client credentials) client credentials from the manifest.
- * Returns undefined if the manifest doesn't contain client data.
- */
 export function getSvcClient(manifest: Manifest): ManifestOauthClientSvc | undefined {
   return getManifestSvcClient(manifest);
 }
 
-/** Obtain a client-credentials JWT for the tenant-service API. */
+/** Client-credentials JWT for tenant-service; explicit args, then manifest, then env vars. */
 export async function getServiceToken(
   clientId?: string,
   clientSecret?: string,
   manifest?: Manifest,
 ): Promise<string> {
-  // Prefer explicit args, then manifest, then env vars
   let cid = clientId;
   let csecret = clientSecret;
 
@@ -46,7 +33,6 @@ export async function getServiceToken(
     );
   }
 
-  // Warn if env vars disagree with manifest
   if (manifest) {
     const manifestClient = getSvcClient(manifest);
     if (manifestClient && AUTH_CLIENT_ID && AUTH_CLIENT_SECRET) {
@@ -83,7 +69,6 @@ export interface Tenant {
   name: string;
 }
 
-/** Create a tenant. Returns the tenant object. */
 export async function createTenant(
   token: string,
   name: string,
@@ -106,7 +91,7 @@ export async function createTenant(
   return data.tenant;
 }
 
-/** Delete a tenant. Idempotent. */
+/** Idempotent. */
 export async function deleteTenant(
   token: string,
   tenantId: string,
@@ -120,12 +105,8 @@ export async function deleteTenant(
   }
 }
 
-/** List every tenant (admin API, paginated).
- *
- *  `GET /api/v0/tenants?page_size&page_token` → `{tenants, next_page_token}`
- *  (tenant-service v0.2.0 openapi/openapi.swagger.json, the published artifact
- *  the compose stack pins). Used by the seeder's fresh-mode cleanup: without a
- *  real list, tenants accumulate across every gate run and matrix night. */
+// `GET /api/v0/tenants?page_size&page_token` → `{tenants, next_page_token}`
+// (tenant-service v0.2.0 openapi/openapi.swagger.json). Backs the seeder's fresh-mode cleanup.
 export async function listTenants(
   token: string,
   pageSize = 100,
@@ -150,7 +131,6 @@ export async function listTenants(
   return all;
 }
 
-/** Provision a user into a tenant (by email). */
 export async function provisionUser(
   token: string,
   tenantId: string,

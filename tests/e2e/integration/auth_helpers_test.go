@@ -13,6 +13,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/canonical/canonical-identity-platform/tests/e2e/internal/harness"
 )
 
 // AuthHelper provides JWT tokens for authenticated requests.
@@ -31,11 +33,7 @@ type AuthHelper struct {
 func NewAuthHelper() *AuthHelper {
 	clientID := envOr("AUTH_CLIENT_ID", "")
 	clientSecret := envOr("AUTH_CLIENT_SECRET", "")
-	hydraURL := envOr("HYDRA_PUBLIC_URL", "")
-	if hydraURL == "" {
-		adminURL := envOr("HYDRA_ADMIN_URL", "http://localhost:4445")
-		hydraURL = strings.Replace(adminURL, "4445", "4444", 1)
-	}
+	hydraURL := harness.HydraPublic.URL()
 
 	if clientID == "" || clientSecret == "" {
 		manifestPaths := []string{
@@ -86,7 +84,6 @@ func (a *AuthHelper) GetToken(ctx context.Context) (string, error) {
 	}
 	a.mu.RUnlock()
 
-	// Check env var override first
 	if token := os.Getenv("JWT_TOKEN"); token != "" {
 		a.mu.Lock()
 		a.cachedToken = token
@@ -148,7 +145,6 @@ func (a *AuthHelper) exchangeToken(ctx context.Context, clientID, clientSecret s
 		return "", 0, fmt.Errorf("token exchange failed (status %d): %s", resp.StatusCode, string(body))
 	}
 
-	// Parse the token response
 	var tokenResp struct {
 		AccessToken string `json:"access_token"`
 		ExpiresIn   int    `json:"expires_in"`
@@ -201,7 +197,7 @@ type HTTPTenantClient struct {
 // NewHTTPTenantClient creates a tenant client using the control repo's auth.
 func NewHTTPTenantClient() (*HTTPTenantClient, error) {
 	auth := NewAuthHelper()
-	baseURL := serviceURL("tenant-service")
+	baseURL := harness.TenantServiceHTTP.URL()
 
 	return &HTTPTenantClient{
 		baseURL: baseURL,
@@ -301,9 +297,7 @@ func (c *HTTPTenantClient) ListTenants(ctx context.Context) ([]Tenant, error) {
 
 // UpdateTenant updates a tenant's name.
 func (c *HTTPTenantClient) UpdateTenant(ctx context.Context, id, name string) error {
-	// The field mask is mandatory: tenant-service's storage layer short-circuits
-	// on an empty mask and returns 200 with the row untouched, so omitting it
-	// makes the update a silent no-op. Every other client in the platform sends one.
+	// The field mask is mandatory: an empty mask returns 200 with the row untouched.
 	payload := fmt.Sprintf(`{"tenant":{"name":%q},"update_mask":"name"}`, name)
 	req, err := authedRequest(ctx, http.MethodPatch, c.baseURL+"/api/v0/tenants/"+id, strings.NewReader(payload), c.getToken)
 	if err != nil {

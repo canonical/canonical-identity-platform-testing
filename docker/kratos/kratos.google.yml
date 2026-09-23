@@ -15,12 +15,8 @@ selfservice:
               - profile
               - email
               - offline_access
-          # Placeholder credentials: the provider must be declared for the
-          # canonical-internal shape (the suite asserts the provider SET the
-          # login flow offers), but the google journeys themselves are
-          # credential-gated and never run in the gate (known-coverage-gaps).
-          # To exercise them for real, substitute a client_id/client_secret
-          # from a Google Cloud OAuth client locally - never commit them.
+          # Placeholder credentials: the suite asserts the provider SET only;
+          # google journeys are credential-gated. Substitute real ones locally, never commit.
           - id: google
             provider: google
             client_id: 000000000000-placeholder.apps.googleusercontent.com

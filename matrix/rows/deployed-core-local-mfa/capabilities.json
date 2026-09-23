@@ -35,6 +35,6 @@
   "verification_enabled": false,
   "access_token_format": "jwt",
   "mail_api": false,
-  "backup_code_prompt_on_use": true,
+  "backup_code_prompt_on_use": false,
   "device_flow": true
 }

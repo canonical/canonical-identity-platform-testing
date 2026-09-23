@@ -1,13 +1,9 @@
 //go:build e2e
 
 // tenant-service's Kratos webhook routes (/api/v0/webhooks/registration and
-// /login), driven directly. Formerly webhook_test.go, a name that read as
-// hook-service coverage: hook-service's sole route is hydra's token hook,
-// whose contract is owned by hook-service's own suite
-// (canonical/hook-service@295273b pkg/hooks/*_test.go, tests/e2e) — this
-// repo covers only the cross-service claim that the hook's output reaches
-// the RP's tokens (login-carries-group-claim, tenantIdFromSeed) and that
-// hydra is wired to call it (preflight). See docs/testing-spec.md §10 item 8.
+// /login), driven directly. hook-service's token-hook contract is owned by its
+// own suite (canonical/hook-service@295273b pkg/hooks/*_test.go); this repo covers
+// only that the hook's output reaches RP tokens (docs/testing-spec.md §10 item 8).
 
 package integration
 
@@ -22,6 +18,8 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/canonical/canonical-identity-platform/tests/e2e/internal/harness"
 )
 
 // webhookLoginPayload mirrors the Kratos login webhook payload.
@@ -55,11 +53,8 @@ func postWebhook(ctx context.Context, baseURL, path string, body interface{}) (*
 	return client.Do(req)
 }
 
-// cleanupShadowTenant deletes the tenant the registration webhook creates.
-//
-// tenant-service names it "<email>'s Org". Without this every webhook run
-// leaks a tenant permanently: they accumulated past ListTenants' 100-row page
-// cap and started breaking unrelated tenant tests that scanned the first page.
+// cleanupShadowTenant deletes the tenant the registration webhook creates
+// ("<email>'s Org"); leaked tenants break unrelated tenant tests.
 func cleanupShadowTenant(t *testing.T, ctx context.Context, email string) {
 	t.Helper()
 
@@ -92,19 +87,15 @@ func cleanupShadowTenant(t *testing.T, ctx context.Context, email string) {
 	}
 }
 
-// TestWebhookRegistration creates a shadow tenant and membership via the
-// registration webhook. This is a cross-service test that exercises
-// hook-service → tenant-service integration.
+// TestWebhookRegistration creates a shadow tenant and membership via the registration webhook.
 func TestWebhookRegistration(t *testing.T) {
-	requireService(t, "tenant-service")
+	requireService(t, harness.TenantService)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Traefik routes PathPrefix(`/api/v0/webhooks`) to tenant-service, which is
-	// where these routes are actually registered; hook-service serves only
-	// /api/v0/hook/hydra. See docker/docker-compose.services.yml.
-	webhookURL := serviceURL("tenant-service")
+	// Traefik routes PathPrefix(`/api/v0/webhooks`) to tenant-service (docker/docker-compose.services.yml).
+	webhookURL := harness.TenantServiceHTTP.URL()
 	identityID := uuid.New().String()
 	email := fmt.Sprintf("e2e-reg-%s@test.example", identityID)
 	defer cleanupShadowTenant(t, ctx, email)
@@ -127,15 +118,12 @@ func TestWebhookRegistration(t *testing.T) {
 // TestWebhookLogin_ValidMember tests that the login webhook succeeds for a
 // registered identity with existing memberships.
 func TestWebhookLogin_ValidMember(t *testing.T) {
-	requireService(t, "tenant-service")
+	requireService(t, harness.TenantService)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	// Traefik routes PathPrefix(`/api/v0/webhooks`) to tenant-service, which is
-	// where these routes are actually registered; hook-service serves only
-	// /api/v0/hook/hydra. See docker/docker-compose.services.yml.
-	webhookURL := serviceURL("tenant-service")
+	webhookURL := harness.TenantServiceHTTP.URL()
 	identityID := uuid.New().String()
 	email := fmt.Sprintf("e2e-login-%s@test.example", identityID)
 

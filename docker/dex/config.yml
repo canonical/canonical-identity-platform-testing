@@ -1,13 +1,6 @@
-# Dex OIDC provider for browser E2E tests.
-#
-# Dex acts as an external social login provider (like Google or GitHub)
-# that Kratos can use for OIDC login. It runs inside Docker Compose
-# and is reachable from the browser via Chromium's --host-resolver-rules
-# which maps "dex" → 127.0.0.1.
-#
-# Static password user for tests:
-#   Email:    dex-user@test.example
-#   Password: dex-password
+# Dex OIDC provider for browser E2E tests: an external social-login IdP for
+# Kratos, reachable from the browser via Chromium's --host-resolver-rules
+# (dex → 127.0.0.1). All static users share the password "dex-password".
 
 issuer: http://dex:5556/dex
 
@@ -28,41 +21,29 @@ enablePasswordDB: true
 
 staticPasswords:
   - email: "dex-user@test.example"
-    # bcrypt hash of "dex-password"
     hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
     username: "Dex Test User"
     userID: "08a8684b-db88-4b73-90a9-3cd1661f5466"
-  # The account-linking collision half (S10 item 15): same email as the
-  # SEEDED KRATOS PASSWORD IDENTITY `link-user` — a dex sign-in for this
-  # address collides with the existing local account, which is the
-  # login-time linking surface. Same test password as dex-user.
+  # Same email as the seeded kratos password identity `link-user`: the login-time linking collision.
   - email: "link-user@test.example"
-    # bcrypt hash of "dex-password"
     hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
     username: "Link Test User"
     userID: "1b9c795b-ec99-4c84-a1b0-4dd2661f5467"
-  # The settings-linking half: matches the seeded `settings-link-user`
-  # kratos identity, linked and unlinked from /ui/manage_connected_accounts.
+  # Matches the seeded `settings-link-user`, linked/unlinked from /ui/manage_connected_accounts.
   - email: "settings-link-user@test.example"
-    # bcrypt hash of "dex-password"
     hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
     username: "Settings Link User"
     userID: "2c8d795b-ec99-4c84-a1b0-4dd2661f5468"
-  # Tenant journeys entered through dex (§10 item 1): the seeded
-  # `dex-single-tenant-user` / `dex-multi-tenant-user` identities carry these
-  # subjects; tenant-service memberships are keyed on the email.
+  # Tenant journeys entered through dex: seeded `dex-*-tenant-user` identities carry these subjects.
   - email: "dex-single-tenant-user@test.example"
-    # bcrypt hash of "dex-password"
     hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
     username: "Dex Single Tenant User"
     userID: "3d9e795b-ec99-4c84-a1b0-4dd2661f5469"
   - email: "dex-multi-tenant-user@test.example"
-    # bcrypt hash of "dex-password"
     hash: "$2b$10$Y7RZKnr6UGSqVhVS7E/ScO..slLLLIjQ6WlhoggCN5gxHZKRq55ma"
     username: "Dex Multi Tenant User"
     userID: "4eaf795b-ec99-4c84-a1b0-4dd2661f546a"
 
 oauth2:
-  # Skip the approval/consent screen to simplify test flows.
-  # Dex will auto-grant access after login.
+  # Auto-grant after login: no consent screen in test flows.
   skipApprovalScreen: true

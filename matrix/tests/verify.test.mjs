@@ -1,9 +1,8 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 //
-// verify.mjs robustness: behavior probes against an unreachable deployment
-// must record a failed CHECK, never crash the runner (a raw undici throw
-// once killed a --all loop mid-flight).
+// Preflight-probe robustness: behavior probes against an unreachable
+// deployment must record a failed CHECK, never crash the runner.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -12,7 +11,10 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-import { fetchJson, verifyAalBehavior, verifyHydraTokens, resetResults, recordedResults } from "../verify.mjs";
+import { fetchJson, resetResults, recordedResults } from "../verify/record.mjs";
+import { verifyAalBehavior } from "../verify/probe-aal.mjs";
+import { verifyHydraTokens } from "../verify/probe-hydra-tokens.mjs";
+import { verifyMailApi } from "../verify/probes.mjs";
 import { derive } from "../lib.mjs";
 
 // Connection refused, immediately. Ports 1 and 9 are on the WHATWG bad-port
@@ -54,10 +56,6 @@ test("fetchJson returns status 0 + error on connection refused", async () => {
   assert.equal(res.body, null);
   assert.ok(res.error && typeof res.error === "string");
 });
-// (No black-holed-address case: the abort resolves the CALLER in exactly
-// `timeout` ms — measured 300ms against TEST-NET-1 — but undici's orphaned
-// socket keeps the event loop alive ~10s until its own connect timeout,
-// which only slows tiny processes like this test file, never the runner.)
 
 test("AAL probe records a failed check when the kratos admin API is unreachable", async () => {
   const results = await probe(() => verifyAalBehavior(derive(dims()), deadUrls()));
@@ -81,6 +79,16 @@ test("AAL probe warns instead of failing when the backend has no admin URL", asy
   assert.match(results[0].detail, /no KRATOS_ADMIN_URL/);
 });
 
+test("mail probe warns when a public-ingress live lane has no MAIL_API_URL", async () => {
+  const results = await probe(() => verifyMailApi({ mail_api: true }, { publicOnly: true, mailApi: undefined, kratosAdmin: undefined }));
+  assert.deepEqual(results.map((r) => [r.ok, r.warn]), [[false, true]]);
+});
+
+test("mail probe fails when mail_api=true, MAIL_API_URL is unset and the admin lane runs", async () => {
+  const results = await probe(() => verifyMailApi({ mail_api: true }, { publicOnly: true, mailApi: undefined, kratosAdmin: "http://admin" }));
+  assert.deepEqual(results.map((r) => [r.ok, r.warn]), [[false, false]]);
+});
+
 test("AAL probe warns instead of failing when local_idp is off", async () => {
   const results = await probe(() => verifyAalBehavior(derive(dims({ local_idp: "off" })), deadUrls()));
   assert.deepEqual(
@@ -98,10 +106,8 @@ test("token-hook probe records failed checks when hydra is unreachable", async (
   assert.ok(results.every((r) => /probe client creation failed: HTTP 0/.test(r.detail)));
 });
 
-// The mode-5 counterpart of the AAL guard: on the `urls` backend a missing
-// admin API is the documented reality, not a drifted row. Before this guard the
-// probe aimed at localhost:4445 and failed every urls row on an unrelated
-// socket.
+// The urls-backend counterpart of the AAL guard: a missing admin API is the
+// documented reality there, not a drifted row.
 test("token-hook probe warns instead of failing when the backend has no hydra admin URL", async () => {
   const results = await probe(() =>
     verifyHydraTokens(derive(dims({ hook_service: "present" })), { access_token_format: "jwt" }, { ...deadUrls(), hydraAdmin: undefined }),
@@ -116,12 +122,8 @@ test("token-hook probe warns instead of failing when the backend has no hydra ad
   assert.ok(results.every((r) => /no HYDRA_ADMIN_URL/.test(r.detail)));
 });
 
-// ── Manifest-minted shape probe (no admin API) ──────────────────────────────
-//
-// The urls lane has no HYDRA_ADMIN_URL, but the seed manifest's svc client can
-// mint — so the access-token SHAPE stays verified there, while the token-hook
-// check (which needs a granted-but-unauthorized audience only the admin API
-// can register) warn-skips with a reason that names the discriminator.
+// ── Manifest-minted shape probe (no admin API): shape verified via the
+// manifest's svc client; the hook check warn-skips naming the discriminator ──
 
 function withManifest(run) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "verify-manifest-"));
@@ -169,12 +171,8 @@ test("manifest-minted shape probe FAILS (not warns) a wrong declaration", async 
   assert.match(shape.detail, /minted token is opaque/);
 });
 
-// ── Token-hook decision table, against a stub hydra ─────────────────────────
-//
-// The wiring check is two-sided, so its polarity is worth defending: an
-// audience-scoped client_credentials mint that comes back 403 access_denied
-// means a token hook refused it, which PASSES a hook_service=present row and
-// FAILS a hook_service=absent one.
+// ── Token-hook decision table, against a stub hydra: 403 access_denied on the
+// audience mint PASSES hook_service=present and FAILS hook_service=absent ────
 
 /** Collect the request body, then answer JSON. */
 function jsonServer(handle) {
@@ -256,11 +254,8 @@ test("token hook check is a warned inconclusive when hydra refuses the audience 
   assert.match(hook.detail, /inconclusive: audience-scoped mint → HTTP 400 invalid_target/);
 });
 
-// ── AAL decision table, against a stub kratos ───────────────────────────────
-//
-// The probe's whole point is the 403-vs-200 distinction on /sessions/whoami
-// after a second factor exists, plus the guarantee that the throwaway identity
-// is always deleted. Both are worth defending offline.
+// ── AAL decision table, against a stub kratos: 403-vs-200 on whoami, and the
+// throwaway identity is always deleted ──────────────────────────────────────
 
 /** Minimal kratos stand-in. `methods` are the settings-flow groups on offer;
  *  `onDelete` decides how the cleanup call answers. Second-factor enrolment

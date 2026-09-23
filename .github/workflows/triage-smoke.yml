@@ -1,15 +1,11 @@
-# Proves the LLM triage plumbing on demand — docs/ci-spec.md §6. The real
-# triage job only runs on a SCHEDULED lane failure, so a rotated key, a
-# retired model slug or a broken `secrets: inherit` would otherwise surface
-# only on the next red night, as a silent fall-back to the verbatim log tail.
-# This dispatch feeds the reusable workflow a synthetic failed-lane log in
-# dry-run mode: the triage lands in the job summary, no issue is filed,
-# commented or closed, and the job FAILS unless the LLM actually answered.
+# Proves the LLM triage plumbing on demand (docs/ci-spec.md §6): feeds _triage.yml a
+# synthetic failed-lane log in dry-run mode. Nothing is filed; the job FAILS unless the
+# LLM actually answered, so a rotated key or retired model surfaces here, not on a red night.
 name: Triage smoke
 
 on:
   workflow_dispatch:
-  # Any PR that touches the triage plumbing proves it before merge (~1¢/run).
+  # any PR touching the triage plumbing proves it before merge
   pull_request:
     paths:
       - .github/workflows/_triage.yml

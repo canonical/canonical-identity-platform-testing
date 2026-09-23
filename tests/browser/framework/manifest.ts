@@ -1,48 +1,19 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * Manifest reader/writer for the scenario-driven test framework.
- *
- * The manifest is a JSON file that contains all seeded test data (users,
- * tenants, memberships). The test runner reads it to find user credentials
- * and tenant IDs. The seeder writes it after creating test data.
- */
-
 import * as fs from "node:fs";
 import * as path from "node:path";
-import type { Manifest, ManifestUser, ManifestTenant, ManifestOauthClients } from "../seeder/manifest-schema";
+import type { Manifest, ManifestUser, ManifestOauthClients } from "../seeder/manifest-schema";
 
-// ---------------------------------------------------------------------------
-// Default manifest path
-// ---------------------------------------------------------------------------
-
-/** Default manifest file name. */
 export const MANIFEST_FILENAME = "manifest.json";
 
-/**
- * Resolve the manifest path: `MANIFEST` if set, else `tests/browser/manifest.json`.
- *
- * The override is what lets the seeding host and the test host be different
- * machines. An admin with admin-API reach runs the seeder out of band against a
- * real deployment (`MANIFEST=/path/out.json npx tsx seeder/seed.ts`), hands the
- * file to a runner that has only the public login-ui, and the runner reads it
- * back the same way. Without it the suite could only ever test a deployment it
- * was itself allowed to provision.
- */
+/** `MANIFEST` if set, else `tests/browser/manifest.json`; the override lets a seeding host hand
+ *  the file to a runner that has only public login-ui reach. */
 export function resolveManifestPath(): string {
   const override = process.env.MANIFEST;
   return override ? path.resolve(override) : path.resolve(__dirname, "..", MANIFEST_FILENAME);
 }
 
-// ---------------------------------------------------------------------------
-// Reader
-// ---------------------------------------------------------------------------
-
-/**
- * Read a manifest from a JSON file.
- * Throws if the file doesn't exist or is invalid JSON.
- */
 export function readManifest(manifestPath?: string): Manifest {
   const filePath = manifestPath ?? resolveManifestPath();
 
@@ -56,7 +27,6 @@ export function readManifest(manifestPath?: string): Manifest {
   const raw = fs.readFileSync(filePath, "utf-8");
   const manifest: Manifest = JSON.parse(raw);
 
-  // Basic validation
   if (!manifest.profile || !manifest.seededAt || !Array.isArray(manifest.users)) {
     throw new Error(
       `Invalid manifest format: missing required fields (profile, seededAt, users). ` +
@@ -67,33 +37,6 @@ export function readManifest(manifestPath?: string): Manifest {
   return manifest;
 }
 
-// ---------------------------------------------------------------------------
-// Writer
-// ---------------------------------------------------------------------------
-
-/**
- * Write a manifest to a JSON file.
- * Creates the directory if it doesn't exist.
- */
-export function writeManifest(manifest: Manifest, manifestPath?: string): void {
-  const filePath = manifestPath ?? resolveManifestPath();
-  const dir = path.dirname(filePath);
-
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
-
-  fs.writeFileSync(filePath, JSON.stringify(manifest, null, 2), "utf-8");
-}
-
-// ---------------------------------------------------------------------------
-// Lookup helpers
-// ---------------------------------------------------------------------------
-
-/**
- * Find a user in the manifest by ref.
- * Throws if not found.
- */
 export function findUserByRef(manifest: Manifest, ref: string): ManifestUser {
   const user = manifest.users.find((u) => u.ref === ref);
   if (!user) {
@@ -105,30 +48,8 @@ export function findUserByRef(manifest: Manifest, ref: string): ManifestUser {
   return user;
 }
 
-/**
- * Find a tenant in the manifest by ref.
- * Throws if not found.
- */
-export function findTenantByRef(manifest: Manifest, ref: string): ManifestTenant {
-  const tenant = manifest.tenants.find((t) => t.ref === ref);
-  if (!tenant) {
-    throw new Error(
-      `Tenant ref "${ref}" not found in manifest. ` +
-      `Available refs: ${manifest.tenants.map((t) => t.ref).join(", ")}`
-    );
-  }
-  return tenant;
-}
-
-/**
- * Resolve a scenario's tenant reference to the display name the UI renders.
- *
- * Scenarios name a tenant by manifest ref, exactly as they name a user. The
- * seeder namespaces the actual tenant names so cleanup can tell them apart from
- * a deployment's own tenants (seeder/ownership.ts), and scenario data must not
- * restate that convention. A seeded display name is still accepted so an
- * ad-hoc scenario can name one directly.
- */
+/** Manifest ref (or seeded display name) → the display name the UI renders. The seeder namespaces
+ *  tenant names (seeder/ownership.ts); scenario data must not restate that convention. */
 export function resolveTenantDisplayName(
   manifest: Manifest,
   ref: string | undefined,
@@ -145,18 +66,10 @@ export function resolveTenantDisplayName(
   return tenant.name;
 }
 
-/**
- * Get the RP (authorization code) client credentials from the manifest.
- * Returns undefined if not available.
- */
 export function getRpClient(manifest: Manifest): ManifestOauthClients["rp"] | undefined {
   return manifest.oauthClients?.rp;
 }
 
-/**
- * Get the service (client credentials) client credentials from the manifest.
- * Returns undefined if not available.
- */
 export function getSvcClient(manifest: Manifest): ManifestOauthClients["svc"] | undefined {
   return manifest.oauthClients?.svc;
 }

@@ -11,16 +11,18 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/canonical/canonical-identity-platform/tests/e2e/internal/harness"
 )
 
 // grpcAddress returns the gRPC server address for the tenant-service.
 func grpcAddress() string {
-	return envOr("TENANT_SERVICE_GRPC_ADDR", "localhost:50051")
+	return harness.TenantServiceGRPC.URL()
 }
 
 // TestGRPCAuthentication tests that gRPC endpoints require authentication.
 func TestGRPCAuthentication(t *testing.T) {
-	requireService(t, "tenant-service")
+	requireService(t, harness.TenantService)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
@@ -48,7 +50,6 @@ func TestGRPCAuthentication(t *testing.T) {
 	// (tenant-service cmd/serve.go). login-ui attaches no credentials to its
 	// tenant-lookup call, so if this exclusion regresses, every login on a
 	// multi-tenancy profile 500s with "authorization token is not provided".
-	// That was PD-1: it blocked the four tenant browser scenarios entirely.
 	t.Run("LookupTenantsWithoutAuthShouldSucceed", func(t *testing.T) {
 		_, err := client.LookupTenants(ctx, &v0.LookupTenantsRequest{
 			Email: "grpc-auth-probe@test.example",

@@ -117,9 +117,7 @@ jobs:
               echo '```'
             } > triage.md
           fi
-      # Smoke mode: the triage IS the deliverable. A fallback here means the
-      # key or the model is broken and the next real failure would go out
-      # untriaged — fail so the dispatcher sees it.
+      # smoke mode: a fallback means the key or model is broken — fail so the dispatcher sees it
       - name: Dry run — publish the triage, file nothing
         if: env.OUTCOME == 'failure' && env.DRY_RUN == 'true'
         env:

@@ -2,40 +2,24 @@
 // SPDX-License-Identifier: AGPL-3.0
 //
 // Operator-producible configuration model of the Canonical Identity Platform.
+// DATA: the dimensions a Juju deployment can vary, the constraints between
+// them, and the named rows we pin. Single source for matrix/generate.mjs.
 //
-// This file is DATA (same philosophy as scenarios-as-data): it declares the
-// dimensions a Juju deployment of the platform can actually vary, the
-// constraints between them, and the named configurations we pin. It is the
-// single source of truth for `matrix/generate.mjs`, which emits the pairwise
-// covering array in `matrix/matrix.json` and the materialized compose rows
-// under `matrix/rows/`.
+// Rules: a dimension exists only if a charm option or relation produces it.
+// Every citation is commit-pinned `<org>/<repo>@<sha> <path>:<lines>`; resolve
+// with https://github.com/<org>/<repo>/blob/<sha>/<path>#L<lines>.
 //
-// Ground rules:
-//  - A dimension exists here ONLY if a charm option or relation can produce
-//    it. Raw-service knobs the charms never render are out (see harnessGaps
-//    and upstreamFindings for the audit trail).
-//  - Every value and constraint cites the operator source it was read from.
-//    Every upstream citation below is COMMIT-PINNED as `<org>/<repo>@<sha>
-//    <path>:<lines>` and was re-verified against raw.githubusercontent.com at
-//    that sha. The survey date 2026-08-01 is CONTEXT ONLY: it is how the shas
-//    were chosen (default-branch HEAD at or before that date), not what
-//    anchors a citation. Resolve any citation with
-//    https://github.com/<org>/<repo>/blob/<sha>/<path>#L<lines>.
-//
-//    Pin table (short sha -> what it is; `j2` abbreviates
-//    templates/kratos.yaml.j2, as used inline below):
-//      canonical/kratos-operator                      @99da536  2026-07-31
-//      canonical/hydra-operator                       @f7e000b  2026-07-31
-//      canonical/identity-platform-login-ui-operator  @b8497db  2026-07-31
-//      canonical/hook-service-operator                @186d47f  2026-07-31
-//      canonical/user-verification-service-operator   @6f89b99  2026-07-31
-//      canonical/kratos-external-idp-integrator       @7219838  2026-07-31
-//      canonical/iam-bundle-integration               @74b2ea1  2026-07-13
-//      canonical/identity-platform-login-ui           @197703c  tag v0.28.0 (the workload image the stack runs)
-//      ory/kratos                                     @64e04ac  tag v25.4.0 — the exact source
-//        ghcr.io/canonical/kratos:25.4.0 is built from (canonical/kratos-rock@6edfdb3
-//        rockcraft.yaml: `source: https://github.com/ory/kratos`, `source-tag: v25.4.0`).
-//        There is no separate Canonical kratos source fork; the rock builds upstream.
+// Pin table (`j2` abbreviates templates/kratos.yaml.j2):
+//   canonical/kratos-operator                      @99da536
+//   canonical/hydra-operator                       @f7e000b
+//   canonical/identity-platform-login-ui-operator  @b8497db
+//   canonical/hook-service-operator                @186d47f
+//   canonical/user-verification-service-operator   @6f89b99
+//   canonical/kratos-external-idp-integrator       @7219838
+//   canonical/iam-bundle-integration               @74b2ea1
+//   canonical/identity-platform-login-ui           @197703c  tag v0.28.0 (the workload image)
+//   ory/kratos                                     @64e04ac  tag v25.4.0 (source of
+//     ghcr.io/canonical/kratos:25.4.0 per canonical/kratos-rock@6edfdb3 rockcraft.yaml)
 
 export const model = {
   version: 1,
@@ -171,18 +155,9 @@ export const model = {
   ],
 
   // ── Pinned rows: the three gate profiles, in model coordinates ────────────
-  // First-class MATERIALIZED rows: `make matrix-generate` emits
-  // matrix/rows/<name>/docker-compose.override.yml + capabilities.json for
-  // them exactly like seed/generated rows, and `make gate PROFILE=<name>`
-  // consumes those artifacts (the hand-written profiles/ tree is retired).
-  // They are counted as already-covered pairs (the gate runs them per-PR).
-  // `webauthn: null` means the profile's real deployment holds a value the
-  // operators cannot produce — webauthn enabled as a pure second factor
-  // (passwordless:false, no sequencing). The materializer renders that shape
-  // (see derive() in lib.mjs) but it contributes NO pair coverage.
-  // `divergences` is the machine-readable audit: residual deltas between the
-  // materialized row and the retired hand-written override, plus anything
-  // still off-model.
+  // Materialized like every other row; `make gate PROFILE=<name>` consumes the
+  // artifacts. `webauthn: null` is the off-model pure-second-factor shape
+  // (rendered by derive() in lib.mjs, no pair credit). `divergences` is the audit.
   pinned: [
     {
       name: "core",
@@ -242,9 +217,7 @@ export const model = {
     },
   ],
 
-  // ── Seed rows: mandatory generated rows ───────────────────────────────────
-  // Every configuration-interaction defect found in the field gets its cell
-  // seeded here permanently — deployment-level regression pinning.
+  // ── Seed rows: mandatory generated rows (field defects pinned permanently) ──
   seeds: [
     {
       name: "pd931-single-oidc-mt",
@@ -294,70 +267,23 @@ export const model = {
         user_verification: "absent",
         access_token: "jwt",
       },
-      // A TARGET-BOUND row: the caps below describe iam.orange.canonical.com
-      // (its Google provider, its login-ui's prompt-on-use fork, no mail),
-      // which no compose override or juju var-file can render — the compose
-      // stack offers dex and the preflight rightly refused the row every
-      // night (2026-08-27 → 2026-09-08, "oidc providers [google_canonical] —
-      // the registration flow offers [dex]"). Bound to the urls backend: the
-      // generator emits capabilities.json only, `run-row --all` lists it as
-      // out of scope on every other backend instead of deploying it, and a
-      // single-row run on another backend is refused before deploy.
+      // Target-bound: these caps describe iam.orange.canonical.com, which no
+      // compose override or juju var-file can render. Only the urls backend runs it.
       backends: ["urls"],
-      // Row-level truths that are NOT dimensions because no charm option or
-      // relation produces them — they are properties of the TARGET, not of the
-      // platform's configuration space (the `mail_api` case harnessGaps already
-      // described as "hand-writes mail_api=false").
+      // Properties of the TARGET, not dimensions: no charm option produces them.
       caps: {
         mail_api: false,
         services: ["kratos", "hydra", "login-ui"],
         oidc_providers: ["google_canonical"],
-        // MEASURED 2026-08-27 and re-confirmed 2026-08-31 (green run): this
-        // target renders the backup-code regeneration prompt after EVERY
-        // backup-code sign-in (fresh 12 codes, burn 1 → prompt), unlike the
-        // v0.28.0 workload the compose/juju stacks run (prompt only at ≤3
-        // unused). Gates the prompt-terminal scenario variant
-        // (requires.backupCodePromptOnUse).
-        backup_code_prompt_on_use: true,
+        // backup_code_prompt_on_use stays at the derived false: no prompt after a backup-code
+        // sign-in while unused codes remain (measured 2026-09-23 on the v0.27.0 image).
       },
-      // Values this row DECLARES but the target could not initially be asked
-      // about through a public ingress. Two have since become MEASURED:
-      //  - verification=off: chosen to match the charm default
-      //    (canonical/kratos-operator@99da536 charmcraft.yaml:139-145
-      //    `enable_verification`, default false); mail_api=false gates every
-      //    verification and recovery journey off regardless, so the dim does
-      //    not move the executed set. Still unverifiable from outside.
-      //  - access_token=jwt: MEASURED 2026-08-26 — with a seed manifest the
-      //    preflight mints client_credentials with the manifest's svc client
-      //    and the orange token is a decodable JWT (matrix/verify.mjs,
-      //    "minted with the manifest's svc client"). Also the hydra charm
-      //    default (canonical/hydra-operator@f7e000b charmcraft.yaml:95-99).
-      //  - tenant_service=absent: MEASURED after the 2026-08-26 login-ui
-      //    refresh — the target now reports multi_tenancy_enabled: false
-      //    (the key entered /api/v0/app-config in v0.27.0, @973f960).
+      // Declared but not witnessable through a public ingress. mail_api=false
+      // gates every verification journey off, so the dim never moves the executed set.
       unobservable: ["verification"],
-      // AT FIRST CONTACT (2026-08-26, before the same-day refresh) the target
-      // ran login-ui v0.24.0-v0.25.0, pinned by two independent observations of
-      // its own responses — kept because it is the audit trail for the
-      // identifier-first outage in upstreamFindings:
-      //  - /api/v0/app-config carries `flags` but not `multi_tenancy_enabled`:
-      //    `flags` arrived in v0.24.0 (present at @72d4b5b, absent at @b964996
-      //    = v0.23.1) and `multi_tenancy_enabled` in v0.27.0 (@973f960) — so
-      //    v0.24.0 <= version <= v0.26.0.
-      //  - /self-service/registration/browser and .../verification/browser both
-      //    answer a bare Go `404 page not found`: the BFF's chi route table has
-      //    no registration or verification routes before v0.26.0 (17 routes at
-      //    @48a7049 = v0.26.0, 11 at @ad44e9e = v0.25.0 and @72d4b5b = v0.24.0,
-      //    canonical/identity-platform-login-ui pkg/kratos/handlers.go) — so
-      //    version <= v0.25.0.
-      // Neither 404 means a disabled kratos flow: kratos registers those routes
-      // unconditionally and answers a disabled flow with an HTTP 400 JSON error
-      // (ory/kratos@64e04ac selfservice/flow/registration/handler.go:81,113-115
-      // and selfservice/flow/verification/handler.go:78,167-170), and
-      // kratos-operator ships no option to disable registration at all
-      // (canonical/kratos-operator@99da536 charmcraft.yaml:104-206). The 404s
-      // are the BFF's route table, which is why the preflight must not read
-      // kratos flow config off an ingress that fronts it.
+      // Bounded from the target's own responses (/api/v0/app-config fields,
+      // BFF route table). A bare 404 on a BFF route is not a disabled kratos
+      // flow (ory/kratos@64e04ac selfservice/flow/registration/handler.go:113-115 answers 400).
       loginUiVersion: "v0.24.0-v0.25.0 at first contact; >= v0.27.0 since the 2026-08-26 refresh (multi_tenancy_enabled present, registration route present, identifier-first login works)",
     },
   ],

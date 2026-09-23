@@ -1,23 +1,9 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * Compute the expected execution set for a declared capabilities file.
- *
- *   npx tsx scripts/expected-set.ts <capabilities.json>
- *
- * For the scenario-driven specs (tier A), which tests run vs. skip is a pure
- * function of the declaration: lane membership plus `satisfies(requires, …)` —
- * the exact predicates `runScenario` applies (unconditionally — `satisfies()`
- * is the runner's only gating predicate). This script imports the same suite
- * data and the same `satisfies` implementation, so it cannot drift from it.
- *
- * Specs with extra runtime predicates (google-oidc's credential checks,
- * hand-written specs) are tier B: they are NOT listed here and are judged by
- * the skip-reason allowlist in the matrix runner instead.
- *
- * Output (JSON, stdout): { lane, run: [{file, id}], skip: [{file, id, reason}] }
- */
+// Expected run/skip set for a declared capabilities file, using the same suite data and
+// `satisfies()` the runner applies. Tier-B specs (runtime predicates) are not listed;
+// the matrix runner judges them by the skip-reason allowlist instead.
 
 import * as fs from "node:fs";
 import { satisfies } from "../framework/requires";
@@ -48,9 +34,7 @@ if (!capabilitiesPath) {
 const caps = JSON.parse(fs.readFileSync(capabilitiesPath, "utf-8")) as ActiveConfig;
 const lane = getExecutionLane();
 
-// Tier-A spec files and the suite each iterates. oidc.spec.ts selects its
-// suite at collection time from the sequencing flag — mirrored here from the
-// declaration (which IS active-config.json in matrix runs).
+// oidc.spec.ts selects its suite at collection time from the sequencing flag; mirrored here.
 const TIER_A: [string, ScenarioSuite][] = [
   ["specs/account-linking.spec.ts", accountLinkingScenarios],
   ["specs/device.spec.ts", deviceScenarios],

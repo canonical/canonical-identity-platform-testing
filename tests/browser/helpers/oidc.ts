@@ -1,13 +1,6 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * OIDC authorization-code flow helpers.
- *
- * Ported from tenant-service/tests/browser/helpers/oidc.ts.
- * The dev stack runs the Hydra exemplary OAuth 2.0 consumer on :4446.
- * These helpers drive the browser through the full OAuth2 flow.
- */
 import { Page, expect } from "@playwright/test";
 import { buildAuthorizeUrl } from "./hydra";
 import { decodeJwtPayload, TokenClaims } from "./jwt";
@@ -17,46 +10,26 @@ import { getRpClient as getManifestRpClient, readManifest } from "../framework/m
 
 const CALLBACK_URL = `${OIDC_CONSUMER_URL}/callback`;
 
-/**
- * Get the RP (authorization code) client credentials from the manifest.
- * Returns undefined if the manifest doesn't contain client data.
- */
 export function getRpClient(manifest: Manifest): ManifestOauthClientRp | undefined {
   return getManifestRpClient(manifest);
 }
 
-/**
- * Tokens extracted from the OIDC callback page.
- */
 export interface OIDCTokens {
   accessToken: string;
   idToken: string;
-  /** Present when the client requested offline_access (the seeded RP does).
-   *  Captured so post checks can prove family revocation after a code replay. */
+  /** Present when the client requested offline_access (the seeded RP does). */
   refreshToken?: string;
   /** null when the deployment mints opaque access tokens (access_token_format=opaque). */
   accessTokenClaims: TokenClaims | null;
   idTokenClaims: TokenClaims;
 }
 
-/**
- * Start a new authorization-code flow from the OIDC consumer app.
- * Strips any default max_age injected by the OIDC consumer so the
- * flow behaves as a normal first-login (no forced re-auth).
- * After this call the browser is on the Kratos login page.
- */
 export async function startOIDCFlow(page: Page): Promise<void> {
   const url = await buildAuthorizeUrl(page, {});
   await page.goto(url);
   await waitForOidcEntryState(page);
 }
 
-/**
- * Start a new authorization-code flow with additional OIDC parameters.
- *
- * @param page — Playwright Page object
- * @param params — Additional query parameters (e.g., { max_age: "0" } for forced re-auth)
- */
 export async function startOIDCFlowWithParams(
   page: Page,
   params: Record<string, string>,
@@ -66,13 +39,7 @@ export async function startOIDCFlowWithParams(
   await waitForOidcEntryState(page);
 }
 
-/**
- * Wait for any valid first state after starting an OIDC flow.
- * Depending on session state, Hydra/Kratos can land on:
- * - login page (/ui/login)
- * - consent page (/ui/consent)
- * - callback page (/callback)
- */
+/** Login, consent or callback: session reuse can pass straight through /ui/login. */
 async function waitForOidcEntryState(page: Page): Promise<void> {
   await expect(async () => {
     const url = page.url();
@@ -82,15 +49,8 @@ async function waitForOidcEntryState(page: Page): Promise<void> {
 
     expect(isLogin || isConsent || isCallback).toBe(true);
   }).toPass({ timeout: 15_000 });
-
-  // Do not assert login-page content here: the flow may briefly pass through
-  // /ui/login and auto-redirect immediately (session reuse path).
 }
 
-/**
- * Assert the OIDC flow completed by checking the callback page shows tokens.
- * Returns the decoded tokens for further assertions (e.g. tenant_id claims).
- */
 export async function expectOIDCFlowComplete(
   page: Page,
 ): Promise<OIDCTokens> {
@@ -101,19 +61,8 @@ export async function expectOIDCFlowComplete(
   return extractTokensFromCallback(page);
 }
 
-/**
- * Extract access token and ID token from the Hydra OIDC consumer callback page.
- *
- * The page renders tokens as:
- *   <li>Access Token: <code>eyJ...</code></li>
- *   <li>ID Token: <code>eyJ...</code></li>
- *
- * The ID token is ALWAYS a JWT (OIDC spec). The access token's shape is a
- * deployment dimension: hydra mints JWTs only when jwt_access_tokens is on;
- * opaque rows produce `ory_at_…` strings (2 dot-parts) that must not be
- * decoded. Claims are null for opaque tokens — assertions that need
- * access-token claims must gate on the declared access_token_format.
- */
+/** Callback renders `<li>Access Token: <code>…</code></li>` etc. The ID token is always a JWT; the
+ *  access token is opaque (`ory_at_…`) unless jwt_access_tokens is on, so its claims are null then. */
 async function extractTokensFromCallback(page: Page): Promise<OIDCTokens> {
   const items = page.locator("li");
   let accessToken = "";
@@ -150,16 +99,9 @@ export interface DeviceAuthorization {
   verificationUriComplete: string;
 }
 
-/**
- * Device-grant bootstrap (RFC 8628 §3.1): request a device_code/user_code
- * pair from hydra's public device endpoint, authenticated the way the seeded
- * RP is registered (client_secret_post — hydra rejects basic auth for it).
- * Public surface + manifest only, so it runs on the live lane.
- *
- * Returns hydra's own verification_uri_complete: entering the journey there
- * is exactly what a real device's link/QR does, and hydra redirects it to
- * login-ui's /ui/device_code with the device_challenge attached.
- */
+/** RFC 8628 §3.1 via hydra's public device endpoint with client_secret_post (hydra rejects
+ *  basic auth for the seeded RP). Returns hydra's verification_uri_complete, which redirects
+ *  to /ui/device_code with the device_challenge attached. */
 export async function startDeviceAuth(page: Page): Promise<DeviceAuthorization> {
   const rp = getRpClient(readManifest());
   if (!rp) {
@@ -183,14 +125,8 @@ export async function startDeviceAuth(page: Page): Promise<DeviceAuthorization> 
   return { deviceCode: parsed.device_code, verificationUriComplete: parsed.verification_uri_complete };
 }
 
-/**
- * Redeem an APPROVED device_code at the token endpoint (RFC 8628 §3.4) — the
- * RP-side half of the grant, which never passes through the browser: device
- * tokens arrive by polling, not via a callback. Called by the runner after
- * the walk observed /ui/device_complete, so the code is approved and a single
- * poll must succeed; authorization_pending here means the approval did not
- * stick and IS the failure.
- */
+/** RFC 8628 §3.4 redemption of an APPROVED device_code (after /ui/device_complete): a single
+ *  poll must succeed; authorization_pending here IS the failure. */
 export async function pollDeviceToken(page: Page, deviceCode: string): Promise<OIDCTokens> {
   const rp = getRpClient(readManifest());
   if (!rp) {
@@ -226,12 +162,7 @@ export async function pollDeviceToken(page: Page, deviceCode: string): Promise<O
   };
 }
 
-/**
- * Assert a freshly minted device_code is NOT redeemable before the user
- * completes the browser journey (RFC 8628 §3.5 authorization_pending) — the
- * property that makes the grant safe at all: possession of the device_code
- * alone must never yield tokens.
- */
+/** RFC 8628 §3.5: a device_code alone must never yield tokens before the browser journey completes. */
 export async function expectDeviceTokenPending(page: Page, deviceCode: string): Promise<void> {
   const rp = getRpClient(readManifest());
   if (!rp) {

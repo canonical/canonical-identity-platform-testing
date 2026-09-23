@@ -1,27 +1,10 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * Device authorization grant (RFC 8628) — §10 item 10, landed.
- *
- * The device half is an API call ("start → device-code" mints the code pair
- * with the manifest's RP client against hydra's PUBLIC device endpoint), the
- * user half is a browser walk, and the token half is the runner redeeming
- * ctx.deviceCode at the token endpoint after /ui/device_complete — device
- * tokens arrive by RP polling, never a callback, which is why this suite's
- * terminal is the one sanctioned exception to the callback rule
- * (defineScenario's device-complete carve-out).
- *
- * Surveyed live 2026-08-31 on the compose stack and iam.orange: user code
- * arrives prefilled via verification_uri_complete ("Enter code to continue"
- * → Next), the login journey is the standard challenge walk, and the
- * terminal reads "Sign in successful … successfully connected".
- *
- * Live-lane compatible: public endpoints plus the manifest, no admin API.
- */
+/** Device grant (RFC 8628): tokens arrive by RP polling, so device-complete is the one sanctioned non-callback terminal; live-lane compatible. */
 
-import { expect } from "@playwright/test";
 import { defineScenario, defineScenarioSuite } from "../framework/scenario-types";
+import { amrRecords, subjectIsSeededIdentity } from "../framework/claim-assertions";
 
 export const deviceScenarios = defineScenarioSuite({
   name: "device",
@@ -46,31 +29,16 @@ export const deviceScenarios = defineScenarioSuite({
         "device-complete",
       ],
       finalUrlContains: "/ui/device_complete",
-      // Evaluated against the POLLED tokens (the runner redeems
-      // ctx.deviceCode after the walk): proves the grant issued a real,
-      // decodable identity token for the user who authenticated in the
-      // browser — not merely that the success page rendered.
+      // Evaluated against the polled tokens: the runner redeems ctx.deviceCode after the walk.
       assertions: {
-        custom: async ({ idTokenClaims }) => {
-          expect(idTokenClaims.sub, "device-grant id_token must name a subject").toBeTruthy();
-          const amr = idTokenClaims.amr;
-          expect(Array.isArray(amr) ? amr : [], "device-grant id_token amr must record the password+totp login").toEqual(
-            expect.arrayContaining(["password", "totp"]),
-          );
-        },
+        claims: [
+          subjectIsSeededIdentity(),
+          amrRecords({ mustInclude: ["password", "totp"] }),
+        ],
       },
-      // Redeem-once: the runner's poll consumed the device_code; a second
-      // redemption must answer invalid_grant.
       postChecks: ["device-code-replay-rejected"],
     }),
 
-    // ── Failure: a user code hydra never issued ────────────────────────────
-    // The self-transition submits a well-formed wrong code and the runner
-    // demands a visible error (R-2). Requires only the wired grant — no
-    // login, no user state — so it runs on every device_flow row, local
-    // users or not. The bootstrap transition additionally asserts the
-    // pre-approval poll answers authorization_pending, so this scenario also
-    // witnesses that an unapproved device_code yields no tokens.
     defineScenario({
       id: "device-code-invalid-rejected",
       description:

@@ -1,11 +1,8 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 //
-// The justified-skip allow-list is shared, not duplicated. Hand-copied twins
-// under a "KEEP IN SYNC" comment drift, and `gate.mjs` executes on import, so
-// a drifted copy there would be invisible to tests. Both consumers are
-// importable, so this asserts array IDENTITY: a copy-paste fails here instead
-// of quietly changing what the gate tolerates.
+// The justified-skip allow-list is shared, not duplicated: both consumers are
+// importable, so this asserts array IDENTITY (a copy-paste twin would drift).
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

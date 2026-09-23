@@ -141,7 +141,7 @@ variable "charm_revisions" {
 }
 
 variable "kratos_image_revision" {
-  description = "kratos oci-image resource revision. Lane pin = 434 (v26.2.0, migration runbook in main.tf). Attach mode passes the discovered resource revision."
+  description = "kratos oci-image resource revision. Lane pin = 434 (v26.2.0; version-bump runbook in docs/juju-lane-runbook.md). Attach mode passes the discovered resource revision."
   type        = number
   default     = 434
 }
@@ -171,7 +171,7 @@ variable "cloud_region" {
 }
 
 variable "login_ui_channel" {
-  description = "login-ui charm channel (store origin only — local-origin charms are not a supported shape in any lane, decision D-2)."
+  description = "login-ui charm channel (store origin only — local-origin charms are not a supported shape in any lane)."
   type        = string
   default     = "latest/edge"
 }

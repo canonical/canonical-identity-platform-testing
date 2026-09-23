@@ -42,14 +42,14 @@ services:
       OPENFGA_AUTHN_METHOD: "preshared"
       OPENFGA_AUTHN_PRESHARED_KEYS: "42"
     command: run
+    # Host ports are offset (+100) so they do not collide with hook-service
+    # (8080) and tenant-service (8081); on the intranet network it is still openfga:8080.
     ports:
       - "8180:8080"
       - "8181:8081"
       - "3001:3000"
     restart: unless-stopped
-    # No healthcheck: upstream openfga image is distroless (no pebble) and we
-    # don't want to commit to a probe before the image is swapped for a rock.
-    # Tracked separately; revisit once the openfga rock lands.
+    # No healthcheck: the upstream image is distroless (no probe binary).
     networks:
       - intranet
     labels:
@@ -80,9 +80,7 @@ services:
       - "4436:4436"
       - "4437:4437"
     restart: unless-stopped
-    # No healthcheck: image lacks a usable probe (no curl/wget/nc/pebble) and
-    # mailslurper isn't on any service's dependency chain. See change
-    # add-container-healthchecks design decision 5.
+    # No healthcheck: the image has no probe binary and nothing depends on mailslurper.
     networks:
       - intranet
     labels:

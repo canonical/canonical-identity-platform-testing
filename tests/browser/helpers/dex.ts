@@ -1,28 +1,11 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * Dex OIDC login helpers.
- *
- * Ported from tenant-service/tests/browser/helpers/dex.ts.
- * Dex runs as a static OIDC provider in the dev Docker Compose stack.
- * The browser reaches it via Chromium's --host-resolver-rules
- * (mapping "dex" → 127.0.0.1, port 5556).
- */
-
 import { Page, expect } from "@playwright/test";
 import { DEX_USER_EMAIL, DEX_USER_PASSWORD } from "./test-credentials";
 import { isDexUrl } from "./page-state";
 
-/**
- * Complete the Dex login form (email + password).
- *
- * Assumes the browser has been redirected to Dex's authorization page.
- * With skipApprovalScreen enabled, Dex redirects back immediately
- * after successful login.
- */
 export async function loginWithDex(page: Page, email: string = DEX_USER_EMAIL): Promise<void> {
-  // Wait for the Dex login form
   const emailInput = page.locator("#login");
   await expect(emailInput).toBeVisible({ timeout: 15_000 });
   await emailInput.fill(email);
@@ -33,25 +16,12 @@ export async function loginWithDex(page: Page, email: string = DEX_USER_EMAIL): 
   await page.locator("button[type=submit]").click();
 }
 
-/**
- * Click the "Sign in with Dex" button on the Kratos 1FA page.
- *
- * Must be called AFTER entering the email via `enterEmail()` — the
- * identifier-first flow only shows OIDC buttons on the 1FA page,
- * not on the initial identifier page.
- */
 export async function clickDexLoginButton(page: Page): Promise<void> {
-  // End-anchored regex. The button's accessible name INCLUDES the logo
-  // img alt text ("dex logo Sign in with Dex"), so a full anchor never
-  // matches; plain substring matching is ambiguous on providers=2 rows
-  // ("Sign in with dex" is a substring of the dex2 button's name too).
-  // Ending the match at "dex" excludes "…dex2" and stays case-insensitive.
+  // End-anchored: the accessible name includes the logo alt ("dex logo Sign in with Dex"), and a substring would also match dex2.
   const dexButton = page.getByRole("button", { name: /sign in with dex$/i });
   await expect(dexButton).toBeVisible({ timeout: 10_000 });
-  // Click and wait for navigation to Dex's page
   await Promise.all([
     page.waitForURL((url) => isDexUrl(url.href), { timeout: 15_000 }).catch(() => {
-      // If the URL pattern doesn't match (e.g., error redirect), just continue
     }),
     dexButton.click(),
   ]);

@@ -1,14 +1,9 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * Manage Kratos identities via the admin API.
- *
- * Ported from tenant-service/tests/browser/helpers/kratos.ts and
- * login-ui/ui/tests/helpers/kratosIdentities.ts.
- * Uses fetch() API (no execSync) for portability.
- */
+/** Kratos admin/public API helpers (fetch-based). */
 
+import type { Page } from "@playwright/test";
 import { KRATOS_ADMIN_URL, KRATOS_PUBLIC_URL, LOGIN_UI_URL, envOr } from "./config";
 
 const IDENTITY_SCHEMA_ID = envOr("KRATOS_IDENTITY_SCHEMA_ID", "default");
@@ -60,15 +55,7 @@ export async function createIdentity(
   return data.id;
 }
 
-/**
- * Mark a Kratos identity's email as verified via JSON Patch.
- *
- * Kratos creates identities with `verifiable_addresses/0/verified: false`
- * and `verifiable_addresses/0/status: "pending"` by default. This function
- * patches both fields to mark the email as verified.
- *
- * @param identityId — The Kratos identity UUID.
- */
+/** Patch verifiable_addresses/0 to verified=true, status="completed". */
 export async function markVerified(identityId: string): Promise<void> {
   const patchOps = [
     { op: "replace", path: "/verifiable_addresses/0/verified", value: true },
@@ -102,20 +89,9 @@ export async function deleteIdentity(id: string): Promise<void> {
   }
 }
 
-/**
- * Reset an identity's password via the admin API.
- *
- * Used by the "restore-password" scenario cleanup: the recovery scenarios drive
- * a real self-service password change against a shared seeded identity, and
- * every later spec still authenticates with the manifest password.
- *
- * Uses PUT with the full identity rather than a JSON-Patch on
- * /credentials/password/config/password. Kratos accepts that patch with a 200
- * and silently does nothing — the stored credential keeps a hashed password and
- * the plaintext patch never reaches the hasher — so the patch form looks like it
- * works while leaving the old password in place. PUT re-runs the credential
- * pipeline properly; other credential types (totp, webauthn) are preserved.
- */
+/** Reset an identity's password with a full PUT. A JSON-Patch on
+ *  /credentials/password/config/password returns 200 but never reaches the hasher, so the
+ *  old password stays; PUT re-runs the credential pipeline and keeps totp/webauthn. */
 export async function setIdentityPassword(
   id: string,
   password: string,
@@ -153,14 +129,7 @@ export async function setIdentityPassword(
   }
 }
 
-/**
- * Return the first unused Kratos lookup secret (backup code) for an identity.
- *
- * Backup codes are one-shot. The manifest records only the first code issued at
- * seed time, so any scenario that reads it burns it — and every later run finds
- * it spent. Reading the live credential instead keeps backup-code scenarios
- * idempotent for as long as unused codes remain.
- */
+/** First unused lookup secret from the live credential; the manifest's seed-time code is one-shot. */
 export async function getUnusedBackupCode(identityId: string): Promise<string> {
   const res = await fetch(
     `${KRATOS_ADMIN_URL}/admin/identities/${identityId}?include_credential=lookup_secret`,
@@ -188,13 +157,7 @@ export async function getUnusedBackupCode(identityId: string): Promise<string> {
   return unused.code;
 }
 
-/**
- * Consume backup codes through native AAL2 login flows, leaving the rest unused.
- *
- * Used by the seeder to put an identity into the "running low on backup codes"
- * state, which is the only state in which login-ui offers the regeneration
- * prompt (it triggers at three or fewer unused codes remaining).
- */
+/** Burn backup codes via native AAL2 login flows; login-ui offers regeneration at <=3 unused. */
 export async function burnBackupCodes(
   sessionToken: string,
   codes: string[],
@@ -231,24 +194,9 @@ export async function burnBackupCodes(
   }
 }
 
-/**
- * Delete one credential type from an identity via the admin API.
- *
- * Idempotent: Kratos answers 204 even when the identity does not have that
- * credential, and for `webauthn` it removes the registered keys while leaving
- * the credential record — and therefore the user handle Kratos allocated at
- * identity creation — in place, so the identity is left as the seeder made it.
- *
- * `oidc` is the exception in TWO ways (measured 2026-09-01): a bare DELETE
- * answers 400 "You must provide an identifier to delete this credential", so
- * every linked provider identifier is read from the identity and deleted
- * individually — and an identity with no oidc credential simply yields zero
- * identifiers, keeping the idempotency contract.
- *
- * Preferred over a public settings flow for cleanup: it needs no browser
- * session, so it still runs after a scenario failed halfway and left the
- * browser somewhere unauthenticated.
- */
+/** Idempotent (204 even when absent); `webauthn` keeps the credential record and user handle.
+ *  `oidc` rejects a bare DELETE (400 "You must provide an identifier"), so each linked
+ *  identifier is deleted individually. Needs no browser session, so it runs after failures. */
 export async function deleteIdentityCredentialType(
   id: string,
   type: "totp" | "webauthn" | "lookup_secret" | "oidc",
@@ -293,29 +241,13 @@ export async function deleteIdentitySessions(id: string): Promise<void> {
   });
 }
 
-// ---------------------------------------------------------------------------
-// Session token helpers (for programmatic settings flow)
-// ---------------------------------------------------------------------------
+// --- Session token helpers (programmatic settings flow) ---
 
-/**
- * Create a session token for a Kratos identity by performing a native login.
- *
- * Uses the Kratos public API's native login flow:
- *   1. Create a login flow via `GET /self-service/login/api`
- *   2. Submit credentials via `POST /self-service/login` to obtain a session token
- *
- * This allows the seeder to drive self-service settings flows on behalf of a
- * user without browser interaction.
- *
- * @param email — The identity's email (login identifier).
- * @param password — The identity's password.
- * @returns The session token string.
- */
+/** Native login (GET /self-service/login/api, POST /self-service/login) -> session token. */
 export async function createSessionToken(
   email: string,
   password: string,
 ): Promise<string> {
-  // Step 1: Create a native login flow
   const createRes = await fetch(`${KRATOS_PUBLIC_URL}/self-service/login/api`, {
     method: "GET",
     headers: { "Accept": "application/json" },
@@ -329,7 +261,6 @@ export async function createSessionToken(
   const flowData = (await createRes.json()) as { id: string };
   const flowId = flowData.id;
 
-  // Step 2: Submit credentials to the login flow
   const submitRes = await fetch(
     `${KRATOS_PUBLIC_URL}/self-service/login?flow=${flowId}`,
     {
@@ -358,11 +289,8 @@ export async function createSessionToken(
     continue_with?: Array<{ action: string; flow?: { id: string } }>;
   };
 
-  // If the user has TOTP configured, the login flow requires AAL2.
-  // The response will contain a `continue_with` array with an
-  // `ask_aal2` action instead of a session_token.
+  // TOTP-enrolled users get `continue_with: [{action: "ask_aal2"}]` instead of a session_token.
   if (!loginData.session_token) {
-    // Check if AAL2 is required (TOTP verification needed)
     const aal2Action = loginData.continue_with?.find(
       (c) => c.action === "ask_aal2",
     );
@@ -380,22 +308,10 @@ export async function createSessionToken(
   return loginData.session_token;
 }
 
-/**
- * Initiate a TOTP settings flow for an authenticated user.
- *
- * Calls `GET /self-service/settings/api` with a Bearer session token,
- * then parses the flow response to find the TOTP secret key node.
- *
- * The TOTP secret is returned in a `text` node with `id: "totp_secret_key"`.
- * The actual base32 secret is in `attributes.text.context.secret`.
- *
- * @param sessionToken — A valid Kratos session token (from createSessionToken).
- * @returns An object with the flow ID and the extracted base32 TOTP secret.
- */
+/** GET /self-service/settings/api; the base32 secret is the totp_secret_key node's text.context.secret. */
 export async function initTotpSettingsFlow(
   sessionToken: string,
 ): Promise<{ flowId: string; totpSecret: string }> {
-  // Step 1: Create a settings flow via the API endpoint
   const createRes = await fetch(`${KRATOS_PUBLIC_URL}/self-service/settings/api`, {
     method: "GET",
     headers: {
@@ -433,9 +349,6 @@ export async function initTotpSettingsFlow(
 
   const flowId = flowData.id;
 
-  // Step 2: Find the totp_secret_key text node in the flow UI
-  // Kratos returns the TOTP secret in a text node with id "totp_secret_key".
-  // The base32 secret is in attributes.text.context.secret.
   const totpNode = flowData.ui?.nodes?.find(
     (n) =>
       n.group === "totp" &&
@@ -459,16 +372,6 @@ export async function initTotpSettingsFlow(
   return { flowId, totpSecret };
 }
 
-/**
- * Confirm TOTP enrollment by submitting a valid TOTP code.
- *
- * Calls `POST /self-service/settings` with the TOTP code to confirm
- * enrollment. Throws if Kratos returns an error.
- *
- * @param flowId — The settings flow ID (from initTotpSettingsFlow).
- * @param sessionToken — A valid Kratos session token.
- * @param totpCode — A valid TOTP code generated from the secret.
- */
 export async function confirmTotpEnrollment(
   flowId: string,
   sessionToken: string,
@@ -498,27 +401,12 @@ export async function confirmTotpEnrollment(
   }
 }
 
-/**
- * Generate backup codes (lookup_secret) for an authenticated user.
- *
- * After TOTP is configured, backup codes can be generated by submitting
- * a settings flow with `method: "lookup_secret"` and
- * `lookup_secret_regenerate: true`. Kratos will create a set of recovery
- * codes and require confirmation via `lookup_secret_confirm`.
- *
- * IMPORTANT: This must be called in the SAME settings flow as TOTP
- * confirmation, because after TOTP is configured, creating a new settings
- * flow requires AAL2 authentication.
- *
- * @param flowId — The settings flow ID (same flow used for TOTP confirmation).
- * @param sessionToken — A valid Kratos session token.
- * @returns An array of backup code strings.
- */
+/** Must run in the SAME settings flow as TOTP confirmation: once TOTP is configured, a new
+ *  settings flow requires AAL2. */
 export async function generateBackupCodes(
   flowId: string,
   sessionToken: string,
 ): Promise<string[]> {
-  // Step 1: Submit the lookup_secret regenerate to generate backup codes
   const regenerateRes = await fetch(
     `${KRATOS_PUBLIC_URL}/self-service/settings?flow=${flowId}`,
     {
@@ -567,7 +455,6 @@ export async function generateBackupCodes(
     };
   };
 
-  // Step 2: Extract the backup codes from the response
   const backupCodes: string[] = [];
   for (const node of regenerateData.ui?.nodes ?? []) {
     if (node.group === "lookup_secret" && node.type === "text") {
@@ -582,8 +469,6 @@ export async function generateBackupCodes(
     }
   }
 
-  // Step 3: Confirm the backup codes
-  // Kratos requires a confirmation step to actually save the backup codes
   const confirmRes = await fetch(
     `${KRATOS_PUBLIC_URL}/self-service/settings?flow=${flowId}`,
     {
@@ -616,14 +501,7 @@ export interface KratosIdentity {
   traits?: { email?: string };
 }
 
-/** List every Kratos identity, following keyset pagination to the end.
- *
- *  Kratos returns at most one page and advertises the next one in a `Link`
- *  header (`rel="next"` carrying `page_token`); the terminal page simply omits
- *  that link. The previous `?per_page=200` one-shot silently truncated: on a
- *  deployment with more identities than the page size, cleanup saw only the
- *  first page and `findIdentityByEmail` returned null for users that exist,
- *  which makes the seeder try to re-create them. */
+/** Follows `Link: <...page_token=...>; rel="next"` keyset pagination; the last page omits the link. */
 export async function listIdentities(pageSize = 250): Promise<KratosIdentity[]> {
   const all: KratosIdentity[] = [];
   let pageToken = "";
@@ -662,20 +540,14 @@ export async function findIdentityByEmail(
   return identities.find((i) => i.traits?.email === email)?.id ?? null;
 }
 
-/**
- * Create a Kratos identity with OIDC credentials pre-linked.
- *
- * This lets the identifier-first 1FA page show the OIDC provider button
- * without needing a prior OIDC registration flow.
- */
+/** Identity with an oidc credential pre-linked, so identifier-first shows the provider button. */
 export async function createIdentityWithOIDC(
   opts: CreateIdentityWithOIDCOpts,
 ): Promise<string> {
   const body = {
     schema_id: IDENTITY_SCHEMA_ID,
     credentials: {
-      // Password credentials make the email a searchable credential identifier
-      // so the identifier-first flow can find the identity by email.
+      // Password credential makes the email a searchable identifier for identifier-first.
       password: { config: { password: "oidc-identity-unused-pw" } },
       oidc: {
         config: {
@@ -712,90 +584,40 @@ export async function createIdentityWithOIDC(
   return data.id;
 }
 
-/**
- * Start a Kratos self-service recovery flow by navigating to the
- * Kratos recovery browser endpoint. Kratos creates a recovery flow
- * and redirects the browser to the login-ui recovery page with a
- * `flow` query parameter.
- *
- * After this call, the browser should be on the reset-email page.
- */
+/** Navigate to Kratos' recovery browser endpoint; lands on /ui/reset_email?flow=. */
 export async function startRecoveryFlow(page: import("@playwright/test").Page): Promise<void> {
   await page.goto(`${KRATOS_PUBLIC_URL}/self-service/recovery/browser`);
-  // Kratos redirects to LOGIN_UI_URL/ui/reset_email?flow=<id>
-  // Wait for the redirect to complete
   await page.waitForURL(/\/ui\/reset_email/, { timeout: 10_000 });
 }
 
-/**
- * Start a Kratos self-service verification flow and advance it to the code
- * entry step for `email`.
- *
- * A freshly created verification flow opens on the "Check your email" step,
- * which asks for an address — the code input only appears once that is
- * submitted. Scenarios model `verification` as the code step, mirroring how
- * recovery splits `reset-email` from `reset-email-code`, so the bootstrap
- * completes the address step to leave the flow where scenarios expect it.
- *
- * Callers that intend to read the resulting code must snapshot the mailbox
- * (`mailCursor`) before calling this.
- */
+/** Start a verification flow and submit `email` to reach the code step, which is what
+ *  scenarios model as `verification`. Snapshot the mailbox (`mailCursor`) before calling. */
 export async function startVerificationFlow(
   page: import("@playwright/test").Page,
   email: string,
 ): Promise<void> {
   await page.goto(`${KRATOS_PUBLIC_URL}/self-service/verification/browser`);
-  // Kratos redirects to LOGIN_UI_URL/ui/verification?flow=<id>
   await page.waitForURL(/\/ui\/verification/, { timeout: 10_000 });
 
   await page.getByLabel(/e-?mail/i).first().fill(email);
   await page.getByRole("button", { name: /continue|submit/i }).click();
 }
 
-/**
- * Start a Kratos self-service registration flow by navigating to the
- * Kratos registration browser endpoint. Kratos creates a registration
- * flow and redirects the browser to the login-ui registration page
- * with a `flow` query parameter.
- *
- * After this call, the browser should be on the register-email page.
- */
+/** Navigate to Kratos' registration browser endpoint; lands on /ui/register?flow=. */
 export async function startRegistrationFlow(page: import("@playwright/test").Page): Promise<void> {
   await page.goto(`${KRATOS_PUBLIC_URL}/self-service/registration/browser`);
-  // Kratos redirects to LOGIN_UI_URL/ui/register?flow=<id>
   await page.waitForURL(/\/ui\/register/, { timeout: 10_000 });
 }
 
-// ---------------------------------------------------------------------------
-// Public-flow helpers (no admin API required — uses browser session cookies)
-// ---------------------------------------------------------------------------
+// --- Public-flow helpers (browser session cookies, no admin API) ---
 
-/**
- * Remove the TOTP authenticator from the currently logged-in user
- * via the Kratos public settings flow.
- *
- * Uses `page.request` (APIRequestContext) which shares the browser's
- * cookie jar, so the session is already authenticated.
- *
- * Flow:
- *   1. Create a settings flow via the browser endpoint (GET)
- *   2. Fetch the flow details to get the CSRF token
- *   3. Submit the settings flow with `totp_unlink: true`
- *
- * This is the equivalent of navigating to the "Manage security" page
- * and clicking "Remove authenticator", but done via XHR so it's fast
- * and doesn't require navigating away from the current page.
- */
+/** Unlink TOTP through the public settings flow via page.request (shares the
+ *  browser cookie jar). Returns false when the page holds no session — the
+ *  caller must then unlink another way; a silent no-op leaves the seed dirty. */
 export async function removeTotpViaPublicApi(
-  page: import("@playwright/test").Page,
+  page: Page,
   totpSecret?: string | null,
-): Promise<void> {
-  // Step 1: Create a settings flow by hitting the browser endpoint.
-  // The response can be either:
-  // - a redirect (3xx with Location), or
-  // - a followed final URL (when redirects are auto-followed).
-  // Also, on unauthenticated state it can redirect to login. In cleanup,
-  // that's a safe no-op.
+): Promise<boolean> {
   const createRes = await page.request.get(
     `${KRATOS_PUBLIC_URL}/self-service/settings/browser`,
     { maxRedirects: 0 },
@@ -809,14 +631,8 @@ export async function removeTotpViaPublicApi(
   let flowId = redirectUrl?.searchParams.get("flow")
     ?? finalUrl.searchParams.get("flow");
 
-  // Kratos answers the browser endpoint with a 303 whose Location carries
-  // ?flow= — that is what the two lookups above parse. The login-ui BFF (the
-  // ONLY kratos surface a charmed ingress exposes) answers the same endpoint
-  // with the flow as a 200 JSON body: no redirect, no ?flow= anywhere. With
-  // redirect-only discovery this helper silently took the "not authenticated"
-  // no-op below on the urls lane, so remove-totp cleanup never ran there —
-  // first-login-mfa left its user enrolled and every rerun failed on
-  // setup-secure while reporting the cleanup as best-effort.
+  // Kratos answers with a 303 whose Location carries ?flow=; the login-ui BFF (the only
+  // kratos surface a charmed ingress exposes) answers 200 with the flow as a JSON body.
   if (!flowId && createRes.ok()) {
     try {
       const body: unknown = await createRes.json();
@@ -829,12 +645,9 @@ export async function removeTotpViaPublicApi(
   }
 
   if (!flowId) {
-    // If no settings flow was created (for example because the user is not
-    // authenticated due to an earlier scenario failure), cleanup is best-effort.
-    return;
+    return false;
   }
 
-  // Step 2: Fetch the flow details to get the CSRF token.
   const flowRes = await page.request.get(
     `${KRATOS_PUBLIC_URL}/self-service/settings/flows?id=${flowId}`,
   );
@@ -845,7 +658,6 @@ export async function removeTotpViaPublicApi(
   }
   const flowData = await flowRes.json();
 
-  // Extract the CSRF token from the flow's UI nodes.
   const csrfNode = flowData.ui?.nodes?.find(
     (n: { attributes?: { name?: string } }) => n.attributes?.name === "csrf_token",
   );
@@ -860,7 +672,6 @@ export async function removeTotpViaPublicApi(
   }
   const totpCode = await generateTotpCode(totpSecret);
 
-  // Step 3: Submit the settings flow with totp_unlink=true.
   const submitRes = await page.request.post(
     `${KRATOS_PUBLIC_URL}/self-service/settings?flow=${flowId}`,
     {
@@ -879,4 +690,5 @@ export async function removeTotpViaPublicApi(
       `removeTotpViaPublicApi: failed to unlink TOTP: ${submitRes.status()} ${body}`,
     );
   }
+  return true;
 }

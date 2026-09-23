@@ -2,25 +2,17 @@
 // SPDX-License-Identifier: AGPL-3.0
 
 /**
- * Google OIDC scenario suite — social login flows via Google.
- *
- * Covers: Google OIDC login (first time, with TOTP 2FA),
- * Google OIDC session reuse, Google OIDC with oidc_sequencing.
- *
- * Unlike Dex scenarios, Google scenarios do NOT use a seeded user.
- * The Google test account is a real Google Workspace account whose
- * credentials come from environment variables. The Kratos identity
- * is registered via the admin API in beforeAll (using the Google
- * `sub` claim from GOOGLE_TEST_SUBJECT_ID).
+ * Google social login: first login with TOTP, session reuse, and OIDC→WebAuthn sequencing.
+ * The Google account is real (GOOGLE_TEST_* env vars); the google-user archetype carries its `sub` claim.
  */
 
 import { defineScenario, defineScenarioSuite } from "../framework/scenario-types";
 
 export const googleOidcScenarios = defineScenarioSuite({
   name: "google-oidc",
-  defaultLanes: ["internal"],
+  // The journeys use public surfaces only; the google-user identity is seeded once, out of band.
+  defaultLanes: ["live", "internal"],
   scenarios: [
-  // ── Google OIDC first login ──────────────────────────────────────────
   defineScenario({
     id: "google-oidc-first-login",
     description: "Google OIDC login (first time, identity created in Kratos, includes TOTP 2FA)",
@@ -37,7 +29,6 @@ export const googleOidcScenarios = defineScenarioSuite({
     assertions: { noTenantId: true },
   }),
 
-  // ── Google OIDC session reuse ────────────────────────────────────────
   defineScenario({
     id: "google-oidc-session-reuse",
     description: "Second Google login reuses existing Kratos session",
@@ -64,18 +55,6 @@ export const googleOidcScenarios = defineScenarioSuite({
     assertions: { noTenantId: true },
   }),
 
-  // ── Google OIDC with OIDC sequencing (webauthn MFA) ──────────────────
-  //
-  // When oidc_sequencing=true and webauthn_enabled=true, after the Google
-  // OIDC provider returns, Kratos redirects to the login UI for AAL2.
-  // If the user has no webauthn key, they must register one (setup-passkey);
-  // enrolling the key completes the ceremony and releases the callback in
-  // one step — there is no separate verify page (measured 2026-09-08 with
-  // real Google credentials, identical to the Dex twin `oidc-dex-login`).
-  // If the user already has a key, they verify with it (login-webauthn-verify).
-  //
-  // Phase 1: First login — Google auth → register webauthn key → callback
-  // Phase 2: Returning login — Google auth → verify with key → callback
   defineScenario({
     id: "google-oidc-sequencing",
     description: "Google login with OIDC sequencing — register webauthn key on first login, verify with key on returning login",
@@ -97,12 +76,7 @@ export const googleOidcScenarios = defineScenarioSuite({
       {
         name: "authenticate-with-key",
         flowParams: { max_age: "0" },
-        // Google session persists from Phase 1, so Google auto-selects the
-        // session and redirects back immediately — no password/TOTP pages,
-        // and the hop through accounts.google.com is too brief to be a
-        // state. The browser goes: login-ui → Kratos OIDC → Google
-        // (auto-session) → Kratos callback → login-ui (webauthn verify for
-        // AAL2). Measured 2026-09-08.
+        // Google's session persists from phase 1: no password/TOTP pages, and the accounts.google.com hop is too brief to be a state.
         expectedPath: [
           "login-email",
           "login-webauthn-verify",
@@ -111,10 +85,7 @@ export const googleOidcScenarios = defineScenarioSuite({
       },
     ],
     assertions: { noTenantId: true },
-    // The key enrolled in phase 1 must not survive the run: a leftover key
-    // turns the next first-login into a verify step (measured 2026-09-08 —
-    // phase 1 landed on login-webauthn-verify instead of setup-passkey).
-    // Same cleanup as the Dex sequencing twins.
+    // A leftover key would turn the next first-login into a verify step instead of setup-passkey.
     cleanup: "remove-2fa",
   }),
   ],

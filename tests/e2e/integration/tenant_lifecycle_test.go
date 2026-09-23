@@ -7,10 +7,12 @@ import (
 	"fmt"
 	"testing"
 	"time"
+
+	"github.com/canonical/canonical-identity-platform/tests/e2e/internal/harness"
 )
 
 func TestTenantLifecycle(t *testing.T) {
-	requireService(t, "tenant-service")
+	requireService(t, harness.TenantService)
 
 	client, err := NewHTTPTenantClient()
 	if err != nil {
@@ -37,7 +39,6 @@ func TestTenantLifecycle(t *testing.T) {
 		t.Logf("created tenant %s (%s)", tenantName, id)
 	})
 
-	// Cleanup regardless of test outcome
 	defer func() {
 		if tenantID == "" {
 			return
@@ -50,8 +51,7 @@ func TestTenantLifecycle(t *testing.T) {
 	}()
 
 	t.Run("ListTenants", func(t *testing.T) {
-		// Prove the endpoint answers at all, then locate our own tenant across
-		// pages — the first page alone is not a reliable place to look.
+		// Locate our own tenant across pages; the first page alone is not reliable.
 		if _, err := client.ListTenants(ctx); err != nil {
 			t.Fatalf("ListTenants failed: %v", err)
 		}

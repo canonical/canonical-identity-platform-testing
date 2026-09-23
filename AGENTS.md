@@ -1,184 +1,90 @@
 # AGENTS.md — Identity Platform Test Plane
 
-## Context
-You are working in the Canonical Identity Platform control repo.
-Its single purpose is **testing the platform**: bring up a deployment profile with
-Docker Compose, seed deterministic data, then run the Playwright browser suite and
-the Go E2E suite against it.
-
-The platform itself is a polyrepo of Go microservices. This repo builds nothing —
-and it contains **no service checkouts**. Every service under test runs from a
-published image (`docker/docker-compose.*.yml`) or a store charm
-(`matrix/backends/juju/`), so a fresh clone needs nothing beside it. Do not
-make a lane depend on a local checkout — see the overlay policy in
-`docs/juju-lane-runbook.md` (decision D-2).
+## Purpose
+This repo tests the Canonical Identity Platform; it builds nothing and contains no service
+checkouts. A run brings up a deployment profile (Docker Compose from published images, or
+store charms on Juju), seeds deterministic data, then runs the Playwright browser suite and
+the Go E2E suite against it. Never make a lane depend on a local checkout.
 
 ## Layout
 | Path | Role |
 |---|---|
-| `tests/browser/` | Playwright suite — the primary asset |
+| `README.md` | Start here: prerequisites, first gate, where to go next |
+| `tests/browser/` | Playwright suite — the primary asset; `README.md` there is the how-to, `LANES.md` the operator doc |
 | `tests/e2e/` | Go E2E + smoke + integration tests |
-| `docker/` | Compose layers: `infra`, `auth`, `services` |
-| `matrix/rows/<name>/` | GENERATED per-row compose override + capabilities manifest; the three pinned rows (`core`, `canonical-internal`, `canonical-portal`) ARE the gate profiles |
-| `matrix/` | Config-matrix lane: operator-producible model (`config-model.mjs`), pairwise generator, materialized rows (`rows/`) — docs/testing-spec.md |
-| `matrix/backends/juju/` | Charmed backend: row root terraform (`root/`, revision-pinned; rows applied as `-var-file=rows/<row>/juju.tfvars.json`) + k8s manifests for mailslurper/dex. `JUJU_CONTROLLER=microk8s-localhost` is ENFORCED by `matrix/controller-guard.mjs`. Teardown: `terraform destroy` |
+| `docker/` | Compose layers: `infra`, `auth`, `services`; `traefik/login-ui-routes.yml` is the ingress |
+| `matrix/` | Config-matrix lane: `config-model.mjs` (operator-producible model), pairwise generator, `run-row.mjs`, `verify.mjs` preflight |
+| `matrix/rows/<name>/` | GENERATED compose override + `capabilities.json`; pinned rows `core`, `canonical-internal`, `canonical-portal` are the gate profiles |
+| `matrix/backends/juju/` | Charmed backend: revision-pinned terraform `root/` (rows applied as `-var-file=rows/<row>/juju.tfvars.json`) + k8s manifests |
 | `scripts/audit-compose-ports.sh` | Guards against duplicate host-port publications |
-| `docs/testing-spec.md` | **The testing spec** — goal, approach, configuration surface, gate + matrix contracts |
-| `docs/testing-proposal.md` | Review-facing RFC/pitch for the same architecture — narrative, not contracts. The spec is authoritative where they disagree |
-| `docs/juju-lane-runbook.md` | Charmed-backend operational runbooks |
+| `docs/testing-spec.md` | The testing spec — goal, configuration surface, gate + matrix contracts |
+| `docs/ci-spec.md` | CI lanes: PR gate, nightly matrix, juju drift gate, triage |
+| `docs/juju-lane-runbook.md` | Charmed-backend runbooks |
 
 ## Browser suite architecture
-Scenarios are **data, not logic**.
+Scenarios are data, not logic; adding a test means adding a data object. How-to: `tests/browser/README.md`.
+- `scenarios/*-scenarios.ts`: declarative `Scenario` objects via `defineScenario()`, which rejects malformed entries at import time.
+- `framework/scenario-runner.ts` walks `expectedPath` pairwise; each `"A → B"` pair indexes `framework/transitions.ts`.
+- `helpers/page-state.ts` detects state from the DOM — login-ui multiplexes many states onto few URLs.
+- `expectError: true` on a repeated state requires a visible, non-empty error message; "did not navigate" is never the assertion.
+- `freshSession: true` on a later phase clears cookies but not the virtual authenticator (how WebAuthn sign-in is reachable).
+- `interventions` perturb the scenario's own path (`reload`, `replay-current-url`, `history-back`, `history-roundtrip`, `double-submit`); primitives in `framework/interventions.ts`.
+- Error terminals (`oidc-error-page`, `oidc-callback-error`) are enterable from `start` only, via malformed-authorize `flowParams`.
+- Token assertions live in `framework/claim-assertions.ts`, API post checks in `framework/intervention-checks.ts`; scenarios name them, never implement them.
+- `seeder/` owns all admin-API access; `seeder/archetypes.ts` is the sole source of users; `seed.ts` writes `manifest.json`, which specs read.
+- `framework/global-setup.ts` produces `active-config.json` (from `BROWSER_TEST_CAPABILITIES` or live `/api/v0/app-config`); the stack must be up before collection.
 
-- `tests/browser/scenarios/*-scenarios.ts` — declarative `Scenario` objects:
-  `{id, requires, user.ref, expectedPath[], expectError, freshSession, interventions,
-  postChecks, finalUrlContains, assertions, cleanup, defaultLanes}`.
-  `freshSession: true` on a later phase clears cookies but NOT the virtual authenticator —
-  that is how the one WebAuthn assertion (sign-in with an existing key) is reachable.
-  `interventions` declare weird-user-behavior perturbations anchored to the scenario's own
-  path (`{at: <state>, do: "reload" | "replay-current-url" | "history-back" |
-  "history-roundtrip"}` after a state's assertion — roundtrip = real Back to `via`, real
-  Forward back to `at`, walk continues; `{on: "<A → B>", do: "double-submit"}` modifies that
-  transition's submit) —
-  primitives live in `framework/interventions.ts`, and `defineScenario()` rejects anchors
-  that don't name the path. Error terminals (`oidc-error-page`, `oidc-callback-error`) are
-  enterable from `start` ONLY, via malformed-authorize `flowParams` (the oidc-error suite);
-  a mid-journey step into one is still an illegal transition.
-  Claim assertions live in `framework/claim-assertions.ts` (`reauthenticated`, `amrRecords`)
-  and API-side post checks in `framework/intervention-checks.ts`
-  (`code-replay-revokes-family`): scenarios name an assertion, they never implement one.
-- `tests/browser/framework/scenario-runner.ts` — walks `expectedPath` pairwise; each
-  `"stateA → stateB"` pair indexes the action map in `framework/transitions.ts`.
-  A repeated state is an error path: `expectError: true` makes the runner require a
-  visible, non-empty error message there, so "did not navigate" is never the whole
-  assertion.
-- `tests/browser/helpers/page-state.ts` — detects the current page state from the DOM.
-  The login-ui multiplexes many states onto few URLs, so detection is DOM-driven, not URL-driven.
-- `tests/browser/seeder/` — owns **all** admin-API access. `seeder/archetypes.ts` is the
-  sole source of truth for which users exist; `seed.ts` writes `manifest.json`.
-  Specs are browser-only and read the manifest.
-- `tests/browser/framework/global-setup.ts` — fetches `/api/v0/app-config` from the live
-  login-ui into `active-config.json`. The stack must be up before collection.
-
-Adding a test means adding a data object, not writing Playwright code.
-
-### Lanes
-`BROWSER_TEST_LANE` selects `internal` (default, full access incl. Mailslurper and admin
-bootstrapping) or `live` (UI-only, safe against a real deployment). Lane gating happens at
-suite level via `defaultLanes`; `framework/transitions.ts:assertInternalLane()` is the hard
-backstop. `tests/browser/LANES.md` is the operator doc.
-
-Capability gating is separate and unconditional: `runScenario` lane-gates, then applies
-`satisfies(scenario.requires, readActiveConfig())`. That is the ONLY predicate — there is no
-`BROWSER_TEST_ENFORCE_REQUIRES` switch and no legacy `checkRequires` path.
-
-### Determinism rules
+### Lanes, gating, determinism
+- `BROWSER_TEST_LANE=internal` (default; Mailslurper + admin access) or `live` (UI-only, safe against a real deployment). Suites set `defaultLanes`; `transitions.ts:assertInternalLane()` is the backstop.
+- Capability gating is unconditional: `runScenario` lane-gates, then `satisfies(scenario.requires, readActiveConfig())`. That is the only skip predicate.
+- In the matrix lane the row's declared `capabilities.json` drives gating, never runtime discovery; `matrix/verify.mjs` must pass first so a bad reconfiguration aborts instead of shrinking the executed set.
 - `workers: 1`, `fullyParallel: false` — Kratos sessions and identities are global mutable state.
-- `retries: 0` in every environment. A test that only passes on retry is flaky, and
-  flakiness must fail the gate rather than be absorbed.
-- No flaky/quarantine tag exists. A test either passes deterministically or it is removed.
+- `retries: 0` everywhere; a test that passes only on retry is flaky and must fail the gate. No flaky/quarantine tag exists: a test passes deterministically or is removed.
 
 ## Commands
 | Command | Effect |
 |---|---|
-| `make up` | Bring up infra + auth + services for the active profile, block until healthy |
-| `make down` | Tear down |
-| `make profile-set PROFILE=<name>` | Switch active profile |
-| `make seed-test-data-clean` | Delete the test plane's own users/tenants and re-seed them |
-| `make unseed-test-data` | Delete the test plane's own users/tenants, re-create nothing |
-| `make test-browser` | Playwright suite, internal lane |
-| `make test-browser-profile PROFILE=<name>` | Playwright suite for one profile |
-| `make test-browser-list` | List collected tests without running |
-| `make test-browser-audit-live` | Static live-lane compatibility audit |
-| `make matrix-generate` / `matrix-check` | Regenerate / verify the config matrix from `matrix/config-model.mjs` |
-| `make test-matrix-row ROW=<name> [BACKEND=compose\|juju\|urls]` | One matrix row under the full contract: deploy → `matrix/verify.mjs` preflight → seed → enforce-gated suite → expected-set verdict. Browser leg runs by default on juju (`MATRIX_JUJU_BROWSER=0` skips); `urls` needs `LOGIN_UI_URL` (+ optional admin/hydra/mail URLs) and no substrate access |
-| `make test-matrix-row ROW=<name> BACKEND=juju ATTACH=1 [PLAN_ONLY=1]` | Attach mode: configure an EXISTING charmed deployment via ephemeral-state terraform import (adopt → transition), then the full contract. `PLAN_ONLY=1` = zero-mutation drift gate. Store-origin charms only; never deploys apps (docs/testing-spec.md) |
-| `make test-matrix` | Nightly matrix lane across every seed+generated row (non-blocking; failures file issues) |
+| `make up` / `make down` | Bring up infra + auth + services for the active profile (blocks until healthy) / tear down |
+| `make profile-set PROFILE=<name>` / `profile-show` / `profile-validate` | Switch, print, validate the active profile |
+| `make seed-test-data-clean` / `unseed-test-data` | Wipe and re-seed the test plane's own users/tenants / delete them and re-create nothing |
+| `make test-browser` / `test-browser-live` / `test-browser-internal` | Playwright suite: internal lane / live lane only / full internal lane |
+| `make test-browser-list` / `test-browser-typecheck` / `test-browser-unit` / `test-browser-audit-live` | List collected tests / typecheck / unit-test pure logic / static live-lane audit |
+| `make test-browser-gate` | Suite twice; fail on any failure, flake, or skip not justified by `tests/browser/scripts/skip-allowlist.mjs` |
 | `make test-e2e` / `test-smoke` / `test-integration` | Go suites |
-| `make gate PROFILE=<name>` | **The gate**: up → seed → browser suite twice → Go E2E |
-| `make gate-all-profiles` | The gate across every pinned matrix row |
-| `make audit-ports` | Detect duplicate host-port publications |
-| `make test-browser-typecheck` | Typecheck the suite — catches helper/locator drift before a run |
-| `make test-browser-gate` | Run the suite twice; fail on any failure, flake, or **unjustified** skip (a skip is justified only when its reason matches the capability allow-list in `tests/browser/scripts/skip-allowlist.mjs`) |
+| `make gate PROFILE=<name>` / `gate-all-profiles` | The gate: typecheck → up → smoke → browser suite twice → Go E2E; all pinned rows + cross-profile coverage union |
+| `make check` | Hermetic guard: typecheck, matrix artifacts, offline tests, port audit (no stack) |
+| `make matrix-generate` / `matrix-check` / `matrix-test` | Regenerate / verify matrix artifacts from `matrix/config-model.mjs` / offline harness tests |
+| `make test-matrix-row ROW=<name> [BACKEND=compose\|juju\|urls]` | One row: deploy → `verify.mjs` preflight → seed → gated suite → expected-set verdict. `urls` needs `LOGIN_UI_URL`; `MATRIX_JUJU_BROWSER=0` skips the juju browser leg |
+| `make test-matrix-row ROW=<name> BACKEND=juju ATTACH=1 [PLAN_ONLY=1]` | Attach mode: configure an EXISTING charmed deployment via terraform import; `PLAN_ONLY=1` is a zero-mutation drift gate |
+| `make test-matrix` | Nightly matrix lane over every seed+generated row (non-blocking; failures file issues) |
+| `make audit-ports` / `make dev-check` | Duplicate host-port check / toolchain check (`JUJU_LANE=1` also requires `terraform` + `juju` on PATH) |
 
 ## Port Mapping (Canonical)
 | Service | Host Port |
 |---|---|
 | kratos (public / admin) | 4433 / 4434 |
 | hydra (public / admin) | 4444 / 4445 |
-| hook-service | 8080 |
-| tenant-service | 8081 |
+| hook-service / tenant-service / user-verification | 8080 / 8081 / 8083 |
 | login-ui | 80 (via Traefik) |
-| user-verification | 8083 |
 | oidc-consumer (test RP) | 4446 |
 | openfga HTTP / gRPC / playground | 8180 / 8181 / 3001 |
 | dex | 5556 |
-| mailslurper | 4436 / 4437 |
-
-Postgres is **not** published to the host — it is reachable only on the `intranet`
-compose network. Publishing 5432 collided with unrelated local stacks.
+| mailslurper (UI / API) | 4436 / 4437 |
+| postgres | not published; `intranet` compose network only |
 
 ## Rules
-- **Before calling anything a PRODUCT defect, prove the harness is wired like the
-  reference deployment.** A finding that only reproduces here is a finding about
-  here. C-16 is the standing example: `kratos.yml` had `serve.public.base_url`
-  on Kratos's published port instead of the ingress, so every browser-submitted
-  self-service form bypassed Traefik and login-ui's BFF — which is the component
-  that redeems the Hydra login challenge. That produced two "product defects"
-  (retired PD-7, resolved S-7), a truncated scenario and a drafted upstream bug
-  report, all describing our own config. Diff against login-ui's
-  `docker-compose.dev.yml` + `docker/traefik/login-ui-routes.yml` and the charms.
-- The login-ui **skip/accept decision spans three systems** — login-ui's BFF,
-  Hydra's login session (`authenticated_at`, refreshed only on accept) and
-  Kratos's flow state (`oauth2_login_challenge`, never set under sequencing; it
-  rides inside `return_to`). Never reason about a loop or a lost challenge from
-  one component's source alone, and always confirm which server actually
-  received the submission — Kratos's request log records the client address.
-- Findings and survey evidence cite upstream sources as COMMIT-PINNED GitHub
-  permalinks (or `<repo>@<sha> path:line`), never paths into local clones —
-  unpinned checkouts drift and make `file:line` evidence unverifiable.
-- Adding browser coverage means adding a `Scenario` to `tests/browser/scenarios/`,
-  not a new hand-written spec, unless the behaviour genuinely does not fit the
-  state-transition model (browser back/forward is the standing example).
-- Never introduce a flaky-test tag, `test.skip` without a runtime capability reason,
-  or a retry to paper over a race.
+- Before calling anything a product defect, prove the harness matches the reference deployment (login-ui `docker-compose.dev.yml`, `docker/traefik/login-ui-routes.yml`, the charms); a finding that only reproduces here is about here.
+- The login-ui skip/accept decision spans three systems (login-ui BFF, Hydra login session `authenticated_at`, Kratos flow state via `return_to`); never reason about a loop from one component's source, and confirm which server received the submission (Kratos's request log records the client address).
+- Cite upstream sources as commit-pinned permalinks or `<repo>@<sha> path:line`, never local paths.
+- Browser coverage is a `Scenario` in `tests/browser/scenarios/`, not a hand-written spec, unless the behaviour cannot fit the state-transition model.
+- Never add a flaky tag, a `test.skip` without a runtime capability reason, or a retry.
 - All admin-API provisioning belongs in `tests/browser/seeder/`, never in a spec.
-- The seeder only ever deletes what `tests/browser/seeder/ownership.ts` authorises:
-  the reserved `@test.example` domain (RFC 2606) and the `iam-test ` tenant prefix,
-  widened by ids the manifest we last wrote recorded. Anything else on the
-  deployment is foreign and is counted, reported, and left alone — that is what
-  lets an admin seed a real deployment out of band (`tests/browser/LANES.md`).
-  Never broaden a cleanup to an unscoped list-and-delete, and never key ownership
-  on an email the test plane does not control.
-- `MANIFEST=<path>` relocates the seed manifest for the seeder and the suite
-  alike, so the seeding host and the test host can differ.
+- The seeder deletes only what `tests/browser/seeder/ownership.ts` authorises (`@test.example` domain, `iam-test ` tenant prefix, ids in the last manifest); everything else is foreign — counted, reported, left alone. Never widen cleanup to list-and-delete.
+- `MANIFEST=<path>` relocates the seed manifest for seeder and suite alike, so the seeding host and test host may differ.
 - Run `make gate PROFILE=<name>` before claiming a change works.
-- `matrix/rows/` and `matrix/matrix.json` are generated — edit `matrix/config-model.mjs`
-  and run `make matrix-generate`; `make matrix-check` guards drift in CI.
-- In the matrix lane, gating is driven by the row's declared `capabilities.json`,
-  never by runtime discovery; `matrix/verify.mjs` must pass before tests run, so a
-  failed reconfiguration aborts loudly instead of silently shrinking the executed set.
-- Every juju/terraform operation the matrix harness owns calls `assertController()`
-  (`matrix/controller-guard.mjs`): the RESOLVED controller from `juju show-controller`
-  must equal `MATRIX_ALLOWED_CONTROLLER` (default `microk8s-localhost`), and
-  `JUJU_MODEL`/`JUJU_CONTROLLER_ADDRESSES` are refused because they route around
-  that resolution. Bare by-hand `terraform` in `root/` is outside the guard — run
-  `juju show-controller` first (docs/juju-lane-runbook.md).
-- Juju row runs self-spawn `matrix/watchdog.mjs` — an OBSERVER: it journals workload-status changes and stuck units (wedge frequency is upstream-bug evidence; never silence it) and never mutates the model. No `juju resolved`, no config kick, anywhere: rows hitting the filed kratos-operator wedge fail their settle budget and stay red (D-3).
-- Attach mode (`ATTACH=1`) configures existing deployments via pure terraform:
-  ephemeral `attach` workspace, discovery-generated imports, adopt → transition.
-  It never deploys apps, never manages secrets it didn't create, and refuses
-  local-origin charms. After any attach work, verify `terraform workspace show`
-  says `default` in `matrix/backends/juju/root/` before bare terraform commands.
-- `matrix/backends/juju/root/local.auto.tfvars` is this machine's substrate
-  identity (ingress hostname, cloud/region) — gitignored, required; without the
-  cloud pin a clean-mode apply plans model replacement.
-- `matrix/backends/juju/root/terraform.tfstate*` is SECRET-BEARING by construction
-  (the root manages `juju_secret`, and terraform stores secret values in cleartext):
-  gitignored, never committed, and never shared/pasted/attached to a bug report or
-  upstream issue — excerpt the one non-secret attribute you need instead. The sibling
-  `.terraform.lock.hcl` is the inverse: TRACKED on purpose, because `providers.tf`
-  floats on `~> 1.0.0`. Provider bumps are a reviewed lock-file commit.
-- `make dev-check` verifies the compose-lane toolchain (go/node/npx/docker compose);
-  `JUJU_LANE=1 make dev-check` additionally requires `terraform` and `juju` on PATH
-  (presence only — it never invokes juju).
+- `matrix/rows/` and `matrix/matrix.json` are generated: edit `matrix/config-model.mjs`, run `make matrix-generate`; `make matrix-check` guards drift.
+- Every harness-owned juju/terraform call passes `assertController()` (`matrix/controller-guard.mjs`): the resolved `juju show-controller` must equal `MATRIX_ALLOWED_CONTROLLER` (default `microk8s-localhost`); `JUJU_MODEL`/`JUJU_CONTROLLER_ADDRESSES` are refused. Bare `terraform` in `root/` is outside the guard — run `juju show-controller` first.
+- `matrix/watchdog.mjs` is an observer: it journals status changes and stuck units and never mutates the model. No `juju resolved`, no config kick, anywhere; a wedged row fails its settle budget and stays red.
+- Attach mode never deploys apps, never manages secrets it did not create, and refuses local-origin charms. After attach work, confirm `terraform workspace show` says `default` in `matrix/backends/juju/root/` before bare terraform commands.
+- `matrix/backends/juju/root/local.auto.tfvars` is this machine's substrate identity (gitignored, required); without the cloud pin a clean-mode apply plans model replacement.
+- `matrix/backends/juju/root/terraform.tfstate*` is secret-bearing: gitignored, never committed, never pasted into a bug report — excerpt the one non-secret attribute you need. `.terraform.lock.hcl` is tracked on purpose; provider bumps are a reviewed lock-file commit.

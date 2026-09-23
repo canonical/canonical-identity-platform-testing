@@ -1,11 +1,9 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 //
-// Controller-guard reject paths. These tests are the ONLY proof of every
-// reject path: a guard whose negative path is demonstrated by running the real
-// entrypoint against a disallowed controller would make the demonstration
-// itself the hazard. Nothing here spawns juju — both functions under test are
-// pure, and `assertController()`'s only untested line is its spawnSync.
+// Controller-guard reject paths: the ONLY proof of them (demonstrating a
+// reject path against a real disallowed controller would itself be the hazard).
+// Nothing here spawns juju.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";

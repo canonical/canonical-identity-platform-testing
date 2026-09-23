@@ -36,3 +36,12 @@ matrix/backends/juju/manifests/.rendered/
 # Out-of-band seed manifests are credential material (passwords, TOTP secrets)
 orange-manifest.json
 *-manifest.json
+# scripts/seed-in-cluster.sh writes ./manifest.<env>.json on the host it runs from
+manifest.*.json
+
+# Terraform state and plans anywhere in the tree (backups copied out of the juju
+# root included): they carry cleartext secrets.
+*.tfstate
+*.tfstate.*
+terraform.tfstate.d/
+*.tfplan

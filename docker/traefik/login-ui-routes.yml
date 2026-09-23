@@ -11,9 +11,7 @@ http:
   routers:
     # ── Kratos direct routes (bypass login-ui proxy) ──────────────────────
 
-    # OIDC callback — must go directly to Kratos, not through the login-ui
-    # proxy.  The callback carries CSRF tokens and session cookies that Kratos
-    # manages natively; routing through login-ui breaks the flow.
+    # OIDC callback: Kratos manages its CSRF/session cookies natively; the login-ui proxy breaks it.
     kratos-oidc-callback:
       entryPoints:
         - web
@@ -21,9 +19,7 @@ http:
       service: kratos-public-svc
       priority: 300
 
-    # WebAuthn JavaScript helper — served by Kratos at
-    # /.well-known/ory/webauthn.js.  The login-ui pages load this script for
-    # passkey registration and verification ceremonies.
+    # WebAuthn helper script, served by Kratos at /.well-known/ory/webauthn.js.
     kratos-webauthn-js:
       entryPoints:
         - web
@@ -43,9 +39,7 @@ http:
 
     # ── Login-UI proxied routes ───────────────────────────────────────────
 
-    # Identifier-first login step — handled by the login-ui Go proxy (which
-    # calls Kratos internally and manages cookies correctly).
-    # Must have higher priority than the generic kratos-self-service route.
+    # Identifier-first step is handled by the login-ui Go proxy; outranks kratos-self-service.
     login-ui-id-first:
       entryPoints:
         - web
@@ -55,9 +49,7 @@ http:
       middlewares:
         - sidecar-replace-path-regex-login-ui
 
-    # Self-service endpoints routed through the login-ui proxy so that CSRF
-    # cookies and session handling work correctly.  The OIDC callback is
-    # excluded (see kratos-oidc-callback above).
+    # Self-service through the login-ui proxy (CSRF cookies); the OIDC callback is excluded above.
     kratos-self-service:
       entryPoints:
         - web
@@ -74,11 +66,8 @@ http:
       rule: "PathPrefix(`/api/hydra`)"
       service: login-ui-svc
 
-    # Device flow user-code acceptance (login-ui v0.28.0 registers exactly
-    # PUT /api/device — pkg/web/router.go:187 at @197703c9; the reference
-    # deployment routes it as its own Path rule at @ab24edd2bc5a
-    # docker/traefik/login-ui-routes.yml). The /api/hydra prefix above is a
-    # NEWER login-ui's route family and does not cover this on v0.28.
+    # login-ui v0.28.0 registers exactly PUT /api/device
+    # (canonical/identity-platform-login-ui@197703c9 pkg/web/router.go:187); /api/hydra does not cover it.
     login-ui-api-device:
       entryPoints:
         - web
@@ -99,14 +88,9 @@ http:
       rule: "Path(`/api/v0/app-config`)"
       service: login-ui-svc
 
-    # Tenant lookup API — the browser's tenant picker.
-    #
-    # Exactly `/api/v0/tenants` belongs to login-ui; everything below it
-    # (notably `/api/v0/tenants/lookup`, which login-ui's own Go proxy calls
-    # server-side) belongs to tenant-service. tenant-service's docker-provider
-    # router claims the whole prefix with a longer rule and so wins Traefik's
-    # default rule-length tie-break, which would 401 the browser. `Path` plus an
-    # explicit priority splits the two deliberately rather than by rule length.
+    # Exactly `/api/v0/tenants` is login-ui's; `/api/v0/tenants/lookup` (called
+    # server-side by login-ui) is tenant-service's. Its docker-provider router
+    # claims the whole prefix, so an explicit priority splits the two.
     login-ui-api-tenants:
       entryPoints:
         - web

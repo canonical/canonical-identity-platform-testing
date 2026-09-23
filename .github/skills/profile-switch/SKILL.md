@@ -1,67 +1,29 @@
 # Skill: Profile Switch
 
-## Description
+## When
+"switch to profile X", "set profile to X", "change deployment target".
 
-Switches the active deployment profile for the Identity Platform. A profile is
-a **pinned row of the configuration matrix**: it determines which services are
-deployed and which capability flags they run with. Its artifacts live in
-`matrix/rows/<name>/` (`docker-compose.override.yml` + `capabilities.json`) and
-are generated from `matrix/config-model.mjs` — never hand-edited.
+A profile is a pinned row of the configuration matrix: `matrix/rows/<name>/` holds its generated
+`docker-compose.override.yml` and `capabilities.json` (from `matrix/config-model.mjs`; never hand-edit).
 
-## Trigger Phrases
+## Profiles
+Authoritative source: `matrix/rows/<name>/capabilities.json`.
+- `core` — Kratos, Hydra, Login UI, Dex, OpenFGA; password + OIDC 1FA, no enforced MFA.
+- `canonical-internal` — core + `hook-service` + `user-verification-service`; MFA enforced
+  (TOTP, backup codes, WebAuthn); `oidc_webauthn_sequencing_enabled: true`.
+- `canonical-portal` — `canonical-internal`'s services + `tenant-service` (`multi_tenancy_enabled: true`);
+  MFA enforced; no sequencing.
+Multi-tenancy + sequencing exists on none of them (`tests/browser/known-coverage-gaps.json`).
 
-- "switch to profile X"
-- "set profile to X"
-- "activate the canonical-internal profile"
-- "change deployment target"
+## Commands
+```bash
+make profile-validate PROFILE=<name>   # optional: check the row exists and matches the model
+make profile-set PROFILE=<name>        # validates against the pinned rows, writes .active-profile
+docker compose ps --quiet 2>/dev/null  # containers up? then:
+make down && make up
+make profile-show                      # active profile + declared capabilities
+```
 
-## Available Profiles
-
-Authoritative source: `matrix/rows/<name>/capabilities.json`. Summary today:
-
-- `core` — Kratos, Hydra, Login UI, Dex, OpenFGA. Password + OIDC 1FA, no
-  enforced MFA, no hook-service, no user-verification-service.
-- `canonical-internal` — core plus `hook-service` and
-  `user-verification-service`; MFA enforced (TOTP + backup codes + WebAuthn)
-  and `oidc_webauthn_sequencing_enabled: true`.
-- `canonical-portal` — same service set as `canonical-internal`, MFA enforced,
-  but **without** OIDC/WebAuthn sequencing.
-
-Multi-tenancy is `false` on all three (`multi_tenancy_enabled`); the
-tenant-service shape is parked — see `tests/browser/known-coverage-gaps.json`.
-
-## Steps
-
-1. **Validate profile name:**
-   `make profile-set` validates the name itself against the pinned rows and
-   exits non-zero on an unknown one. To check first without switching:
-   ```bash
-   make profile-validate PROFILE=<profile_name>
-   ```
-
-2. **Set the active profile:**
-   ```bash
-   make profile-set PROFILE=<profile_name>
-   ```
-
-3. **Restart containers if running:**
-   Check if containers are currently up:
-   ```bash
-   docker compose ps --quiet 2>/dev/null
-   ```
-   If containers are running, restart with the new profile:
-   ```bash
-   make down && make up
-   ```
-
-4. **Confirm:**
-   ```bash
-   make profile-show
-   ```
-   Prints the active profile and its declared capabilities.
-
-## Tool Access
-
-- File reads: `matrix/rows/<name>/capabilities.json`, `.active-profile`
-- Terminal: `make profile-set`, `make profile-validate`, `make profile-show`,
-  `make down`, `make up`, `docker compose ps`
+## Success
+- `make profile-show` prints the requested profile and its `capabilities.json`.
+- `make profile-set` exits non-zero on an unknown name; nothing was written.

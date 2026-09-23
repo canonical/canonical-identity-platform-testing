@@ -1,7 +1,6 @@
-# State-only renames from the presence-gating refactor (count added to the
-# optional-app modules and their relations: module.X -> module.X[0]).
-# Purely address bookkeeping - no infrastructure is touched. Safe to delete
-# once every long-lived state (this workstation, CI cluster) has applied it.
+# State-only address renames (module.X -> module.X[0] after `count` was added
+# to the optional-app modules). No infrastructure is touched; safe to delete
+# once every long-lived state has applied it.
 
 moved {
   from = module.tenant_service

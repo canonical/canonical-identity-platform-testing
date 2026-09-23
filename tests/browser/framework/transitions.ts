@@ -1,19 +1,9 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * The transition table — every known state transition and the action that
- * drives the browser through it — plus the types that describe it.
- *
- * The table is a flat (fromState → toState) lookup, not a graph library: the
- * number of meaningful transitions is small, and a scenario declares the path
- * it expects rather than asking anything to search for one. Each entry uses the
- * user context from the manifest and the scenario's action context.
- *
- * If the UI changes (a button is renamed) you update one entry, not every
- * scenario. To add a transition: add the entry, import the helper it needs, and
- * the action resolver picks it up automatically.
- */
+/** The transition table: every known (fromState → toState) pair and the action
+ *  that drives the browser through it. Scenarios declare the path they expect;
+ *  a UI change is fixed in one entry here, not in every scenario. */
 
 import { Page, expect } from "@playwright/test";
 import { enterEmail, enterPassword } from "../helpers/login";
@@ -26,10 +16,9 @@ import {
 import { clickDexLoginButton, loginWithDex } from "../helpers/dex";
 import { clickGoogleLoginButton, confirmGoogleIdentity, enterGoogleEmail, enterGooglePassword, enterGoogleTotp, dismissGoogleInterstitial } from "../helpers/google";
 import { GOOGLE_TEST_EMAIL, GOOGLE_TEST_PASSWORD, GOOGLE_TEST_TOTP_SECRET } from "../helpers/config";
-import { startOIDCFlow, startOIDCFlowWithParams, expectOIDCFlowComplete, startDeviceAuth, expectDeviceTokenPending } from "../helpers/oidc";
-// The oidc.ts starter waits for a login/consent/callback entry URL; error-path
-// starts terminate on /ui/oidc_error or the RP error page instead, so they use
-// the raw navigation from helpers/hydra.
+import { startOIDCFlowWithParams, expectOIDCFlowComplete, startDeviceAuth, expectDeviceTokenPending } from "../helpers/oidc";
+// Error-path starts terminate on /ui/oidc_error or the RP error page, which the
+// oidc.ts starter never waits for; they use the raw hydra navigation instead.
 import { startOIDCFlowWithParams as startAuthorizeNavigation } from "../helpers/hydra";
 import { verifyBackupCode } from "../helpers/backupCode";
 import { selectTenant } from "../helpers/navigation";
@@ -45,100 +34,62 @@ import type { MailCursor } from "../helpers/mail";
 import type { WebAuthnHelper } from "../helpers/webauthn";
 import type { ManifestUser } from "../seeder/manifest-schema";
 
-// ---------------------------------------------------------------------------
-// Transition action types
-// ---------------------------------------------------------------------------
+// --- Transition action types ---
 
 /** Additional context passed to action functions. */
 export interface ActionContext {
-  /** Active test execution lane. */
   lane?: ExecutionLane;
-  /** OIDC flow parameters (e.g., { max_age: "0" }). */
   flowParams?: Record<string, string>;
-  /** Tenant name to select (for multi-tenant scenarios). */
   selectTenant?: string;
-  /** TOTP secret generated during setup (stored here for later use). */
   totpSecret?: string;
-  /**
-   * Which 30-second TOTP window an error self-transition computes its code for.
-   * Unset → a wrong code ("000000"). "expired" → a well-formed code from a
-   * window Kratos no longer accepts, so the two TOTP error scenarios exercise
-   * two different rejections instead of the same one twice.
-   */
+  /** Unset → a wrong code ("000000"); "expired" → a well-formed code from a
+   *  window Kratos no longer accepts. */
   totpCodeWindow?: "expired";
-  /** Which code the "verification → verification" error self-transition
-   *  submits. Unset → a junk code. "stale-after-resend" → run the resend
-   *  flow (helpers/resend.ts) and submit the ORIGINAL code, which the
-   *  resend invalidated — a different rejection with a different cause. */
+  /** Unset → a junk code; "stale-after-resend" → run the resend flow and submit
+   *  the ORIGINAL code the resend invalidated. */
   verificationCodeSubmission?: "stale-after-resend";
-  /** Backup code generated during setup (stored here for later use). */
   backupCode?: string;
-  /** RFC 8628 device_code minted by "start → device-code" — the runner
-   *  redeems it at the token endpoint after the walk reaches
-   *  device-complete (device tokens arrive by RP polling, not a callback). */
+  /** Minted by "start → device-code"; the runner redeems it at the token endpoint after device-complete. */
   deviceCode?: string;
-  /** Set by the runner when a "double-submit" intervention targets the
-   *  transition being executed. The transition's action MUST forward it to
-   *  its submit helper and acknowledge via doubleSubmitConsumed — the runner
-   *  fails the test when the flag was set but not consumed, so an unsupported
-   *  transition cannot silently downgrade the intervention to a no-op. */
+  /** Set by the runner for a "double-submit" intervention. The action MUST forward it
+   *  to its submit helper and set doubleSubmitConsumed; the runner fails the test
+   *  otherwise, so an unsupported transition cannot downgrade the intervention. */
   doubleSubmit?: boolean;
-  /** Acknowledgement that the executed action honored doubleSubmit. */
   doubleSubmitConsumed?: boolean;
-  /** New password for recovery/registration flows. */
   newPassword?: string;
-  /** The password the seeder gave this user, snapshotted by the runner before
-   *  any transition mutates `user.password` — what a settings restore pass
-   *  submits to leave a shared identity exactly as seeded. */
+  /** Snapshotted by the runner before any transition mutates `user.password`; the settings restore pass submits it. */
   seededPassword?: string;
-  /** Mailslurper message ids present before an email was triggered. */
   mailCursor?: MailCursor;
-  /** Google test account email (for Google OIDC transitions). */
   googleEmail?: string;
-  /** Google test account password (for Google OIDC transitions). */
   googlePassword?: string;
-  /** Google test account TOTP secret base32 (for Google OIDC transitions). */
   googleTotpSecret?: string;
-  /** WebAuthn virtual authenticator helper (for WebAuthn ceremonies). */
   webauthn?: WebAuthnHelper;
 }
 
-/** A function that drives the browser from one state to the next. */
 export type ActionFunction = (
   page: Page,
   user: ManifestUser,
   ctx: ActionContext,
 ) => Promise<void>;
 
-/** A transition action with a human-readable description. */
 export interface TransitionAction {
-  /** Human-readable description (used in test.step() reporting). */
   description: string;
-  /** The action function that drives the browser. */
   action: ActionFunction;
 }
 
-/** Key format: "fromState → toState" */
 export type TransitionKey = `${string} → ${string}`;
 
-/** The transition table. */
 export type TransitionTable = Record<TransitionKey, TransitionAction>;
 
+/** Hard backstop behind lane metadata: every action that uses an internal-only surface calls this first. */
 export function assertInternalLane(ctx: ActionContext, feature: string): void {
   if (ctx.lane === "live") {
     throw new Error(`${feature} is not available in live lane`);
   }
 }
 
-/**
- * A well-formed recovery code that Kratos did not issue.
- *
- * Codes are 4–8 digits (helpers/mail.ts reads them out of the courier
- * subject), so an all-zero value has the right shape and is rejected on
- * lookup rather than on validation — which is the rejection the code-abuse
- * scenario is about. A collision with a real issued code would make the
- * scenario fail loudly on an unexpected state, never pass silently.
- */
+/** Well-formed (4–8 digits) but never issued: rejected on lookup, not validation,
+ *  which is the rejection the code-abuse scenario is about. */
 const WRONG_RECOVERY_CODE = "000000";
 
 async function submitWrongRecoveryCode(page: Page): Promise<void> {
@@ -146,13 +97,7 @@ async function submitWrongRecoveryCode(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Submit" }).click();
 }
 
-// ---------------------------------------------------------------------------
-// Shared action bodies
-// ---------------------------------------------------------------------------
-//
-// Several keys drive the browser identically and differ only in where the
-// platform lands afterwards — the per-key description says which. One body
-// per group; keys whose bodies differ in any way stay inline.
+// --- Shared action bodies ---
 
 const startOIDCFlowAction: ActionFunction = async (page, _user, ctx) => {
   await startOIDCFlowWithParams(page, ctx.flowParams ?? {});
@@ -167,8 +112,7 @@ const enterEmailAction: ActionFunction = async (page, user) => {
   await enterEmail(page, user.email);
 };
 
-// Always forwards and acknowledges ctx.doubleSubmit: with the flag unset the
-// helper gets `{ double: undefined }`, which is a single click.
+// Forwards ctx.doubleSubmit unconditionally: unset means a single click.
 const enterPasswordAction: ActionFunction = async (page, user, ctx) => {
   await enterPassword(page, user.password!, { doubleSubmit: ctx.doubleSubmit });
   if (ctx.doubleSubmit) ctx.doubleSubmitConsumed = true;
@@ -199,37 +143,23 @@ const verifyBackupCodeAction: ActionFunction = async (page, user, ctx) => {
   await verifyBackupCode(page, code);
 };
 
-/**
- * The register-key prefix shared by the three setup-passkey transitions: name
- * the key and click "Add security key". What the page does after the ceremony
- * differs per key, so each transition waits for its own landing inline.
- */
+/** Name the key and click "Add security key"; each caller waits for its own landing. */
 async function registerSecurityKey(page: Page, ctx: ActionContext): Promise<void> {
-  // Ensure the CDP virtual authenticator is active
   await ctx.webauthn?.setup();
 
-  // Enter a name for the security key
   const nameInput = page.locator('[name="webauthn_register_displayname"]');
   await expect(nameInput).toBeVisible({ timeout: 10_000 });
   await nameInput.fill("Test Security Key");
 
-  // Click "Add security key" — the CDP virtual authenticator with
-  // automaticPresenceSimulation auto-responds to navigator.credentials.create()
   const addBtn = page.getByRole("button", { name: /add security key/i });
   await expect(addBtn).toBeVisible({ timeout: 10_000 });
   await addBtn.click();
 }
 
-// ---------------------------------------------------------------------------
-// Transition table
-// ---------------------------------------------------------------------------
+// --- Transition table ---
 
 export const TRANSITION_TABLE: TransitionTable = {
-  // ── Starting the flow ─────────────────────────────────────────────────
-  //
-  // The "start" pseudo-state represents the initial navigation to the OIDC
-  // consumer app. The action starts the flow and the browser lands on the
-  // first page state (login-email, oidc-callback for session reuse, etc.).
+  // --- Starting the flow ("start" = the initial navigation to the consumer app) ---
 
   "start → login-email": {
     description: "Start OIDC authorization code flow",
@@ -249,19 +179,9 @@ export const TRANSITION_TABLE: TransitionTable = {
     action: startOIDCFlowAction,
   },
 
-  // A callback carrying `error=` (or a failed code exchange) is where an OAuth
-  // flow DIED; nothing follows it. No mid-journey step may route INTO an error
-  // state — an observed one is reported as an illegal transition. The ONLY
-  // legal way in is from `start`: the oidc-error suite drives deliberately
-  // malformed authorize requests, which terminate on the login-ui error page
-  // (unvalidatable client/redirect) or the RP callback error (everything else).
-  //
-  // Error-path starts: a deliberately malformed authorize request. Hydra
-  // splits on redirect-URI validity (writeAuthorizeError): an unvalidatable
-  // client_id/redirect_uri 302s to urls.error → login-ui /ui/oidc_error,
-  // while a validatable request carries its ?error= back to the RP callback.
-  // The malformation itself is scenario data — flowParams overrides
-  // (buildAuthorizeUrl replaces query params via searchParams.set).
+  // Error states are only reachable from `start`; a mid-journey hop into one is an
+  // illegal transition. Hydra splits on redirect-URI validity: unvalidatable client/
+  // redirect → login-ui /ui/oidc_error, otherwise ?error= back to the RP callback.
   "start → oidc-error-page": {
     description: "Start OIDC flow with a malformed authorize request (unvalidatable client/redirect)",
     action: startAuthorizeErrorAction,
@@ -272,10 +192,7 @@ export const TRANSITION_TABLE: TransitionTable = {
     action: startAuthorizeErrorAction,
   },
 
-  // ── Identifier-first transitions ───────────────────────────────────────
-  //
-  // The login-email page is the first screen users see. From here they can
-  // go to the password form, tenant selection, or an external OIDC provider.
+  // --- Identifier-first transitions ---
 
   "login-email → login-password": {
     description: "Enter email and continue",
@@ -296,20 +213,18 @@ export const TRANSITION_TABLE: TransitionTable = {
   },
 
   "login-email → provider:google:login": {
-    description: "Enter email, then click Google login button",
+    description: "Click Google login (after the email step when the page only offers providers per identity)",
     action: async (page, user) => {
-      await enterEmail(page, user.email);
+      // Older login-ui builds render provider buttons on the first page; newer identifier-first
+      // builds offer them only after the email step, to identities that carry the credential.
+      if (!(await page.getByRole("button", { name: /sign in with google/i }).isVisible())) {
+        await enterEmail(page, user.email);
+      }
       await clickGoogleLoginButton(page);
     },
   },
 
-  // ── Password step transitions ──────────────────────────────────────────
-  //
-  // After entering a password, the next state depends on the user's
-  // attributes and the platform config:
-  //   - No TOTP configured + MFA on → setup-secure (first-time TOTP setup)
-  //   - TOTP configured + MFA on → login-totp-verify
-  //   - MFA off → oidc-callback (direct completion)
+  // --- Password step transitions ---
 
   "login-password → setup-secure": {
     description: "Enter password (first-time login → TOTP setup)",
@@ -331,9 +246,6 @@ export const TRANSITION_TABLE: TransitionTable = {
     action: enterPasswordAction,
   },
 
-  // Error case: wrong password — stays on login-password. The scenario declares
-  // `expectError: true`, which is what makes the runner read the error message
-  // rather than only re-detecting the page.
   "login-password → login-password": {
     description: "Enter wrong password (error — stays on password page)",
     action: async (page, _user) => {
@@ -341,52 +253,35 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // ── TOTP setup transitions ─────────────────────────────────────────────
+  // --- TOTP setup transitions ---
 
   "setup-secure → setup-complete": {
     description: "Complete TOTP setup — page auto-redirects to setup-complete",
     action: async (page, _user, ctx) => {
       const secret = await completeTotpSetup(page);
-      // Store the secret for later use in TOTP verification
       ctx.totpSecret = secret;
     },
   },
 
-  // ── Passkey (WebAuthn) setup transitions ────────────────────────────────
-  //
-  // Two ways in. With OIDC sequencing on (canonical-internal) login-ui
-  // redirects here itself after an external OIDC login. Without it
-  // (canonical-portal) nothing in the login journey points at
-  // /ui/setup_passkey, and the page is reached the way a user reaches it: the
-  // "Security key" entry of the self-serve navigation, which renders this same
-  // page and rewrites the URL to ./setup_passkey?flow=<id>.
-  //
-  // The CDP-based virtual authenticator (WebAuthnHelper) must be set up
-  // before these transitions are executed (handled in the spec file's
-  // beforeEach and passed via ctx.webauthn).
+  // --- Passkey (WebAuthn) setup transitions ---
+  // Reached via login-ui's OIDC sequencing (canonical-internal) or the self-serve
+  // "Security key" nav entry (canonical-portal); ctx.webauthn must be set up first.
 
   "start → setup-passkey": {
     description: "Open the self-service security-key page",
     action: async (page) => {
-      // return_to is what Kratos redirects to once the key is registered.
-      // kratos.yml declares no settings after-hooks, so without it Kratos falls
-      // back to selfservice.flows.settings.ui_url — which points at
-      // /ui/reset_password, not at anything passkey-shaped.
+      // return_to: kratos.yml has no settings after-hooks, so Kratos would otherwise fall back to settings.ui_url (/ui/reset_password).
       const returnTo = `${LOGIN_UI_URL}/ui/setup_complete`;
       await page.goto(
         `${LOGIN_UI_URL}/ui/setup_passkey?return_to=${encodeURIComponent(returnTo)}`,
       );
-      // The page creates its own settings flow; if the session cannot open one
-      // it bounces to /ui/login instead, so wait for the form, not the URL.
+      // The page bounces to /ui/login if it cannot open a settings flow, so wait for the form, not the URL.
       await expect(
         page.locator('[name="webauthn_register_displayname"]'),
       ).toBeVisible({ timeout: 15_000 });
     },
   },
 
-  // With OIDC/WebAuthn sequencing on (canonical-internal), login-ui intercepts
-  // after OIDC 1FA and steps the user up to a security key before releasing the
-  // callback — so Dex login lands on the passkey pages, not the callback.
   "provider:dex:login → setup-passkey": {
     description: "Log in with Dex; sequencing diverts to security-key enrolment",
     action: async (page, user) => {
@@ -406,8 +301,6 @@ export const TRANSITION_TABLE: TransitionTable = {
     action: async (page, _user, ctx) => {
       await registerSecurityKey(page, ctx);
 
-      // Wait for the key to be registered (the page updates to show the key)
-      // Then wait for redirect to setup-complete
       await page.waitForURL(/\/ui\/setup_complete/, { timeout: 30_000 });
     },
   },
@@ -417,16 +310,11 @@ export const TRANSITION_TABLE: TransitionTable = {
     action: async (page, _user, ctx) => {
       await registerSecurityKey(page, ctx);
 
-      // After the WebAuthn ceremony completes, the settings flow is updated
-      // and the page shows the registered key. The PasskeySequencedSignIn
-      // component shows a "Sign in" button that redirects back to the login
-      // flow for AAL2 verification.
+      // PasskeySequencedSignIn renders a "Sign in" button that returns to the login flow for AAL2.
       const signInBtn = page.locator('button:has-text("Sign in")').last();
       await expect(signInBtn).toBeVisible({ timeout: 15_000 });
       await signInBtn.click();
 
-      // Wait for navigation away from the setup_passkey page.
-      // The redirect goes back to the login flow with aal=aal2.
       await page.waitForURL(
         (url) => !url.toString().includes("/ui/setup_passkey"),
         { timeout: 30_000 },
@@ -439,9 +327,6 @@ export const TRANSITION_TABLE: TransitionTable = {
     action: async (page, _user, ctx) => {
       await registerSecurityKey(page, ctx);
 
-      // In the OIDC sequencing flow, after the WebAuthn ceremony completes,
-      // the login-ui automatically redirects to the OIDC callback.
-      // Wait for navigation away from the setup_passkey page.
       await page.waitForURL(
         (url) => !url.toString().includes("/ui/setup_passkey"),
         { timeout: 30_000 },
@@ -449,16 +334,15 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // ── Setup complete ─────────────────────────────────────────────────────
+  // --- Setup complete ---
 
   "setup-complete → oidc-callback": {
     description: "Account setup complete — flow auto-continues to callback",
     action: async (_page) => {
-      // No action needed — the page auto-redirects after setup completion
     },
   },
 
-  // ── TOTP verify transitions ────────────────────────────────────────────
+  // --- TOTP verify transitions ---
 
   "login-totp-verify → oidc-callback": {
     description: "Submit TOTP code",
@@ -474,56 +358,34 @@ export const TRANSITION_TABLE: TransitionTable = {
       if (ctx.doubleSubmit) ctx.doubleSubmitConsumed = true;
     },
   },
-  // ── Device flow (RFC 8628) ─────────────────────────────────────────────
-  // The device half is an API call: startDeviceAuth() mints the
-  // device_code/user_code pair with the manifest's RP client (public
-  // endpoint + client_secret_post, so it runs on the live lane) and the
-  // browser enters at hydra's own verification_uri_complete — exactly where
-  // a real device's link/QR points. Hydra redirects to /ui/device_code with
-  // the user code prefilled.
+  // --- Device flow (RFC 8628) ---
+  // startDeviceAuth() mints the device_code/user_code pair via the RP client; the
+  // browser enters at hydra's verification_uri_complete, as a real device's link would.
   "start → device-code": {
     description: "Mint a device_code with the manifest RP and open hydra's verification URL",
     action: async (page, _user, ctx) => {
       const auth = await startDeviceAuth(page);
       ctx.deviceCode = auth.deviceCode;
-      // The property that makes the grant safe: possession of the
-      // device_code alone yields NO tokens — hydra must answer
-      // authorization_pending until the browser journey completes.
+      // Possession of the device_code alone yields no tokens: hydra answers authorization_pending until the browser completes.
       await expectDeviceTokenPending(page, auth.deviceCode);
       await page.goto(auth.verificationUriComplete);
       await expect(page.getByRole("heading", { name: "Enter code to continue" })).toBeVisible();
     },
   },
 
-  // Error self-transition (R-2 pattern): a user code hydra never issued.
-  // Observed 2026-08-31 on login-ui:stable: PUT /api/device answers a raw
-  // HTTP 500 "Failed to accept user code" (the BFF's precise
-  // NOT_FOUND_ERROR_DESC never reaches the wire) and the page renders a
-  // generic "Something went wrong, please try again" — the S-8
-  // status/message-collapse class, registered in config-model
-  // upstreamFindings. The runner's expectError assertion needs only a
-  // visible, non-empty error.
-  //
-  // Determinism, measured same day: NO rate limiting or lockout exists on
-  // user-code attempts (6 wrong codes on one device_challenge and 4 across
-  // fresh flows all answer identically in ~12ms), so repeated runs cannot
-  // race a limiter. RFC 8628 §5.2 recommends one — if a limiter ever lands
-  // upstream, re-measure this transition before trusting the gate.
+  // PUT /api/device answers a raw HTTP 500 for an unissued code and the page renders a generic
+  // "Something went wrong"; no rate limit exists on user-code attempts (RFC 8628 §5.2 recommends one).
   "device-code → device-code": {
     description: "Submit a user code hydra never issued (error — stays on the device page)",
     action: async (page) => {
       const field = page.getByRole("textbox");
       await field.clear();
-      // Well-formed shape (8 chars), impossible value: hydra's user codes are
-      // mixed-case base62 and an outstanding code equal to this literal would
-      // be a collision, not a behaviour.
+      // Well-formed (8 chars) but impossible: hydra's user codes are mixed-case base62.
       await field.fill("wrongcod");
       await page.getByRole("button", { name: "Next" }).click();
     },
   },
 
-  // The code arrives prefilled from the URL; Next hands the accepted
-  // device_challenge to hydra, which opens a login_challenge journey.
   "device-code → login-email": {
     description: "Confirm the prefilled user code — hydra opens the login journey",
     action: async (page) => {
@@ -531,10 +393,6 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // Terminal: after the second factor, login-ui accepts the device session
-  // and lands on urls.device.success (/ui/device_complete, "Sign in
-  // successful … successfully connected"). No callback follows — the runner
-  // polls the token endpoint with ctx.deviceCode instead.
   "login-totp-verify → device-complete": {
     description: "Submit TOTP — the device journey terminates on /ui/device_complete",
     action: async (page, user, ctx) => {
@@ -570,9 +428,6 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // Error case: rejected TOTP code — stays on login-totp-verify. Which kind of
-  // rejection is the scenario's choice (`totpCodeWindow`); the scenario also
-  // declares `expectError: true` so the runner reads the message.
   "login-totp-verify → login-totp-verify": {
     description: "Submit a rejected TOTP code (error — stays on verify page)",
     action: async (page, user, ctx) => {
@@ -588,12 +443,11 @@ export const TRANSITION_TABLE: TransitionTable = {
           "drop `totpCodeWindow: \"expired\"`.",
         );
       }
-      // A code from a window Kratos rejects, computed rather than waited for.
       await submitTotpCode(page, secret, Date.now() - EXPIRED_TOTP_WINDOW_OFFSET_MS);
     },
   },
 
-  // ── Tenant selection transitions ───────────────────────────────────────
+  // --- Tenant selection transitions ---
 
   "tenant-selection → login-password": {
     description: "Select tenant",
@@ -605,10 +459,7 @@ export const TRANSITION_TABLE: TransitionTable = {
     action: selectTenantAction,
   },
 
-  // A dex-credentialed multi-tenant identity: tenant lookup keys on the
-  // identifier, so selection precedes the credential page exactly as for a
-  // password user, and that page offers "Sign in with Dex" (observed
-  // 2026-09-02, canonical-portal).
+  // Tenant lookup keys on the identifier, so selection precedes the Dex button.
   "tenant-selection → provider:dex:login": {
     description: "Select tenant, then click the Dex login button",
     action: async (page, _user, ctx) => {
@@ -628,19 +479,15 @@ export const TRANSITION_TABLE: TransitionTable = {
     action: selectTenantAction,
   },
 
-  // ── External provider (Dex) transitions ────────────────────────────────
+  // --- External provider (Dex) transitions ---
 
   "provider:dex:login → oidc-callback": {
     description: "Login with Dex",
     action: async (page, user) => {
-      // The scenario user's manifest email doubles as the dex static-password
-      // account (dex-user and the link users alike) — never hardcode one.
+      // The manifest email doubles as the dex static-password account — never hardcode one.
       await loginWithDex(page, user.email);
     },
   },
-  // Hypothesised terminal of the login-time LINK walk (entered from
-  // /ui/register, no OIDC challenge): after the second factor the session
-  // lands on the settings hub. Same submit as "→ oidc-callback".
   "login-totp-verify → manage-details": {
     description: "Submit TOTP — the challenge-less link login lands on the settings hub",
     action: async (page, user, ctx) => {
@@ -651,17 +498,8 @@ export const TRANSITION_TABLE: TransitionTable = {
       await submitTotpCode(page, secret);
     },
   },
-  // The authenticate-to-link completion, pinned as REAL behaviour (§11), for
-  // a no-2FA identity: the password submit LINKS and a session is issued —
-  // kratos answers 200 with a bare session object (methods password +
-  // oidc/dex; trace-verified 2026-09-01) — but the response carries no
-  // continue_with and no redirect_browser_to, and the SPA renders NOTHING:
-  // the user is linked, sessioned, and stranded on a dead password page
-  // (filed in upstreamFindings; the TOTP-identity variant dead-ends harder,
-  // kratos 1010004 → BFF 500). The action therefore asserts the 200-session
-  // submit and walks on by navigation — the issued session is what makes the
-  // settings hub serve. When the SPA learns to navigate, the manual goto
-  // becomes a no-op and this transition keeps passing.
+  // The password submit links and issues a session (200 + bare session) but the response
+  // carries no continue_with, so the SPA renders nothing; walk on by navigation.
   "login-password → manage-details": {
     description: "Submit the existing password on the authenticate-to-link page — linked and sessioned; the SPA strands, so walk on",
     action: async (page, user) => {
@@ -673,19 +511,13 @@ export const TRANSITION_TABLE: TransitionTable = {
       const response = await submitted;
       expect(response.status(), "the link submit must succeed (200 + session)").toBe(200);
       await page.goto(`${LOGIN_UI_URL}/ui/manage_details`);
-      // Let the hub's own fetches (settings flow, whoami) finish before the
-      // phase ends: the next phase's freshSession clears cookies, and an
-      // in-flight request answering 401 makes the SPA bounce to /ui/login —
-      // a client-side redirect that races the next start navigation
-      // (observed 1-in-4, 2026-09-01).
+      // Let the hub's fetches finish: a 401 in flight after the next phase clears cookies bounces the SPA to /ui/login.
       await page.waitForLoadState("networkidle", { timeout: 5_000 }).catch(() => {});
     },
   },
 
-  // ── Account linking (S10 item 15) ──────────────────────────────────────
-  // Login-time linking enters from the REGISTER page's provider buttons —
-  // the identifier-first login page only offers providers to identities that
-  // already carry the oidc credential (observed 2026-09-01).
+  // --- Account linking ---
+  // Login-time linking enters from the REGISTER page; the login page only offers providers to identities that already carry the oidc credential.
   "register-email → provider:dex:login": {
     description: 'Click "Sign in with Dex" on the registration page',
     action: async (page) => {
@@ -694,11 +526,7 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // The collision: dex authenticates an address that already belongs to a
-  // seeded PASSWORD identity, and kratos redirects to the authenticate-to-
-  // link page — /ui/login?flow=…&no_org_ui=true, DOM-identical to the
-  // ordinary password page (observed 2026-09-01), so it reuses the
-  // login-password state (the settings-suite precedent).
+  // The authenticate-to-link page (/ui/login?flow=…&no_org_ui=true) is DOM-identical to the password page.
   "provider:dex:login → login-password": {
     description: "Dex login for a colliding address — kratos asks for the existing password to link",
     action: async (page, user) => {
@@ -706,9 +534,7 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // Settings-side linking: the Connect buttons render one per provider, dex
-  // first (observed order); the dex landing is what the next state assert
-  // verifies.
+  // Connect buttons render one per provider, dex first.
   "connected-accounts → provider:dex:login": {
     description: 'Click Connect on the dex row of /ui/manage_connected_accounts',
     action: async (page) => {
@@ -717,9 +543,7 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // The settings Connect ceremony's landing: the settings flow carries no
-  // return_to, so kratos completes onto selfservice.flows.settings.ui_url —
-  // /ui/reset_password (runner-observed 2026-09-01). The link itself is done.
+  // The settings flow carries no return_to, so kratos lands on settings.ui_url (/ui/reset_password).
   "provider:dex:login → reset-password": {
     description: "Dex login from the settings Connect — kratos lands on the settings ui_url fallback",
     action: async (page, user) => {
@@ -727,7 +551,6 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // Self-transition: Disconnect re-renders the page in its unlinked shape.
   "connected-accounts → connected-accounts": {
     description: "Disconnect the linked provider (page re-renders unlinked)",
     action: async (page) => {
@@ -747,11 +570,10 @@ export const TRANSITION_TABLE: TransitionTable = {
   "provider:dex:consent → oidc-callback": {
     description: "Accept Dex consent (auto-redirects)",
     action: async (_page) => {
-      // Dex with skipApprovalScreen auto-redirects — no action needed
     },
   },
 
-  // ── External provider (Google) transitions ─────────────────────────────
+  // --- External provider (Google) transitions ---
 
   "provider:google:login → provider:google:password": {
     description: "Enter Google email",
@@ -763,13 +585,7 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // Google session reuse: with a Google session from an earlier phase, the
-  // hop through accounts.google.com is sub-second (Google auto-selects the
-  // account and bounces to the Kratos callback), so `provider:google:login`
-  // is never an observable state — measured 2026-09-08: the runner's state
-  // assertion found the page already on the security-key verify step. The
-  // edge names what the browser can actually be seen doing: enter the email,
-  // click Google, land on the AAL2 verify page.
+  // A live Google session auto-selects the account sub-second, so provider:google:login is never observable.
   "login-email → login-webauthn-verify": {
     description: "Enter email, click Google — a live Google session bounces straight to webauthn verify",
     action: async (page, user) => {
@@ -853,20 +669,16 @@ export const TRANSITION_TABLE: TransitionTable = {
     action: confirmGoogleIdentityAction,
   },
 
-  // NOTE: consent and interstitial are handled internally by confirmGoogleIdentity.
-  // These transitions exist for the transition validator but the action is a no-op
-  // since confirmGoogleIdentity already navigated past these pages.
+  // consent/interstitial are navigated by confirmGoogleIdentity; these entries only satisfy the validator.
   "provider:google:consent → provider:google:interstitial": {
     description: "Allow Google consent (proceed to interstitial) — handled by confirmGoogleIdentity",
     action: async (_page) => {
-      // Already handled by confirmGoogleIdentity
     },
   },
 
   "provider:google:consent → oidc-callback": {
     description: "Allow Google consent (direct to callback) — handled by confirmGoogleIdentity",
     action: async (_page) => {
-      // Already handled by confirmGoogleIdentity
     },
   },
 
@@ -877,43 +689,26 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // ── Backup code verify transitions ─────────────────────────────────────
+  // --- Backup code verify transitions ---
 
   "login-backup-code-verify → oidc-callback": {
     description: "Submit backup recovery code",
     action: verifyBackupCodeAction,
   },
-  // The identity's ONLY second factor is lookup_secret (the post-unlink
-  // state): enforced MFA accepts the code and then walks straight into TOTP
-  // re-enrolment instead of completing to the callback (observed 2026-08-31
-  // on login-ui:stable). "setup-secure → setup-complete" then captures the
-  // fresh secret into ctx.totpSecret for later phases.
+  // lookup_secret is the only second factor, so enforced MFA walks into TOTP re-enrolment instead of the callback.
   "login-backup-code-verify → setup-secure": {
     description: "Submit backup code (no TOTP on the identity — enforced MFA walks into re-enrolment)",
     action: verifyBackupCodeAction,
   },
 
-  // Error self-transition (R-2 pattern): submit a code an earlier phase
-  // already spent. Kratos rejects it visibly ("This backup code was already
-  // used") and the flow stays put — the runner's expectError assertion reads
-  // the message.
   "login-backup-code-verify → login-backup-code-verify": {
     description: "Submit an already-used backup code (error — stays on the backup code page)",
     action: verifyBackupCodeAction,
   },
 
-  // No consent-screen transition exists on purpose: login-ui auto-accepts
-  // every consent request (remember=true, all scopes), so /ui/consent is
-  // unreachable in this deployment and coverage was decided against
-  // (docs/testing-spec.md §10 item 12). The provider consent states
-  // (provider:dex:consent, provider:google:consent) are third-party IdP
-  // surfaces and are unaffected.
+  // No /ui/consent transition: login-ui auto-accepts every consent request, so the page is unreachable.
 
-  // ── Recovery flow transitions ──────────────────────────────────────────
-  //
-  // The recovery flow starts from the login page (click "Reset password")
-  // or directly navigating to the recovery page. It uses Mailslurper
-  // (via page.context()) to read the recovery code from email.
+  // --- Recovery flow transitions ---
 
   "start → reset-email": {
     description: "Navigate to the recovery flow entry page",
@@ -933,9 +728,7 @@ export const TRANSITION_TABLE: TransitionTable = {
   "reset-email → reset-email-code": {
     description: "Enter email and submit the recovery form",
     action: async (page, user, ctx) => {
-      // Snapshot the mailbox first: Mailslurper keeps mail across runs and this
-      // identity is reused, so the code read afterwards must be one that did
-      // not exist yet.
+      // Snapshot first: Mailslurper keeps mail across runs, so the code read must postdate this.
       ctx.mailCursor = await mailCursor(user.email);
       await page.getByLabel(/e-?mail/i).first().fill(user.email);
       await page.getByRole("button", { name: /reset password|submit/i }).click();
@@ -959,15 +752,9 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // ── Recovery code abuse ────────────────────────────────────────────────
-  //
-  // Kratos counts code submissions per flow and refuses past `max_submissions`
-  // (default 5), invalidating the flow. The wrong-codes scenario deliberately
-  // stays WITHIN the cap (recovery-scenarios.ts has the full evidence), so
-  // there is exactly ONE transition here, the in-place rejection. Covering the
-  // cap-trip itself (submission 6) needs a `reset-email-code → reset-email`
-  // sibling and a final hop — blocked on the login-ui BFF nil-deref on that
-  // path (pkg/kratos/service.go:737).
+  // --- Recovery code abuse ---
+  // Kratos refuses past `max_submissions` (default 5) and invalidates the flow; the
+  // scenario stays within the cap, so the only transition here is the in-place rejection.
   "reset-email-code → reset-email-code": {
     description: "Submit a wrong recovery code (rejected — stays on the code step)",
     action: async (page) => {
@@ -983,26 +770,14 @@ export const TRANSITION_TABLE: TransitionTable = {
     action: async (page, user, ctx) => {
       const newPassword = ctx.newPassword ?? "New-Secure-Password-456!";
       await enterNewPassword(page, newPassword);
-      // Later phases (and the restore-password cleanup) must use the password
-      // we just set, not the seeded one. readManifest() is per-test, so
-      // mutating the ManifestUser is scoped to this test.
       ctx.newPassword = newPassword;
       user.password = newPassword;
     },
   },
 
-  // ── Settings pages (the authenticated self-service hub) ────────────────
-  //
-  // /ui/manage_details is login-ui's settings hub; its nav routes to
-  // manage_password (→ /ui/reset_password, heading "Change password"),
-  // manage_backup_codes (→ /ui/setup_backup_codes) and manage_secure
-  // (→ /ui/setup_secure). Every surface REUSES a URL the login/recovery
-  // journeys already own, so no new page states exist — only these
-  // transitions. All of them assume a live AAL2 session from an earlier
-  // phase; none needs an admin API, so the settings scenarios run on the
-  // live lane.
-  //
-  // The settings hub: recovery's terminal, and the settings scenarios' base.
+  // --- Settings pages (the authenticated self-service hub) ---
+  // Every settings surface reuses a URL the login/recovery journeys own, so no new page
+  // states exist; all assume a live AAL2 session and none needs an admin API (live lane).
 
   "start → manage-details": {
     description:
@@ -1021,18 +796,9 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // Success is a SELF-transition: the form stays on /ui/reset_password with a
-  // fresh flow id and a "Password was changed successfully" banner (observed
-  // 2026-08-27 on iam.orange). The weak-password rejection is asserted here
-  // too, as a prefix, because both outcomes live on the same state pair and
-  // the transition table holds one action per pair.
-  //
-  // First traversal: submit a weak password (must be rejected VISIBLY), then a
-  // new strong one; mutate user.password so later phases and the
-  // restore-password cleanup authenticate with what is now true.
-  // Second traversal (ctx.newPassword already set): submit the SEEDED password
-  // back — the scenario's own path restores the shared identity, so a
-  // completed walk leaves the deployment exactly as the seeder made it.
+  // Self-transition: success stays on /ui/reset_password with a new flow id. First pass
+  // changes the password (weak value rejected first); second pass (ctx.newPassword set)
+  // restores the seeded password so a completed walk leaves the identity as seeded.
   "reset-password → reset-password": {
     description:
       "Change the password from settings: weak value rejected visibly, then " +
@@ -1042,11 +808,8 @@ export const TRANSITION_TABLE: TransitionTable = {
       const confirmField = page.getByLabel("Confirm New password");
       const changeBtn = page.getByRole("button", { name: "Change password" });
 
-      // Policy floor: too short, no uppercase, no digit. The UI's rejection is
-      // DISABLING the submit (aria-disabled) — click-based probing would hang
-      // on actionability, so the disabled state IS the visible-rejection
-      // assertion. Kept inside the change scenario because a second
-      // "reset-password → reset-password" action cannot exist.
+      // The UI rejects a weak password by DISABLING submit (aria-disabled); clicking would
+      // hang on actionability, so the disabled state is the assertion.
       await newField.fill("abc");
       await confirmField.fill("abc");
       await expect(changeBtn).toBeDisabled();
@@ -1075,34 +838,9 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // Also a self-transition: /ui/setup_backup_codes re-renders in place for
-  // BOTH of its operations, so one action serves two walks, branched on
-  // ctx.backupCode (the "reset-password → reset-password" change/restore
-  // precedent):
-  //
-  //  - First traversal (ctx.backupCode unset): create (or regenerate) codes
-  //    and HARVEST one into ctx.backupCode. The page has two entry shapes —
-  //    "Create backup codes" when none exist, "View backup codes"/
-  //    "Deactivate backup codes" when some do. Newer login-ui (observed
-  //    2026-08-31 on :stable) renders the fresh codes as CANDIDATES: nothing
-  //    is stored until the "I saved the backup codes" checkbox enables the
-  //    commit button — a code harvested without that click authenticates
-  //    nowhere ("Invalid backup code"). Older login-ui (orange's
-  //    v0.24–v0.25) commits on create and shows no checkbox. The action
-  //    drives whichever shape renders. A later freshSession phase signing in
-  //    with the harvested code is the only assertion that the codes this
-  //    page hands out are real.
-  //
-  //  - Second traversal (ctx.backupCode set): DEACTIVATE the codes through
-  //    the confirmation dialog and require the page to collapse to its
-  //    no-codes shape. Server-side credential removal is the
-  //    "backup-codes-deactivated" post check's contract, not this action's —
-  //    after deactivation the login UI stops OFFERING the backup-code
-  //    method, so no browser walk can reach a rejection.
-  //
-  // Create/regenerate observed 2026-08-27 on iam.orange, deactivate observed
-  // 2026-08-31 on login-ui:stable. First-login backup-code ENROLMENT still
-  // has no driving action and remains covered by specs/use-backup-codes.spec.ts.
+  // Self-transition branched on ctx.backupCode: first pass creates codes and harvests one;
+  // second pass deactivates through the dialog. Newer login-ui stores nothing until the
+  // "I saved the backup codes" checkbox commits; older (v0.24–v0.25) commits on create.
   "setup-backup-codes → setup-backup-codes": {
     description: "Create backup codes and capture one (first pass) or deactivate them (second pass)",
     action: async (page, _user, ctx) => {
@@ -1111,8 +849,7 @@ export const TRANSITION_TABLE: TransitionTable = {
       const deactivateBtn = page.getByRole("button", { name: "Deactivate backup codes" });
 
       if (ctx.backupCode) {
-        // Deactivate pass. The dialog repeats the trigger button's accessible
-        // name, so scope the confirm click to the dialog.
+        // The dialog repeats the trigger button's name, so scope the confirm click to the dialog.
         await deactivateBtn.click();
         const dialog = page.getByRole("dialog", { name: "Deactivate backup codes" });
         await expect(dialog).toBeVisible();
@@ -1122,41 +859,44 @@ export const TRANSITION_TABLE: TransitionTable = {
         return;
       }
 
-      // Create pass. Wait for the page to settle on either entry shape before
-      // branching — isVisible() does not wait.
+      // Wait for either entry shape before branching — isVisible() does not wait.
       await expect(createBtn.or(viewBtn).first()).toBeVisible();
       if (await viewBtn.isVisible()) {
         await viewBtn.click();
       }
       await createBtn.click();
 
-      // Unused codes render as 8-char lowercase alphanumerics; consumed ones
-      // render as the literal "Used". Freshly created ⇒ all lines are codes.
-      const harvest = async () => {
-        const codes = (await page.locator("main").innerText())
+      // Unused codes render as 8-char lowercase alphanumerics; consumed ones as "Used".
+      const unusedCodes = async () =>
+        (await page.locator("main").innerText())
           .split("\n")
           .map((l) => l.trim())
           .filter((l) => /^[a-z0-9]{8}$/.test(l));
+      const harvest = async () => {
+        const codes = await unusedCodes();
         if (codes.length === 0) {
           throw new Error("setup-backup-codes: created codes but none are visible to harvest");
         }
         ctx.backupCode = codes[0];
       };
 
-      // Two post-create shapes: the candidate list behind the "I saved the
-      // backup codes" confirm (newer UI), or the already-committed toolbar
-      // with "Deactivate backup codes" (older UI).
+      // Wait for what the create produced: the candidate list behind the confirm checkbox
+      // (newer UI), fresh codes (older UI commits on create) or the View button that hides
+      // them. An identity that already had codes still shows its old list (Deactivate,
+      // Download, all "Used") until the new state renders — that list is not the result.
       const savedCheckbox = page.getByLabel("I saved the backup codes");
-      await expect(savedCheckbox.or(deactivateBtn).first()).toBeVisible();
+      await expect
+        .poll(async () => (await savedCheckbox.isVisible()) || (await viewBtn.isVisible()) || (await unusedCodes()).length > 0, {
+          message: "setup-backup-codes: the create produced neither candidates nor fresh codes",
+          timeout: 15_000,
+        })
+        .toBe(true);
 
       if (await savedCheckbox.isVisible()) {
-        // Harvest from the candidate list, then COMMIT — the codes do not
-        // exist server-side until this click.
+        // Harvest, then commit — the codes do not exist server-side until this click.
         await expect(page.getByRole("button", { name: "Download" })).toBeVisible();
         await harvest();
-        // Vanilla-framework checkbox: the styled label span intercepts
-        // pointer events over the input, so .check() on the input times out —
-        // click the label and assert the input state instead.
+        // The styled label span intercepts pointer events, so .check() times out; click the label.
         await page.getByText("I saved the backup codes").click();
         await expect(savedCheckbox).toBeChecked();
         const commitBtn = page.getByRole("button", { name: "Create backup codes", exact: true });
@@ -1164,8 +904,6 @@ export const TRANSITION_TABLE: TransitionTable = {
         await commitBtn.click();
         await expect(deactivateBtn).toBeVisible();
       } else {
-        // Committed on create; open the view if the page collapsed, then
-        // harvest from the stored list.
         if (await viewBtn.isVisible().catch(() => false)) {
           await viewBtn.click();
         }
@@ -1175,11 +913,8 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // /ui/setup_secure with TOTP already linked ("setup-secure-linked", a
-  // DOM-split of the same URL — see helpers/page-state.ts). Unlinking
-  // re-renders the enrolment shape in place; server-side it deletes the totp
-  // credential and KEEPS lookup_secret, which is why the next login lands on
-  // "login-password → login-backup-code-verify".
+  // "setup-secure-linked" is a DOM split of /ui/setup_secure (helpers/page-state.ts).
+  // Unlinking deletes the totp credential and KEEPS lookup_secret.
   "manage-details → setup-secure-linked": {
     description: 'Open "Authenticator" in the settings nav (TOTP linked — lands on the unlink shape)',
     action: async (page) => {
@@ -1196,10 +931,7 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // ── Registration flow transitions ──────────────────────────────────────
-  //
-  // The registration flow starts from the registration page. It follows
-  // a different path than the OIDC login flow.
+  // --- Registration flow transitions ---
 
   "start → register-email": {
     description: "Navigate to the registration flow entry page",
@@ -1226,13 +958,8 @@ export const TRANSITION_TABLE: TransitionTable = {
       await fillRegistrationPassword(page, password);
     },
   },
-  // Verification OFF: kratos answers the password submit with
-  // continue_with[redirect_browser_to → /ui/manage_details] (measured
-  // 2026-09-01 on mx-l1m0v0wnp0t1h0u1aj), RegisterPassword.tsx follows it as
-  // the fallback branch (v0.28.0 RegisterPassword.tsx:85-94), and the
-  // registration `session` after-hook (docker/kratos/kratos.yml, mirroring
-  // the operator template) means the settings hub actually serves — the
-  // runner-observed terminal.
+  // Verification OFF: kratos answers with continue_with[redirect_browser_to → /ui/manage_details]
+  // and the registration `session` after-hook (docker/kratos/kratos.yml) makes the hub serve.
   "register-password → manage-details": {
     description:
       "Enter valid password and submit — no verification hand-off; the session lands on the settings hub",
@@ -1242,10 +969,7 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // ── Verification flow transitions ──────────────────────────────────────
-  //
-  // The verification flow starts from a verification link or by navigating
-  // to the verification page. It uses Mailslurper to read the code.
+  // --- Verification flow transitions ---
 
   "start → verification": {
     description: "Bootstrap the verification flow and advance to the code step",
@@ -1257,8 +981,6 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // A standalone verification flow is not part of an OIDC journey, so Kratos
-  // returns the browser to the login page once the code is accepted.
   "verification → login-email": {
     description: "Enter the emailed verification code; Kratos returns to login",
     action: async (page, user, ctx) => {
@@ -1268,16 +990,9 @@ export const TRANSITION_TABLE: TransitionTable = {
         subject: MAIL_SUBJECTS.verification,
         seen: ctx.mailCursor,
       });
-      // The field's accessible name is "Verification code Resend code" — the
-      // adjacent resend button sits inside the label — and the submit control
-      // is "Continue", not "Submit".
-      //
-      // Type per character rather than fill(): login-ui's Flow component keeps
-      // a controlled value map that it re-initialises from the flow's nodes
-      // whenever the flow object identity changes. A single fill() racing that
-      // reconciliation sets the DOM value but not React state, and the form
-      // then POSTs without a `code` at all — which Kratos rejects as a missing
-      // address. Assert the value stuck so a regression fails loudly.
+      // Accessible name is "Verification code Resend code" (the resend button sits inside the label).
+      // Type per character: login-ui's Flow component re-initialises its controlled values when
+      // the flow object changes, and a racing fill() POSTs without `code`. Assert the value stuck.
       const codeField = page.getByLabel(/verification code/i);
       await codeField.pressSequentially(code, { delay: 20 });
       await expect(codeField).toHaveValue(code);
@@ -1285,12 +1000,6 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // The scenario declares `expectError: true`; the runner reads the message.
-  // Two rejection kinds, the scenario's choice (`verificationCodeSubmission`,
-  // the totpCodeWindow precedent): a junk code, or the ORIGINAL code after a
-  // resend invalidated it (kratos replaces the flow's code on resend —
-  // witnessed 2026-09-01 by the resend primitive's pre-drain race, now
-  // asserted deliberately).
   "verification → verification": {
     description: "Submit a rejected verification code (error — stays on verification page)",
     action: async (page, user, ctx) => {
@@ -1302,9 +1011,6 @@ export const TRANSITION_TABLE: TransitionTable = {
       assertInternalLane(ctx, "Stale-after-resend code submission (reads Mailslurper)");
       const { originalCode, cursor } = await resendVerificationCode(page, user.email, ctx.mailCursor);
       ctx.mailCursor = cursor;
-      // Same React-race-safe input as the accept path: typed per character,
-      // value asserted, so the rejection below is about the CODE, never a
-      // swallowed field.
       const codeField = page.getByLabel(/verification code/i);
       await codeField.pressSequentially(originalCode, { delay: 20 });
       await expect(codeField).toHaveValue(originalCode);
@@ -1312,11 +1018,7 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
 
-  // ── WebAuthn flow transitions ──────────────────────────────────────────
-  //
-  // WebAuthn uses the existing login flow pages but with WebAuthn-specific
-  // node groups. The virtual authenticator must be set up before these
-  // transitions are executed (handled in the spec file's beforeEach).
+  // --- WebAuthn flow transitions ---
 
   "login-password → login-webauthn-verify": {
     description: "Enter password (WebAuthn is the 2FA method)",
@@ -1326,35 +1028,24 @@ export const TRANSITION_TABLE: TransitionTable = {
   "login-webauthn-verify → oidc-callback": {
     description: "Authenticate with WebAuthn virtual authenticator",
     action: async (page, _user, ctx) => {
-      // Ensure the CDP virtual authenticator is active
       await ctx.webauthn?.setup();
 
-      // The CDP virtual authenticator with automaticPresenceSimulation
-      // auto-responds to navigator.credentials.get(); the ceremony still needs
-      // an explicit click. Match the Kratos node name, not the button label:
-      // the label text varies with whether OIDC sequencing is on, and is never
-      // an exact "Sign in".
+      // The virtual authenticator auto-responds to navigator.credentials.get() but the ceremony needs
+      // a click. Match the Kratos node name: the button label varies with OIDC sequencing.
       await page.locator('button[name="webauthn_login_trigger"]').click();
     },
   },
-  // The key-only identity's REAL post-ceremony hop, identical on the
-  // sequencing and webauthn-as-2FA shapes (observed 2026-09-01 on both
-  // canonical-internal and canonical-portal): the signed assertion is
-  // ACCEPTED — a session exists, the settings flow id on /ui/setup_secure
-  // proves it — and login-ui's TOTP-only MFA gate then forces TOTP enrolment
-  // mid-login anyway instead of completing to the callback. PD-4, sharpened:
-  // not even a signed key satisfies the gate's credential check.
+  // The signed assertion is accepted, then login-ui's TOTP-only MFA gate forces enrolment mid-login.
   "login-webauthn-verify → setup-secure": {
-    description: "Authenticate with the security key — login-ui accepts it, then forces TOTP enrolment (PD-4)",
+    description: "Authenticate with the security key — login-ui accepts it, then forces TOTP enrolment",
     action: async (page, _user, ctx) => {
       await ctx.webauthn?.setup();
       await page.locator('button[name="webauthn_login_trigger"]').click();
     },
   },
 
-  // ── Edge case transitions ──────────────────────────────────────────────
+  // --- Edge case transitions ---
 
-  // Backup code regeneration prompt after using a backup code
   "login-backup-code-verify → backup-code-regenerate": {
     description: "Authenticate with backup code (shows regeneration prompt)",
     action: verifyBackupCodeAction,

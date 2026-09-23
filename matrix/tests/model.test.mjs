@@ -1,10 +1,8 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 //
-// Invariants over the model's pure derivations (matrix/lib.mjs) — checked
-// against every row in the checked-in matrix.json, so a lib change that
-// breaks a contract fails here in milliseconds instead of mid-loop on a
-// live cluster.
+// Invariants over the model's pure derivations (matrix/lib.mjs), checked
+// against every row in the checked-in matrix.json.
 
 import { test } from "node:test";
 import assert from "node:assert/strict";
@@ -28,9 +26,7 @@ test("rowName encoding round-trips every non-pinned row", () => {
   }
 });
 
-// `mail_api` is a DECLARED capability on every row, and dims alone never turn
-// it off: only a row's `caps` block can, because a target without mailslurper
-// is a property of that target, not of the platform's configuration space.
+// `mail_api` is declared on every row; only a row's `caps` block can turn it off.
 test("mail is a declared capability on every row, and only a caps block moves it", () => {
   for (const row of namedRows) {
     assert.equal(capabilities(row.dims).mail_api, true, `${row.name} dims-derived`);
@@ -94,11 +90,8 @@ test("webauthn-passwordless is retired from the generated space (upstream unmain
   }
 });
 
-// tenant-service and hook-service authenticate their admin APIs by parsing the
-// bearer token as a JWT (JWKS/issuer, no introspection), so an opaque-token
-// deployment cannot be seeded: the nightly was red on every such row from
-// 2026-08-27 to 2026-09-08 (`401 invalid token` from both services). The pair
-// is retired from generation until the services introspect.
+// tenant-service and hook-service parse the bearer token as a JWT (no
+// introspection), so an opaque-token deployment cannot be seeded.
 test("opaque access tokens never pair with a present add-on admin API", () => {
   for (const row of namedRows.filter((r) => r.dims.access_token === "opaque")) {
     assert.equal(row.dims.tenant_service, "absent", `${row.name} tenant-service`);
@@ -106,9 +99,7 @@ test("opaque access tokens never pair with a present add-on admin API", () => {
   }
 });
 
-// A target-bound row (config-model.mjs `backends`) materializes no artifact for
-// a backend that cannot render its declared truths — `make matrix-up` refuses
-// on the missing override instead of deploying a row the preflight will refuse.
+// A target-bound row materializes no artifact for a backend that cannot render it.
 test("a row's on-disk artifacts follow its backend binding", () => {
   for (const row of matrix.rows) {
     const dir = path.join(HERE, "..", "rows", row.name);

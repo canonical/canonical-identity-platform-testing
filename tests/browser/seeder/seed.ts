@@ -1,42 +1,26 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * Seeder — creates users via admin APIs and writes a manifest file.
- *
- * Usage:
- *   npx tsx seeder/seed.ts [--fresh|--incremental|--purge] [--profile <name>]
- *
- * The seeder is independent of scenario definitions. Which users to create
- * is determined by seeder/archetypes.ts, not by importing scenario files.
- * The test runner reads the output manifest.json and never calls admin APIs.
- *
- * Every mode that deletes is scoped by seeder/ownership.ts, so an admin can run
- * this out of band against a deployment that already has real users on it:
- *
- *   --fresh        delete the test-plane's own records, then re-create them
- *   --incremental  adopt whatever already exists, create only what is missing
- *   --purge        delete the test-plane's own records and stop
- *
- * Admin/out-of-band use: point KRATOS_ADMIN_URL, HYDRA_ADMIN_URL and
- * TENANT_SERVICE_URL at the deployment, and set MANIFEST=<path> to write the
- * manifest somewhere the test runner can later read it (tests/browser/LANES.md).
- */
+// Creates the archetype users via admin APIs and writes manifest.json, which the test runner
+// reads instead of calling admin APIs. The manifest is SECRET-BEARING (passwords, TOTP secrets).
+// Usage: npx tsx seeder/seed.ts [--fresh|--incremental|--purge] [--profile <name>]
+//   --fresh        delete the test-plane's own records, then re-create them
+//   --incremental  adopt whatever already exists, create only what is missing
+//   --purge        delete the test-plane's own records and stop (Hydra clients are never deleted)
+// Deletes are scoped by seeder/ownership.ts. Out-of-band: point KRATOS_ADMIN_URL, HYDRA_ADMIN_URL
+// and TENANT_SERVICE_URL at the deployment and set MANIFEST=<path> (tests/browser/LANES.md).
 
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-// Helpers (reuse the existing ones)
 import { createIdentity, createIdentityWithOIDC, deleteIdentity, deleteIdentityCredentialType, findIdentityByEmail, deleteIdentitySessions, listIdentities, markVerified, createSessionToken, initTotpSettingsFlow, confirmTotpEnrollment, generateBackupCodes, burnBackupCodes } from "../helpers/kratos";
 import { generateTotpCode } from "../helpers/totp";
 import { createTenant, deleteTenant, getServiceToken, listTenants, provisionUser } from "../helpers/tenants";
 import { addUsersToGroup, ensureGroup, getHookAdminToken, listUserGroups } from "../helpers/hooks";
 import { HYDRA_ADMIN_URL, activeConfig, isServiceInProfile, localUsersEnabled, GOOGLE_TEST_EMAIL, GOOGLE_TEST_SUBJECT_ID } from "../helpers/config";
 
-// Archetype definitions — the authoritative list of users to seed
 import { USER_ARCHETYPES, type UserArchetype } from "./archetypes";
 
-// Ownership — the only thing that authorises a delete
 import {
   archetypeEmail,
   ownsIdentity,
@@ -46,31 +30,19 @@ import {
   type Provenance,
 } from "./ownership";
 
-// Manifest location — one resolver, shared with the test runner
 import { resolveManifestPath } from "../framework/manifest";
 
-// Client definitions — the authoritative payloads for Hydra OAuth2 clients
 import { RP_CLIENT_PAYLOAD, SVC_CLIENT_PAYLOAD, HOOKS_ADMIN_CLIENT_PAYLOAD, type RegisteredClient } from "./clients";
 
-// Manifest types
 import type { Manifest, ManifestUser, ManifestTenant, ManifestMembership, ManifestGroup, ManifestOauthClients } from "./manifest-schema";
 
-// Credentials — one definition, shared with the specs and the transition table
 import {
   DEFAULT_TEST_PASSWORD,
   DEX_USER_PASSWORD,
 } from "../helpers/test-credentials";
 
-/**
- * hook-service groups to seed, and which archetypes belong to them.
- *
- * `returning-mfa` is the general-purpose "already enrolled" login identity: it
- * is exercised by the login, error, session and recovery scenarios, none of
- * which delete it or change its email — and email is the key hook-service uses
- * for membership. The registration and verification archetypes are deleted or
- * consumed by their scenarios, and the tenant archetypes carry tenant state
- * that would confound a groups assertion, so they are poor carriers for this.
- */
+// hook-service groups to seed. `returning-mfa` carries membership: no scenario deletes it or
+// changes its email, and email is the key hook-service uses for membership.
 const HOOK_GROUP_DEFS = [
   {
     ref: "platform-testers",
@@ -80,15 +52,11 @@ const HOOK_GROUP_DEFS = [
   },
 ];
 
-// ---------------------------------------------------------------------------
-// Collect archetypes
-// ---------------------------------------------------------------------------
+// --- Collect archetypes ---
 
-/** Return the archetype map to use for seeding. */
 function collectUserRequirements(): Map<string, UserArchetype> {
   const userMap = new Map<string, UserArchetype>();
   for (const archetype of USER_ARCHETYPES) {
-    // Skip google-user when Google credentials are not configured
     if (archetype.credentials.includes("oidc/google") && (!GOOGLE_TEST_EMAIL || !GOOGLE_TEST_SUBJECT_ID)) {
       console.log(`  Skipping ${archetype.ref}: GOOGLE_TEST_EMAIL and/or GOOGLE_TEST_SUBJECT_ID not set`);
       continue;
@@ -98,13 +66,10 @@ function collectUserRequirements(): Map<string, UserArchetype> {
   return userMap;
 }
 
-// ---------------------------------------------------------------------------
-// Client registration
-// ---------------------------------------------------------------------------
+// --- Client registration ---
 
 /** Upsert a single Hydra OAuth2 client (PUT to update, POST to create). */
 async function upsertClient(payload: Record<string, unknown>): Promise<RegisteredClient> {
-  // Try PUT first (update existing client)
   const putRes = await fetch(`${HYDRA_ADMIN_URL}/admin/clients/${payload.client_id}`, {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
@@ -115,7 +80,6 @@ async function upsertClient(payload: Record<string, unknown>): Promise<Registere
     return (await putRes.json()) as RegisteredClient;
   }
 
-  // If client doesn't exist (404), fall back to POST (create)
   if (putRes.status === 404) {
     const postRes = await fetch(`${HYDRA_ADMIN_URL}/admin/clients`, {
       method: "POST",
@@ -135,7 +99,6 @@ async function upsertClient(payload: Record<string, unknown>): Promise<Registere
   throw new Error(`failed to upsert client ${payload.client_id}: ${putRes.status} ${text}`);
 }
 
-/** Register the test OAuth2 clients (RP + service + hook-service admin) with Hydra. */
 async function seedClients(): Promise<ManifestOauthClients> {
   console.log("Registering OAuth2 clients with Hydra...");
 
@@ -165,39 +128,13 @@ async function seedClients(): Promise<ManifestOauthClients> {
   };
 }
 
-// ---------------------------------------------------------------------------
-// Seeding functions
-// ---------------------------------------------------------------------------
+// --- TOTP provisioning ---
 
-// ---------------------------------------------------------------------------
-// TOTP provisioning
-// ---------------------------------------------------------------------------
-
-/**
- * Why TOTP enrolment failed, per archetype ref.
- *
- * The per-user seeders cannot fail the run themselves — `record()` and the
- * strict-mode failure list live inside `seed()` — so they leave the cause here
- * and the post-condition before the manifest write turns it into a recorded
- * failure. Module state because the seeders are module-level and one process
- * seeds one deployment.
- */
+// Why TOTP enrolment failed, per ref: the per-user seeders leave the cause here and the
+// post-condition before the manifest write reports it.
 const totpFailures = new Map<string, string>();
 
-/**
- * Provision TOTP for a seeded user by driving a Kratos settings flow.
- *
- * Orchestrates: createSessionToken → initTotpSettingsFlow →
- * generate TOTP code from extracted secret → confirmTotpEnrollment →
- * optionally generateBackupCodes.
- *
- * Returns the base32 TOTP secret and optionally a backup code.
- *
- * @param email — The user's email (login identifier).
- * @param password — The user's password.
- * @param identityId — The Kratos identity UUID (for session cleanup).
- * @param withBackupCodes — Whether to also generate backup codes (lookup_secret).
- */
+/** Drive a Kratos settings flow to enrol TOTP; returns the base32 secret and optionally a backup code. */
 async function provisionTotp(
   email: string,
   password: string,
@@ -205,21 +142,15 @@ async function provisionTotp(
   withBackupCodes = false,
   lowBackupCodes = false,
 ): Promise<{ totpSecret: string; backupCode?: string }> {
-  // Step 1: Create a session token by logging in via the native API
   const sessionToken = await createSessionToken(email, password);
 
-  // Step 2: Initiate a TOTP settings flow and extract the secret
   const { flowId, totpSecret } = await initTotpSettingsFlow(sessionToken);
 
-  // Step 3: Generate a valid TOTP code from the extracted secret
   const totpCode = await generateTotpCode(totpSecret);
 
-  // Step 4: Confirm the TOTP enrollment
   await confirmTotpEnrollment(flowId, sessionToken, totpCode);
 
-  // Step 5: Generate backup codes if requested
-  // Must use the SAME flow as TOTP confirmation, because after TOTP is
-  // configured, creating a new settings flow requires AAL2 authentication.
+  // Backup codes must use the SAME flow: once TOTP is configured a new settings flow needs AAL2.
   let backupCode: string | undefined;
   if (withBackupCodes) {
     try {
@@ -229,8 +160,7 @@ async function provisionTotp(
         console.log(`  [seed] Generated ${codes.length} backup codes`);
       }
       if (lowBackupCodes && codes.length > 4) {
-        // Leave exactly 4 unused: a scenario that spends one leaves 3, which is
-        // the threshold at which login-ui offers the regeneration prompt.
+        // Leave exactly 4 unused; a scenario that spends one hits login-ui's regeneration prompt at 3.
         await burnBackupCodes(sessionToken, codes.slice(0, codes.length - 4));
         backupCode = codes[codes.length - 4];
         console.log(`  [seed] Burned ${codes.length - 4} backup codes (4 left)`);
@@ -240,13 +170,11 @@ async function provisionTotp(
     }
   }
 
-  // Step 6: Clean up the session
   await deleteIdentitySessions(identityId);
 
   return { totpSecret, backupCode };
 }
 
-/** Create a password-only user. */
 async function seedPasswordUser(ref: string, user: UserArchetype): Promise<ManifestUser> {
   const email = archetypeEmail(ref);
   const identityId = await createIdentity({
@@ -256,27 +184,19 @@ async function seedPasswordUser(ref: string, user: UserArchetype): Promise<Manif
     surname: ref,
   });
 
-  // By default, Kratos creates identities with verified=false.
-  // If the scenario doesn't explicitly require unverified, mark as verified.
+  // Kratos creates identities unverified; mark verified unless the archetype opts out.
   const shouldVerify = user.verified !== false;
   if (shouldVerify) {
     await markVerified(identityId);
   }
 
-  // Provision TOTP if the archetype requires it. An archetype declaring
-  // lookup_secret WITHOUT totp describes the post-unlink product state:
-  // backup codes only exist as a by-product of TOTP enrolment (Kratos
-  // generates lookup_secret inside the TOTP settings flow), so the seeder
-  // enrols TOTP, generates the codes, then removes the totp credential via
-  // the admin API — exactly the identity shape login-ui's "Unlink TOTP
-  // Authenticator App" leaves behind (observed 2026-08-31: unlink deletes
-  // the totp credential and keeps lookup_secret).
+  // lookup_secret WITHOUT totp is the post-unlink shape: Kratos only mints backup codes inside
+  // TOTP enrolment, so enrol, generate the codes, then delete the totp credential.
   const totpUnlinked = user.credentials.includes("lookup_secret") && !user.credentials.includes("totp");
   let totpSecret: string | null = null;
   let backupCode: string | undefined;
   if ((user.totpConfigured || totpUnlinked) && !localUsersEnabled()) {
-    // TOTP enrolment logs in with the password method; without local users the
-    // self-service login endpoint is disabled and the attempt can only 404.
+    // TOTP enrolment logs in with the password method, which is disabled without local users.
     console.log(`  [seed] TOTP skipped for ${ref}: local users disabled on this deployment`);
   } else if (user.totpConfigured || totpUnlinked) {
     try {
@@ -291,9 +211,7 @@ async function seedPasswordUser(ref: string, user: UserArchetype): Promise<Manif
         console.log(`  [seed] TOTP provisioned for ${ref}`);
       }
     } catch (err) {
-      // Keep the CAUSE. The post-condition near the manifest write reports it
-      // verbatim; inventing a likely cause there sent the last reader chasing
-      // KRATOS_PUBLIC_URL when the deployment simply had totp disabled.
+      // Keep the cause; the post-condition before the manifest write reports it verbatim.
       totpFailures.set(ref, err instanceof Error ? err.message : String(err));
       console.warn(`  ⚠ Failed to provision TOTP for ${ref}: ${err}`);
     }
@@ -312,11 +230,8 @@ async function seedPasswordUser(ref: string, user: UserArchetype): Promise<Manif
   };
 }
 
-/** Kratos's OIDC subject for a dex static-password account: dex encodes
- *  `{user_id, conn_id}` as a protobuf IDTokenSubject (dexidp/dex
- *  server/internal/types.proto) and base64url-encodes it — for the `local`
- *  connector that is `0a <len> <userID> 12 05 local`. Derived, not extracted,
- *  so an archetype needs only the userID it shares with docker/dex/config.yml. */
+/** Kratos's OIDC subject for a dex static account: base64url of the protobuf IDTokenSubject
+ *  `{user_id, conn_id}` (dexidp/dex server/internal/types.proto): `0a <len> <userID> 12 05 local`. */
 export function dexSubject(userId: string): string {
   return Buffer.concat([
     Buffer.from([0x0a, userId.length]),
@@ -326,8 +241,6 @@ export function dexSubject(userId: string): string {
   ]).toString("base64");
 }
 
-/** Create an OIDC/Dex user. The archetype's email is its dex static account's
- *  email; the password is the shared dex test password. */
 async function seedDexUser(ref: string, user: UserArchetype): Promise<ManifestUser> {
   if (!user.dexUserId) throw new Error(`archetype ${ref} declares oidc/dex but no dexUserId (docker/dex/config.yml userID)`);
   const email = archetypeEmail(ref);
@@ -337,7 +250,6 @@ async function seedDexUser(ref: string, user: UserArchetype): Promise<ManifestUs
     subject: dexSubject(user.dexUserId),
   });
 
-  // Mark OIDC users as verified by default
   await markVerified(identityId);
 
   return {
@@ -354,8 +266,7 @@ async function seedDexUser(ref: string, user: UserArchetype): Promise<ManifestUs
   };
 }
 
-/** Create a Google OIDC user. Requires GOOGLE_TEST_EMAIL and GOOGLE_TEST_SUBJECT_ID env vars. */
-async function seedGoogleUser(ref: string, user: UserArchetype): Promise<ManifestUser> {
+async function seedGoogleUser(ref: string): Promise<ManifestUser> {
   if (!GOOGLE_TEST_EMAIL || !GOOGLE_TEST_SUBJECT_ID) {
     throw new Error(
       "Cannot seed google-user: GOOGLE_TEST_EMAIL and GOOGLE_TEST_SUBJECT_ID environment variables are required. " +
@@ -363,8 +274,7 @@ async function seedGoogleUser(ref: string, user: UserArchetype): Promise<Manifes
     );
   }
 
-  // On charmed deployments the integrator registers `provider_id = "google_canonical"`;
-  // on compose/local it is `provider = "google"`. Match whichever is active.
+  // Charmed deployments register `google_canonical`; compose registers `google`.
   const provider = (activeConfig().oidc_providers ?? []).find((p) => p.startsWith("google")) ?? "google";
   const identityId = await createIdentityWithOIDC({
     email: GOOGLE_TEST_EMAIL,
@@ -386,10 +296,9 @@ async function seedGoogleUser(ref: string, user: UserArchetype): Promise<Manifes
   };
 }
 
-/** Create a user based on their credential type. */
 async function seedUser(ref: string, user: UserArchetype): Promise<ManifestUser> {
   if (user.credentials.includes("oidc/google")) {
-    return seedGoogleUser(ref, user);
+    return seedGoogleUser(ref);
   }
   if (user.credentials.includes("oidc/dex")) {
     return seedDexUser(ref, user);
@@ -397,19 +306,11 @@ async function seedUser(ref: string, user: UserArchetype): Promise<ManifestUser>
   return seedPasswordUser(ref, user);
 }
 
-// ---------------------------------------------------------------------------
-// Cleanup (fresh and purge modes)
-// ---------------------------------------------------------------------------
-//
-// Cleanup failures are FATAL, never warnings: seeding on top of unknown
-// leftover state produces a manifest that does not describe the deployment, and
-// every test failure downstream is then misattributable.
-//
-// Deletion is scoped by seeder/ownership.ts. Anything the test plane did not
-// create is counted and reported, never touched — that is what makes it safe to
-// point this script at a deployment that already has real users on it.
+// --- Cleanup (fresh and purge modes) ---
+// Cleanup failures are FATAL: seeding over unknown leftovers makes every downstream failure
+// misattributable. Deletion is scoped by seeder/ownership.ts; foreign records are counted,
+// reported and never touched.
 
-/** Delete every test-plane-owned Kratos identity. Throws if a delete fails. */
 async function cleanupOwnedIdentities(provenance: Provenance): Promise<void> {
   console.log("Cleaning test-plane identities...");
   const identities = await listIdentities();
@@ -435,11 +336,6 @@ async function cleanupOwnedIdentities(provenance: Provenance): Promise<void> {
   );
 }
 
-/** Delete every test-plane-owned tenant. Throws if a delete fails.
- *
- *  A cleanup that no-ops while claiming success accumulates tenants across
- *  every gate run and matrix night. tenant-service exposes a paginated list on
- *  the admin API; the token comes from the svc client this run just upserted. */
 async function cleanupOwnedTenants(token: string, provenance: Provenance): Promise<void> {
   console.log("Cleaning test-plane tenants...");
   const tenants = await listTenants(token);
@@ -464,14 +360,11 @@ async function cleanupOwnedTenants(token: string, provenance: Provenance): Promi
   );
 }
 
-// ---------------------------------------------------------------------------
-// Main seeder
-// ---------------------------------------------------------------------------
+// --- Main seeder ---
 
 type SeedMode = "fresh" | "incremental" | "purge";
 
-/** Read the manifest this test plane last wrote. Never throws: an absent or
- *  corrupt manifest just means no provenance and no preserved TOTP secrets. */
+/** Never throws: an absent or corrupt manifest means no provenance and no preserved TOTP secrets. */
 function readPreviousManifest(): unknown {
   const manifestPath = resolveManifestPath();
   if (!fs.existsSync(manifestPath)) return undefined;
@@ -486,19 +379,14 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
   const activeProfile = profile ?? process.env.ACTIVE_PROFILE ?? "core";
   console.log(`Seeding test data for profile: ${activeProfile} (mode: ${mode})`);
 
-  // Collect user requirements from archetypes
   const userRequirements = collectUserRequirements();
   console.log(`Seeding ${userRequirements.size} user archetypes from seeder/archetypes.ts`);
 
-  // --- Exit discipline -----------------------------------------------------
-  // `--fresh` is what the gate and the matrix lane run: it must not report
-  // success on a partial seed. Cleanup failures abort immediately (see above);
-  // every other per-item failure is recorded and re-printed before a non-zero
-  // exit. `--incremental` is the dev convenience and stays lenient.
+  // `--fresh` (what the gate and the matrix lane run) must not report success on a partial seed:
+  // per-item failures are recorded and exit non-zero. `--incremental` stays lenient.
   const strict = mode === "fresh";
   const failures: string[] = [];
-  // undici hides the useful part (ECONNREFUSED, ENOTFOUND, cert errors) in
-  // `cause`; a bare "fetch failed" tells an operator nothing.
+  // undici hides ECONNREFUSED/ENOTFOUND/cert errors in `cause`; a bare "fetch failed" says nothing.
   const describe = (err: unknown): string => {
     if (!(err instanceof Error)) return String(err);
     const cause: unknown = "cause" in err ? err.cause : undefined;
@@ -516,10 +404,8 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
     process.exit(1);
   };
 
-  // Seed OAuth2 clients with Hydra FIRST: fresh-mode tenant cleanup needs a
-  // client-credentials token, and the svc client this upserts is where it comes
-  // from (AUTH_CLIENT_ID/AUTH_CLIENT_SECRET are overrides, not prerequisites —
-  // no Makefile target sets them, so cleanup must never be gated on them).
+  // Clients first: fresh-mode tenant cleanup needs a token from the svc client upserted here.
+  // AUTH_CLIENT_ID/AUTH_CLIENT_SECRET are overrides, not prerequisites; cleanup never gates on them.
   let oauthClients: ManifestOauthClients | undefined;
   try {
     oauthClients = await seedClients();
@@ -532,7 +418,6 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
   const svcClientSecret = process.env.AUTH_CLIENT_SECRET || oauthClients?.svc.clientSecret;
   const tenantServiceDeclared = isServiceInProfile("tenant-service");
 
-  /** Client-credentials token for the tenant admin API, minted once. */
   let svcTokenPromise: Promise<string> | undefined;
   const serviceToken = (): Promise<string> => {
     if (!svcTokenPromise) {
@@ -543,12 +428,9 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
     return svcTokenPromise;
   };
 
-  // Fresh and purge modes delete first. Scope comes from seeder/ownership.ts:
-  // the reserved `@test.example` namespace, widened by the ids our own previous
-  // manifest recorded (that is what makes google-user, whose email is a real
-  // Workspace account, deletable without ever inferring it from the address).
-  // A declared tenant-service that cannot be cleaned is a failure, never a
-  // silent skip.
+  // Scope from seeder/ownership.ts: the reserved namespace plus ids our previous manifest recorded
+  // (how google-user, a real Workspace address, stays deletable). A declared tenant-service that
+  // cannot be cleaned is a failure, never a silent skip.
   const previousManifest = readPreviousManifest();
   if (mode === "fresh" || mode === "purge") {
     const provenance: Provenance = provenanceFromManifest(previousManifest);
@@ -566,10 +448,8 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
     }
   }
 
-  // Purge stops here: the deployment keeps its own users, and the manifest that
-  // named ours is removed so nothing downstream reads identity ids that are
-  // gone. The Hydra clients stay — they are upserted by fixed id, carry no user
-  // data, and a deployment may legitimately still be serving them.
+  // Purge stops here and removes the manifest naming our ids. Hydra clients are NEVER deleted:
+  // upserted by fixed id, no user data, and a deployment may still be serving them.
   if (mode === "purge") {
     const manifestPath = resolveManifestPath();
     if (fs.existsSync(manifestPath)) {
@@ -580,7 +460,6 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
     return;
   }
 
-  // In incremental mode, reuse the existing manifest to preserve TOTP secrets
   const existingManifest: Record<string, ManifestUser> = {};
   if (mode === "incremental" && previousManifest && typeof previousManifest === "object") {
     if ("users" in previousManifest && Array.isArray(previousManifest.users)) {
@@ -590,7 +469,6 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
     }
   }
 
-  // Seed users
   const users: ManifestUser[] = [];
   for (const [ref, user] of userRequirements) {
     console.log(`  Creating user: ${ref}...`);
@@ -598,17 +476,14 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
       let manifestUser: ManifestUser;
 
       if (mode === "incremental") {
-        // In incremental mode, check if the user already exists
         const email = user.credentials.includes("oidc/google")
           ? GOOGLE_TEST_EMAIL!
           : archetypeEmail(ref);
         const existingId = await findIdentityByEmail(email);
 
         if (existingId) {
-          // User exists — build a manifest entry from the existing identity
           console.log(`  User ${ref} already exists (${email}), skipping creation`);
 
-          // Preserve the existing TOTP secret and backup code from the previous manifest
           const existingEntry = existingManifest[ref];
           const preservedTotpSecret = existingEntry?.totpSecret ?? null;
           const preservedBackupCode = existingEntry?.backupCode;
@@ -628,7 +503,6 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
               : {}),
           };
 
-          // Backfill TOTP only if the user should have it but doesn't have a secret yet
           if (user.totpConfigured && !preservedTotpSecret && !localUsersEnabled()) {
             console.log(`  [seed] TOTP backfill skipped for ${ref}: local users disabled on this deployment`);
           } else if (user.totpConfigured && !preservedTotpSecret) {
@@ -641,13 +515,8 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
               }
               console.log(`  [seed] TOTP provisioned for ${ref} (backfill)`);
             } catch (err: unknown) {
-              // Several expected scenarios when TOTP is already configured:
-              // 1. createSessionToken throws "requires AAL2" — login succeeded but
-              //    TOTP verification was required, meaning TOTP is already enrolled.
-              // 2. initTotpSettingsFlow returns 403 "session_aal2_required" — same.
-              // In both cases, the user already has TOTP configured and we can't
-              // retrieve the existing secret via the API. The manifest will have
-              // totpSecret: null, which means the runner will need to re-bootstrap.
+              // AAL2-required / 403 means TOTP is already enrolled and the secret cannot be read back;
+              // the manifest keeps totpSecret: null and the runner re-bootstraps.
               const msg = err instanceof Error ? err.message : String(err);
               if (msg.includes("AAL2") || msg.includes("aal2") || msg.includes("already") || msg.includes("422") || msg.includes("400") || msg.includes("403")) {
                 console.log(`  [seed] TOTP already configured for ${ref} (cannot retrieve existing secret via API — manifest will have null totpSecret)`);
@@ -657,11 +526,8 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
               }
             }
           }
-          // Backfill the unlinked-TOTP shape (lookup_secret without totp):
-          // when the previous manifest carries no backup code, enrol TOTP for
-          // the codes and unlink it again — the runner resolves unused codes
-          // via the admin API, so a stale manifest code alone is not fatal,
-          // but an identity with NO lookup_secret at all is.
+          // Backfill the unlinked-TOTP shape when the previous manifest has no backup code: the runner
+          // resolves unused codes via the admin API, but an identity with NO lookup_secret is fatal.
           const totpUnlinked = user.credentials.includes("lookup_secret") && !user.credentials.includes("totp");
           if (totpUnlinked && !preservedBackupCode && localUsersEnabled()) {
             try {
@@ -690,7 +556,6 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
     }
   }
 
-  // Seed tenants (multi-tenant profiles only)
   const tenants: ManifestTenant[] = [];
   const memberships: ManifestMembership[] = [];
 
@@ -702,16 +567,12 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
       record("mint svc token for tenant seeding", err);
     }
     if (token) {
-      // Create tenants for multi-tenant scenarios
-      // Names carry TEST_TENANT_PREFIX so cleanup can recognise them as ours
-      // on a deployment whose other tenants must survive (seeder/ownership.ts).
+      // Names carry TEST_TENANT_PREFIX so cleanup can recognise them as ours (seeder/ownership.ts).
       const tenantDefs = [
         { ref: "alpha", name: `${TEST_TENANT_PREFIX}Alpha Inc` },
         { ref: "beta", name: `${TEST_TENANT_PREFIX}Beta LLC` },
-        // Deliberately left with no members. multi-tenant-user belongs to both
-        // of the above, so without a tenant that nobody is in, "the selection
-        // page lists the user's tenants" and "lists every tenant that exists"
-        // are the same set — and tenant enumeration would assert green.
+        // gamma has no members: otherwise "lists the user's tenants" and "lists every tenant"
+        // are the same set and tenant enumeration would assert green.
         { ref: "gamma", name: `${TEST_TENANT_PREFIX}Gamma Ltd` },
       ];
 
@@ -725,12 +586,10 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
         }
       }
 
-      // Provision users into tenants
       const provisionMap: Array<{ userRef: string; tenantRef: string; role: "owner" | "member" }> = [
         { userRef: "single-tenant-user", tenantRef: "alpha", role: "owner" },
         { userRef: "multi-tenant-user", tenantRef: "alpha", role: "owner" },
         { userRef: "multi-tenant-user", tenantRef: "beta", role: "member" },
-        // The dex-entered tenant journeys, same shapes (§10 item 1).
         { userRef: "dex-single-tenant-user", tenantRef: "alpha", role: "member" },
         { userRef: "dex-multi-tenant-user", tenantRef: "alpha", role: "member" },
         { userRef: "dex-multi-tenant-user", tenantRef: "beta", role: "member" },
@@ -754,12 +613,8 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
     }
   }
 
-  // Seed hook-service groups (profiles that deploy hook-service only).
-  //
-  // This is what makes the `groups` profile observably different from `core`:
-  // Hydra calls hook-service's token hook on every issuance, and hook-service
-  // stamps the member's group names into the `groups` claim (under `ext` for
-  // access tokens). With no group seeded the hook runs but contributes nothing.
+  // hook-service groups: Hydra's token hook stamps member group names into the `groups` claim
+  // (under `ext` for access tokens); with none seeded the hook runs but contributes nothing.
   const groups: ManifestGroup[] = [];
 
   if (isServiceInProfile("hook-service")) {
@@ -770,13 +625,12 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
         for (const gd of HOOK_GROUP_DEFS) {
           const group = await ensureGroup(token, gd.name, gd.description);
 
-          // hook-service keys membership on email, not on the Kratos identity ID.
+          // hook-service keys membership on email, not on the Kratos identity id.
           const members = users.filter((u) => gd.memberRefs.includes(u.ref));
           const added = await addUsersToGroup(token, group.id, members.map((u) => u.email));
 
           for (const member of members) {
-            // Record what hook-service actually reports back, so the manifest
-            // states observed state rather than an assumption.
+            // Record what hook-service reports back, not what was requested.
             const memberGroups = await listUserGroups(token, member.email);
             member.groups = memberGroups.map((g) => g.name);
           }
@@ -794,19 +648,9 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
     }
   }
 
-  // Post-condition on the artifact, not on the steps that built it. TOTP
-  // enrolment drives a live login + settings flow and its failure was only ever
-  // a console.warn, so `--fresh` reported success while writing
-  // `totpSecret: null` — and every MFA scenario then died on "totpSecret is
-  // null in the manifest … re-seed", blaming the seeder for whatever actually
-  // broke. Checking the manifest catches every route to a null secret, not just
-  // the one that warned.
-  //
-  // Gated on the DECLARATION, not on the archetype alone: archetypes ask for
-  // TOTP unconditionally, while a deployment that does not offer the method
-  // renders a settings flow with no totp node at all — legitimately, and that
-  // is the `core` gate profile (mfa=off ⇒ methods_2fa: []). Failing there would
-  // break `make gate PROFILE=core`, which is not a deployment defect.
+  // Post-condition on the artifact: any route to `totpSecret: null` fails `--fresh`, not just the
+  // one that warned. Gated on the declaration: a deployment without totp (core, mfa=off ⇒
+  // methods_2fa: []) legitimately renders a settings flow with no totp node.
   const totpDeclared = (activeConfig().methods_2fa ?? []).includes("totp");
   for (const [ref, archetype] of userRequirements) {
     if (!archetype.totpConfigured || !localUsersEnabled() || !totpDeclared) continue;
@@ -823,7 +667,6 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
     }
   }
 
-  // Write manifest
   const manifest: Manifest = {
     profile: activeProfile,
     seededAt: new Date().toISOString(),
@@ -852,11 +695,7 @@ async function seed(mode: SeedMode, profile?: string): Promise<void> {
   }
 }
 
-// ---------------------------------------------------------------------------
-// CLI entry point
-// ---------------------------------------------------------------------------
-
-// Parse args and run
+// --- CLI entry point ---
 const args = process.argv.slice(2);
 let mode: SeedMode = "fresh";
 let profile: string | undefined;

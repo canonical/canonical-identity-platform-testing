@@ -1,14 +1,7 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/**
- * Named API-side post checks — the executable half of `Scenario.postChecks`.
- *
- * These run after the walk (and any final-state interventions), against the
- * tokens the relying party received. Scenarios name a check; the
- * implementation lives here — the same contract as claim assertions, for the
- * same reason: no scenario ever implements an assertion.
- */
+/** Executable half of `Scenario.postChecks`: API-side assertions against the tokens the relying party received, run after the walk. */
 
 import { expect, Page } from "@playwright/test";
 import { HYDRA_PUBLIC_URL, KRATOS_ADMIN_URL } from "../helpers/config";
@@ -21,27 +14,12 @@ export interface PostCheckArgs {
   page: Page;
   tokens: OIDCTokens;
   manifest: Manifest;
-  /** The scenario's seeded user — identity-scoped checks read it. */
   user: ManifestUser;
-  /** The walk's RFC 8628 device_code, when the scenario ran the device
-   *  grant — replay checks redeem it a second time. */
+  /** Device grant only; replay checks redeem it a second time. */
   deviceCode?: string;
 }
 
-/**
- * RFC 6749 §10.5: an authorization code is single-use, and replaying it MUST
- * revoke the tokens already issued for it.
- *
- * The browser-side replay intervention cannot prove this: the CLI consumer's
- * own state guard rejects a replayed callback URL ("States do not match")
- * before the code ever reaches the token endpoint again — that intervention
- * pins the consumer surface. This check replays the code where single-use is
- * enforced: straight at the token endpoint. The page is still on the replayed
- * callback URL, so the code is read from it.
- *
- * Expected: the re-exchange answers invalid_grant, and the refresh token from
- * the LEGITIMATE first exchange is dead afterwards (family revocation).
- */
+/** RFC 6749 §10.5: replaying the redeemed code at the token endpoint must answer invalid_grant and revoke the first exchange's refresh token. */
 async function codeReplayRevokesFamily({ page, tokens, manifest }: PostCheckArgs): Promise<void> {
   const rp = getRpClient(manifest);
   if (!rp) {
@@ -58,12 +36,9 @@ async function codeReplayRevokesFamily({ page, tokens, manifest }: PostCheckArgs
     );
   }
 
-  // Re-exchange the already-redeemed code. `redirect_uri` MUST be the one the
-  // authorize request carried, which is this very callback URL — the manifest's
-  // first registered redirect is NOT it whenever the consumer runs on another
-  // port (the seeder registers 4446 and 4447; the charmed and urls lanes use
-  // 4447). A mismatch there makes hydra answer `invalid_grant` for the wrong
-  // reason, and this check would go green without ever testing code reuse.
+  // redirect_uri must be the callback the authorize request carried, not the manifest's first
+  // registered redirect (the consumer may run on another port); a mismatch yields invalid_grant
+  // for the wrong reason and the check would pass without testing reuse.
   const exchange = await page.request.post(`${HYDRA_PUBLIC_URL}/oauth2/token`, {
     form: {
       grant_type: "authorization_code",
@@ -77,7 +52,6 @@ async function codeReplayRevokesFamily({ page, tokens, manifest }: PostCheckArgs
   const exchangeBody = (await exchange.json()) as { error?: string };
   expect(exchangeBody.error, "replayed code must answer invalid_grant").toBe("invalid_grant");
 
-  // Family revocation: the refresh token from the legitimate exchange is dead.
   if (!tokens.refreshToken) {
     throw new Error(
       'postCheck "code-replay-revokes-family": no refresh token was captured from the callback ' +
@@ -100,15 +74,7 @@ async function codeReplayRevokesFamily({ page, tokens, manifest }: PostCheckArgs
   expect(refreshBody.error, "revoked refresh token must answer invalid_grant").toBe("invalid_grant");
 }
 
-/**
- * Deactivating backup codes must remove the lookup_secret credential, not
- * merely hide the codes. The browser walk cannot prove this: with no
- * lookup_secret the login UI stops OFFERING the backup-code method, so
- * "deactivated" and "button never clicked" render the same reachable pages —
- * the only honest witness is the credential's absence on the identity
- * (observed 2026-08-31: the UI deactivation deletes the credential record
- * outright). Admin API ⇒ internal lane only.
- */
+/** Deactivation must delete the lookup_secret credential; the UI stops offering the method either way, so only the admin API can tell. Internal lane only. */
 async function backupCodesDeactivated({ user }: PostCheckArgs): Promise<void> {
   const res = await fetch(
     `${KRATOS_ADMIN_URL}/admin/identities/${user.identityId}?include_credential=lookup_secret`,
@@ -120,13 +86,7 @@ async function backupCodesDeactivated({ user }: PostCheckArgs): Promise<void> {
     "deactivation must delete the lookup_secret credential from the identity",
   ).toBeUndefined();
 }
-/**
- * RFC 8628 inherits RFC 6749 §10.5: a device_code is single-use. The happy
- * walk's runner poll already redeemed it, so a second redemption at the token
- * endpoint must answer invalid_grant — otherwise anyone holding a spent
- * device_code could mint fresh token families forever (observed rejection
- * 2026-08-31: HTTP 400 invalid_grant "… not_found").
- */
+/** RFC 8628 inherits RFC 6749 §10.5: a spent device_code redeemed again must answer invalid_grant. */
 async function deviceCodeReplayRejected({ page, manifest, deviceCode }: PostCheckArgs): Promise<void> {
   if (!deviceCode) {
     throw new Error("device-code-replay-rejected: the walk recorded no device_code — declare it on a device-flow scenario");
@@ -147,14 +107,7 @@ async function deviceCodeReplayRejected({ page, manifest, deviceCode }: PostChec
   const body = (await res.json()) as { error?: string };
   expect(body.error, "replayed device_code must answer invalid_grant").toBe("invalid_grant");
 }
-/**
- * The register-without-verification premise, pinned server-side: with the
- * verification flow OFF, the freshly registered identity's address must be
- * UNVERIFIED — otherwise "the unverified account signs in" is vacuous
- * (verified 2026-09-01 on mx-l1m0v0wnp0t1h0u1aj). Looks the identity up by
- * the scenario user's EMAIL: registration deleted and re-created it, so the
- * manifest's identityId is stale by design.
- */
+/** With verification OFF the registered address must be unverified; looked up by email because registration re-created the identity (manifest identityId is stale). */
 async function registeredAddressUnverified({ user }: PostCheckArgs): Promise<void> {
   const res = await fetch(
     `${KRATOS_ADMIN_URL}/admin/identities?credentials_identifier=${encodeURIComponent(user.email)}`,
@@ -168,12 +121,7 @@ async function registeredAddressUnverified({ user }: PostCheckArgs): Promise<voi
     expect(address.verified, `address ${address.value} must be unverified with the verification flow off`).toBe(false);
   }
 }
-/**
- * Account linking's whole point, pinned on the tokens: the sign-in that rode
- * the LINKED provider must yield the SEEDED identity — sub equals the
- * manifest identityId — not a freshly minted doppelgänger. (Login-time
- * linking never recreates the identity, so the manifest id is current.)
- */
+/** Sign-in via the linked provider must land the seeded identity: sub equals the manifest identityId. */
 async function linkedIdentityTokens({ tokens, user }: PostCheckArgs): Promise<void> {
   expect(
     tokens.idTokenClaims.sub,

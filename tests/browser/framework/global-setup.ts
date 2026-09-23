@@ -2,22 +2,11 @@
 // SPDX-License-Identifier: AGPL-3.0
 
 import * as fs from "node:fs";
-import { FullConfig } from "@playwright/test";
 import { writeActiveConfig, ActiveConfig } from "./active-config";
 
-/**
- * Keys /api/v0/app-config currently serves truthfully — WHEN IT SERVES THEM.
- * Everything else it omits or fabricates (PD-5), so only these may fail a run;
- * the rest is reported as product drift.
- *
- * A key the running login-ui does not emit AT ALL is a version fact about the
- * endpoint, not deployment drift: `multi_tenancy_enabled` entered the payload
- * in login-ui v0.27.0 (canonical/identity-platform-login-ui@973f960
- * pkg/status/handlers.go `DeploymentInfo.MultiTenancyEnabled`; absent at
- * @48a7049 = v0.26.0). Aborting on an absent field would make every deployment
- * older than that untestable while gating — which reads the declaration, never
- * this endpoint — is unaffected. Present-and-different still aborts.
- */
+// Keys /api/v0/app-config serves truthfully WHEN it serves them; present-and-different aborts, absent is a
+// version fact (multi_tenancy_enabled entered the payload in login-ui v0.27.0) and only logs.
+// canonical/identity-platform-login-ui@973f960 pkg/status/handlers.go `DeploymentInfo.MultiTenancyEnabled`
 const TRUTHFUL_APP_CONFIG_KEYS: (keyof ActiveConfig)[] = [
   "multi_tenancy_enabled",
   "oidc_webauthn_sequencing_enabled",
@@ -25,31 +14,20 @@ const TRUTHFUL_APP_CONFIG_KEYS: (keyof ActiveConfig)[] = [
   "base_url",
 ];
 
-async function globalSetup(config: FullConfig) {
+async function globalSetup() {
   const loginUiUrl = process.env.LOGIN_UI_URL || "http://localhost";
   const url = `${loginUiUrl}/api/v0/app-config`;
   const capabilitiesFile = process.env.BROWSER_TEST_CAPABILITIES;
 
   if (capabilitiesFile) {
-    // Static mode (matrix lane): the declared capabilities file IS the active
-    // configuration — discovery never drives gating, so a failed
-    // reconfiguration cannot silently shrink the executed set. The live
-    // app-config is still fetched, but only as an assertion subject: keys the
-    // endpoint serves truthfully must agree with the declaration (drift =
-    // deployment does not match the row — abort), and the rest is logged as
-    // PD-5 product drift.
+    // Static mode (matrix lane): the declaration IS the active config; app-config is only an assertion subject.
     console.log(`[global-setup] Static configuration from ${capabilitiesFile} (BROWSER_TEST_CAPABILITIES)`);
     const declaredRaw = JSON.parse(fs.readFileSync(capabilitiesFile, "utf-8")) as ActiveConfig & { juju?: Partial<ActiveConfig> };
-    // Backend-divergent keys (compose: dex+google; juju: dex+dex2) live
-    // under `juju` - flatten for the backend this run targets.
     const { juju: jujuOverrides, ...declaredBase } = declaredRaw;
     const declared = (process.env.MATRIX_BACKEND === "juju"
       ? { ...declaredBase, ...(jujuOverrides ?? {}) }
       : declaredBase) as ActiveConfig;
-    // base_url is substrate-dependent (compose: http://localhost; juju: the
-    // ingress LB). A runner-supplied LOGIN_UI_URL IS the declared base for
-    // this run — write it into the active config so every consumer sees the
-    // true base, and compare app-config against it below.
+    // base_url is substrate-dependent; a runner-supplied LOGIN_UI_URL is the declared base for this run.
     if (process.env.LOGIN_UI_URL) {
       declared.base_url = process.env.LOGIN_UI_URL;
     }
@@ -93,9 +71,7 @@ async function globalSetup(config: FullConfig) {
       throw new Error(`HTTP error ${res.status}: ${res.statusText}`);
     }
     const data = await res.json() as ActiveConfig;
-    // app-config does not report mail capability; discovery mode is only used
-    // against the compose gate, which always ships mailslurper. Static mode
-    // (BROWSER_TEST_CAPABILITIES above) takes the declared value verbatim.
+    // app-config does not report mail capability; discovery only runs against the compose gate, which ships mailslurper.
     data.mail_api = data.mail_api ?? true;
     writeActiveConfig(data);
     console.log(`[global-setup] Successfully cached active configuration in active-config.json`);

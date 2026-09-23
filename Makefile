@@ -13,13 +13,11 @@ COMPOSE_INFRA := docker/docker-compose.infra.yml
 COMPOSE_AUTH := docker/docker-compose.auth.yml
 COMPOSE_SERVICES := docker/docker-compose.services.yml
 COMPOSE_PROFILE_OVERRIDE := matrix/rows/$(PROFILE)/docker-compose.override.yml
-# The row's declared capabilities: the single gating source for the browser
-# suite and seeder (static mode — BROWSER_TEST_CAPABILITIES).
+# The row's declared capabilities: the single gating source (BROWSER_TEST_CAPABILITIES).
 PROFILE_CAPABILITIES := $(CURDIR)/matrix/rows/$(PROFILE)/capabilities.json
 
-# Juju-lane substrate paths. local.auto.tfvars is gitignored — it is the ONE
-# place this cluster's identity (ingress hostname, node IP, cloud) lives; both
-# terraform and `make render-manifests` read it.
+# local.auto.tfvars (gitignored) is the ONE place this cluster's identity lives;
+# terraform and `make render-manifests` both read it.
 JUJU_MANIFESTS := matrix/backends/juju/manifests
 JUJU_TFVARS := matrix/backends/juju/root/local.auto.tfvars
 
@@ -29,9 +27,8 @@ ifneq (,$(wildcard $(COMPOSE_PROFILE_OVERRIDE)))
   COMPOSE_FILES += -f $(COMPOSE_PROFILE_OVERRIDE)
 endif
 
-# dex loads its static accounts once at start; stamping the config's content
-# hash into the service environment (docker-compose.services.yml) makes a
-# changed docker/dex/config.yml a changed service, which `up` recreates.
+# dex loads static accounts once at start; the config hash in the service env
+# makes a changed docker/dex/config.yml a changed service, which `up` recreates.
 export DEX_CONFIG_SHA := $(shell sha256sum docker/dex/config.yml | cut -c1-12)
 COMPOSE := COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) docker compose $(COMPOSE_FILES)
 
@@ -124,11 +121,8 @@ unseed-test-data: ## Delete the test plane's own users/tenants and drop the mani
 	@echo "Purging test data for profile: $(PROFILE)"
 	cd tests/browser && npm install --silent && ACTIVE_PROFILE=$(PROFILE) BROWSER_TEST_CAPABILITIES=$(PROFILE_CAPABILITIES) npx tsx seeder/seed.ts --purge --profile $(PROFILE)
 
-# -count=1 on every Go target is load-bearing, not a style choice: these suites
-# drive a LIVE deployment, which is not part of go's test-cache key. Without it a
-# passing result is reused across runs and across reconfigurations, so a profile
-# that changed shape — or a service that is now down — still reports `ok (cached)`
-# having executed nothing. That is the anti-silent-shrink hole on the Go side (C-17).
+# -count=1 is load-bearing: a LIVE deployment is not part of go's test-cache key,
+# so without it a stale pass is reused as `ok (cached)` having executed nothing.
 test-e2e: ## Run Go E2E tests (smoke + integration) against the running stack
 	@echo "Running E2E tests for profile: $(PROFILE)"
 	cd tests/e2e && COMPOSE_PROJECT_NAME=$(COMPOSE_PROJECT_NAME) ACTIVE_PROFILE=$(PROFILE) \
@@ -157,11 +151,9 @@ test-browser-profile: ## Run browser tests for a specific profile (PROFILE=name)
 
 test-browser-live: ## Run only live-lane compatible browser tests
 	@echo "Running browser tests for profile: $(PROFILE) (lane: live)"
-	cd tests/browser && ACTIVE_PROFILE=$(PROFILE) BROWSER_TEST_CAPABILITIES=$(PROFILE_CAPABILITIES) npm run test:live
+	cd tests/browser && ACTIVE_PROFILE=$(PROFILE) BROWSER_TEST_CAPABILITIES=$(PROFILE_CAPABILITIES) BROWSER_TEST_LANE=live npx playwright test
 
-test-browser-internal: ## Run full internal-lane browser test suite
-	@echo "Running browser tests for profile: $(PROFILE) (lane: internal)"
-	cd tests/browser && ACTIVE_PROFILE=$(PROFILE) BROWSER_TEST_CAPABILITIES=$(PROFILE_CAPABILITIES) npm run test:internal
+test-browser-internal: test-browser ## Alias of test-browser (internal lane)
 
 test-browser-audit-live: ## Static live-lane compatibility audit for active specs
 	@echo "Running live compatibility audit for browser specs"

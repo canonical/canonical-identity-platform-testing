@@ -13,10 +13,10 @@ on:
         type: environment
         required: false
       row:
-        description: Matrix row to compare the deployment against
+        description: 'Matrix row to compare the deployment against (must have a juju.tfvars.json: core and canonical-portal do not)'
         type: string
         required: false
-        default: 'core'
+        default: 'canonical-internal'
       mode:
         description: 'plan-only = zero mutation; attach-apply MUTATES the deployment'
         type: choice
@@ -55,9 +55,9 @@ jobs:
             exit 1
           fi
           if [ "$EVENT" = "workflow_dispatch" ]; then
-            row="${IN_ROW:-core}"; mode="${IN_MODE:-plan-only}"
+            row="${IN_ROW:-canonical-internal}"; mode="${IN_MODE:-plan-only}"
           else
-            row="core"; mode="plan-only"
+            row="canonical-internal"; mode="plan-only"
           fi
           {
             echo "environment=$env_name"
@@ -80,8 +80,7 @@ jobs:
       MATRIX_ALLOWED_CONTROLLER: jimm
       MATRIX_JUJU_MODEL: ${{ vars.MATRIX_IAM_MODEL }}
       MATRIX_JUJU_CORE_MODEL: ${{ vars.MATRIX_CORE_MODEL }}
-      # same service account for the CLI (juju/juju#20716) and terraform;
-      # TF_VAR_* instead of JUJU_CONTROLLER_ADDRESSES, which the guard refuses
+      # one service account for CLI (juju/juju#20716) and terraform; TF_VAR_* because the guard refuses JUJU_CONTROLLER_ADDRESSES
       JUJU_CLIENT_ID: ${{ secrets.JIMM_CLIENT_ID }}
       JUJU_CLIENT_SECRET: ${{ secrets.JIMM_CLIENT_SECRET }}
       TF_VAR_jimm_url: ${{ secrets.JIMM_URL }}
@@ -98,6 +97,12 @@ jobs:
         run: sudo snap install juju --channel=3.6/stable
       - name: Toolchain check
         run: JUJU_LANE=1 make dev-check
+      - name: Row has a juju artefact
+        run: |
+          if [ ! -f "matrix/rows/$ROW/juju.tfvars.json" ]; then
+            echo "::error::row '$ROW' has no juju artefact (matrix/rows/$ROW/juju.tfvars.json) — pick a row whose every dimension is on-model"
+            exit 1
+          fi
       - name: Enforce the attach-apply opt-in
         if: env.MODE == 'attach-apply'
         env:
@@ -132,7 +137,7 @@ jobs:
           {
             echo "## Drift gate: $ENV_NAME / row $ROW ($MODE)"
             echo '```'
-            grep -E '^(Plan:|No changes|  # )|relation transition|drift gate|✗' juju-lane-log.txt || true
+            grep -E '^(Plan:|No changes)|^  (imported:|~ |\? )|drift gate|✗' juju-lane-log.txt || true
             echo '```'
             if [ -f matrix/backends/juju/root/attach.tfvars.json ]; then
               echo '### Deployed charm revisions (discovered)'

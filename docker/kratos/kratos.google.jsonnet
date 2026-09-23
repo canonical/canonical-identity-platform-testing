@@ -1,10 +1,9 @@
 // Claims → traits for the google provider, against docker/kratos/identity.schema.json
 // (flat string traits — `name` is a string, given/family names are their own
 // traits). Same shape as kratos.dex.jsonnet: the schema is provider-agnostic.
-// The previous mapper used `||` (a boolean operator in jsonnet) on strings and
-// wrote a nested `name.first`, so every real Google callback 500'd with
-// "Unexpected type string, expected boolean" — measured 2026-09-08 on the
-// first live Google sign-in through this stack.
+// Never use `||` on claims here: it is a boolean operator in jsonnet, and a
+// string operand makes every Google callback 500 with "Unexpected type
+// string, expected boolean".
 local claims = std.extVar('claims');
 
 {

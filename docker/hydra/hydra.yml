@@ -19,15 +19,12 @@ log:
 oauth2:
   expose_internal_errors: true
   device_authorization:
-    # how often a non-interactive device polls the token endpoint (matches the
-    # reference: identity-platform-login-ui@ab24edd2bc5a docker/hydra/hydra.yml)
+    # Polling interval for non-interactive devices (matches the reference:
+    # identity-platform-login-ui@ab24edd2bc5a docker/hydra/hydra.yml).
     token_polling_interval: 5s
-  # NOTE: the token hook is deliberately NOT configured here. hydra.yml is shared
-  # by every profile, and Hydra fails token issuance outright when the hook is
-  # unreachable — on `core`, which scales hook-service to 0, every /oauth2/token
-  # call returns 500 "Unable to execute HTTP Request ... dial tcp: lookup
-  # hook-service". It is set per-profile instead, via OAUTH2_TOKEN_HOOK_* on the
-  # hydra service in the profiles that actually deploy hook-service.
+  # The token hook is set per-row via OAUTH2_TOKEN_HOOK_* on the hydra service:
+  # hydra fails token issuance outright when the hook is unreachable, and this
+  # file is shared by rows that scale hook-service to 0.
 
 strategies:
   access_token: jwt
@@ -48,4 +45,5 @@ urls:
 
 secrets:
   system:
+    # Throwaway local-stack secret: this compose stack is never exposed beyond localhost.
     - youReallyNeedToChangeThis
