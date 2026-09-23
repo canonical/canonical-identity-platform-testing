@@ -29,6 +29,21 @@ export function trackDataRequests(context: BrowserContext): void {
     });
     page.on("requestfinished", (r) => pending.delete(r));
     page.on("requestfailed", (r) => pending.delete(r));
+    // A navigation cancels the old document's requests without always emitting
+    // requestfailed; drop them when a new document commits (not on pushState).
+    let committing = false;
+    page.on("response", (r) => {
+      const req = r.request();
+      if (req.isNavigationRequest() && req.frame() === page.mainFrame() && (r.status() < 300 || r.status() >= 400)) {
+        committing = true;
+      }
+    });
+    page.on("framenavigated", (frame) => {
+      if (frame === page.mainFrame() && committing) {
+        committing = false;
+        pending.clear();
+      }
+    });
   };
   context.pages().forEach(watch);
   context.on("page", watch);
