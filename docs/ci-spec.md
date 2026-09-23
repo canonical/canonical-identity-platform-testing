@@ -167,12 +167,13 @@ Do NOT put a required reviewer on an environment with scheduled runs — it paus
   triage: per-failure verdict, classification (product-defect candidate | harness/config defect |
   infrastructure flake | upstream charm wedge), quoted evidence, one next diagnostic step; the
   prompt forbids speculation beyond the log. Without the key the issue carries the verbatim tail.
-- One OPEN issue per lane label (`ci-nightly-matrix`, `ci-juju-<environment>`): first failure
+- One OPEN issue per lane label (`ci-nightly-matrix`, `ci-live-<environment>`, `ci-juju-<environment>`): first failure
   creates it, repeats comment on it, the next green run comments and closes it.
 - Issue bodies state the triage may be LLM-generated and must be verified against the run
   artifacts. A watchdog wedge is still upstream-bug evidence per D-3 — the triage NAMES it, never
   silences it.
-- Manual dispatches never file or close issues; only scheduled runs do.
+- Manual dispatches never file or close issues; only scheduled runs do. Exception:
+  `nightly-live.yml` dispatched with `file_issues=true` triages exactly like its scheduled run.
 
 ## 7. Safety invariants
 

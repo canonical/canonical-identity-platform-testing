@@ -1,7 +1,8 @@
 # Nightly live lane against a public deployment — design: docs/ci-spec.md §1.
 # Tests only: no terraform, no JIMM, no admin API. The public ingress is the whole interface; one
 # out-of-band seed (SEED_MANIFEST) serves every night because scenarios restore the identities they
-# touch (tests/browser/framework/restore.ts). Only scheduled runs file/close issues.
+# touch (tests/browser/framework/restore.ts). Scheduled runs file/close issues; a dispatch does
+# only with file_issues=true.
 name: Nightly live lane
 
 on:
@@ -13,6 +14,10 @@ on:
         description: 'GitHub environment of the target deployment (empty = CI_LIVE_ENVIRONMENT)'
         type: environment
         required: false
+      file_issues:
+        description: 'File/update/close the ci-live-<environment> issue, as the scheduled run does'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -133,7 +138,7 @@ jobs:
 
   triage:
     needs: [resolve, live]
-    if: always() && needs.live.result != 'cancelled' && github.event_name == 'schedule'
+    if: always() && needs.live.result != 'cancelled' && (github.event_name == 'schedule' || inputs.file_issues)
     uses: ./.github/workflows/_triage.yml
     with:
       lane: nightly live lane (${{ needs.resolve.outputs.environment }})
