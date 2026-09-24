@@ -69,8 +69,9 @@ jobs:
           [ -s excerpt.txt ] || echo "(lane produced no log output)" > excerpt.txt
       # One post per distinct failure: the signature is the set of failing tests and failed checks
       # (URLs and numbers normalized away, so flow ids and counts do not split it). A run whose
-      # signature matches the issue's latest triage post edits that post — no notification, no LLM
-      # call — instead of adding an identical comment every night.
+      # signature matches ANY triage post on the open issue edits that post — no notification, no
+      # LLM call — so a deployment that alternates between a baseline failure and an occasional
+      # extra one does not re-post the baseline every time it returns.
       - name: Compare with the open issue
         id: compare
         if: env.OUTCOME == 'failure'
@@ -87,16 +88,14 @@ jobs:
           [ -n "$num" ] || exit 0
           { gh api "repos/$GH_REPO/issues/$num" --jq '{kind: "issue", id: .number, body: (.body // "")}'
             gh api --paginate "repos/$GH_REPO/issues/$num/comments" --jq '.[] | {kind: "comment", id: .id, body: (.body // "")}'
-          } | jq -s 'map(select(.body | contains("<!-- triage-signature:"))) | last // empty' > last-post.json
+          } | jq -s --arg marker "<!-- triage-signature: $sig -->" 'map(select(.body | contains($marker))) | last // empty' > last-post.json
           [ -s last-post.json ] || exit 0
           jq -r .body last-post.json > last-post.md
-          if grep -qF "<!-- triage-signature: $sig -->" last-post.md; then
-            {
-              echo "repeat=true"
-              echo "kind=$(jq -r .kind last-post.json)"
-              echo "id=$(jq -r .id last-post.json)"
-            } >> "$GITHUB_OUTPUT"
-          fi
+          {
+            echo "repeat=true"
+            echo "kind=$(jq -r .kind last-post.json)"
+            echo "id=$(jq -r .id last-post.json)"
+          } >> "$GITHUB_OUTPUT"
       - name: LLM triage (optional)
         id: llm
         if: env.OUTCOME == 'failure' && steps.compare.outputs.repeat != 'true'
