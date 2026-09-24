@@ -56,6 +56,8 @@ jobs:
     concurrency:
       group: nightly-live-${{ needs.resolve.outputs.environment }}
       cancel-in-progress: false
+    outputs:
+      evidence: ${{ steps.evidence.outputs.line }}
     env:
       ROW: ${{ vars.MATRIX_ROW }}
       LOGIN_UI_URL: ${{ vars.LOGIN_UI_URL }}
@@ -67,6 +69,7 @@ jobs:
       GOOGLE_TEST_PASSWORD: ${{ secrets.GOOGLE_TEST_PASSWORD }}
       GOOGLE_TEST_TOTP_SECRET: ${{ secrets.GOOGLE_TEST_TOTP_SECRET }}
       GOOGLE_TEST_SUBJECT_ID: ${{ secrets.GOOGLE_TEST_SUBJECT_ID }}
+      VIDEO_RETENTION_DAYS: 14
     steps:
       - uses: actions/checkout@08eba0b27e820071cde6df949e0beb9ba4906955 # v4.3.0
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
@@ -138,13 +141,23 @@ jobs:
       # painted (tests/browser/framework/secret-mask.ts); what remains is emails, dotted passwords
       # and TOTP codes that expired before the upload.
       - name: Upload failure videos
+        id: videos
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: nightly-live-videos
           path: tests/browser/test-results/**/*.webm
           if-no-files-found: ignore
-          retention-days: 14
+          retention-days: ${{ env.VIDEO_RETENTION_DAYS }}
+      # The issue links the videos; the link dies with the artifact, so it says when.
+      - name: Link the videos for the issue
+        id: evidence
+        if: always() && steps.videos.outputs.artifact-url != ''
+        env:
+          URL: ${{ steps.videos.outputs.artifact-url }}
+        run: |
+          expires="$(date -u -d "+${VIDEO_RETENTION_DAYS} days" +%F)"
+          echo "line=Failure videos: $URL (zip of .webm, GitHub sign-in required; deleted on $expires)" >> "$GITHUB_OUTPUT"
       - name: Scrub the manifest
         if: always()
         run: rm -f "${MANIFEST:-$RUNNER_TEMP/manifest.json}"
@@ -158,4 +171,5 @@ jobs:
       label: ci-live-${{ needs.resolve.outputs.environment }}
       artifact: nightly-live-log
       outcome: ${{ needs.live.result }}
+      evidence: ${{ needs.live.outputs.evidence }}
     secrets: inherit

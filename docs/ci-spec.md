@@ -168,9 +168,13 @@ Do NOT put a required reviewer on an environment with scheduled runs — it paus
 
 - Scheduled lane fails → the lane's log artifact is downloaded and tailed (100 KiB bound).
 - With `OPENROUTER_API_KEY`, one LLM call (model per `CI_TRIAGE_MODEL`) produces a bounded markdown
-  triage: per-failure verdict, classification (product-defect candidate | harness/config defect |
-  infrastructure flake | upstream charm wedge), quoted evidence, one next diagnostic step; the
-  prompt forbids speculation beyond the log. Without the key the issue carries the verbatim tail.
+  triage: per-failure verdict, classification (product-defect candidate | deployment configuration |
+  harness/config defect | infrastructure flake | upstream charm wedge), quoted evidence, one next
+  diagnostic step; the prompt forbids speculation beyond the log. The prompt tells it what each lane
+  is: the live lane configures nothing, so a deployment that never answers points at that
+  deployment before the product. Without the key the issue carries the verbatim tail.
+- An optional `evidence` line goes under the run link; the live lane uses it for the link to
+  `nightly-live-videos` and the date the artifact is deleted.
 - One OPEN issue per lane label (`ci-nightly-matrix`, `ci-live-<environment>`, `ci-juju-<environment>`): first failure
   creates it, repeats comment on it, the next green run comments and closes it.
 - Issue bodies state the triage may be LLM-generated and must be verified against the run

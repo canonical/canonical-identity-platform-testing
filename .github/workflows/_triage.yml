@@ -21,6 +21,11 @@ on:
         description: Result of the tested job (needs.<job>.result)
         type: string
         required: true
+      evidence:
+        description: Optional markdown line placed under the run link (e.g. where the failure videos are)
+        type: string
+        required: false
+        default: ''
       dry_run:
         description: Run the triage and print it to the job summary WITHOUT filing, commenting or closing any issue (triage-smoke.yml)
         type: boolean
@@ -46,6 +51,7 @@ jobs:
       LABEL: ${{ inputs.label }}
       OUTCOME: ${{ inputs.outcome }}
       DRY_RUN: ${{ inputs.dry_run }}
+      EVIDENCE: ${{ inputs.evidence }}
       RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
     steps:
       - name: Download lane log
@@ -81,14 +87,17 @@ jobs:
           cat > system.txt <<'EOF'
           You triage failed CI runs of the Canonical Identity Platform test plane.
           The lanes are non-blocking detectors: a red row is a named finding, never noise to suppress.
+          Which lane failed decides what a failure can mean:
+          - "nightly live lane (<environment>)" tests an EXISTING deployment through its public URLs, with no admin access; it deploys and configures nothing. A deployment that never answers a request, or behaves differently from how the row declares it, points at that deployment's configuration or network before the product.
+          - "nightly compose matrix" and "juju drift gate" deploy or compare the configuration themselves; there a misbehaving service under the declared configuration is a product-defect candidate.
           From the log excerpt, produce a short markdown report:
           1. One-line verdict per failing row or step.
-          2. Classification for each: product-defect candidate | harness/config defect | infrastructure flake | upstream charm wedge (settle timeout, stuck unit).
+          2. Classification for each: product-defect candidate | deployment configuration (the target deployment's setup or network, e.g. an identity provider it cannot reach) | harness/config defect | infrastructure flake | upstream charm wedge (settle timeout, stuck unit).
           3. Evidence: quote the exact log lines you based each classification on.
           4. One concrete next diagnostic step per failure.
           Diagnostic steps must be READ-ONLY: juju debug-log / show-status-log, container logs, config dumps.
           Never recommend `juju resolved`, config kicks, test retries, or any mutation of the deployment — a stuck unit or settle timeout is upstream-bug evidence (decision D-3), and this platform bans absorbing flakes with retries.
-          Never speculate beyond the log; if evidence is insufficient, say exactly that.
+          Never speculate beyond the log; if evidence is insufficient, say exactly that, and name the classifications the evidence cannot yet separate.
           Keep it under 400 words.
           EOF
           jq -n --rawfile log excerpt.txt --rawfile system system.txt \
@@ -138,6 +147,7 @@ jobs:
             echo "### $LANE failed"
             echo
             echo "Run: $RUN_URL"
+            [ -z "$EVIDENCE" ] || { echo; echo "$EVIDENCE"; }
             echo
             cat triage.md
             echo
