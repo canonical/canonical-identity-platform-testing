@@ -176,11 +176,12 @@ Do NOT put a required reviewer on an environment with scheduled runs — it paus
 - An optional `evidence` line goes under the run link; the live lane uses it for the link to
   `nightly-live-videos` and the date the artifact is deleted.
 - One OPEN issue per lane label (`ci-nightly-matrix`, `ci-live-<environment>`, `ci-juju-<environment>`): first failure
-  creates it, the next green run comments and closes it. Each triage post carries a hidden
-  signature: the set of failing tests and failed checks, URLs and numbers normalized away. A
-  failure with a NEW signature gets a new comment (and an LLM call); one matching any earlier
-  triage post on the open issue edits that post instead — a repeat count, the latest run and its
-  evidence line — so a lane failing the same way every night notifies once.
+  creates it, the next green run comments and closes it. A run's failures are its failing tests
+  and failed checks, URLs and numbers normalized away; every triage post records its list in a
+  hidden marker. A run with a failure no post on the open issue has reported gets a new comment
+  (and an LLM call) naming what is new; a run whose failures were all reported before edits the
+  latest post instead — a repeat count, the latest run, its failures and evidence line. A flaky
+  deployment therefore notifies once per distinct failure, not once per night.
 - Issue bodies state the triage may be LLM-generated and must be verified against the run
   artifacts. A watchdog wedge is still upstream-bug evidence per D-3 — the triage NAMES it, never
   silences it.

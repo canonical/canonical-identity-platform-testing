@@ -67,29 +67,35 @@ jobs:
           # tail: verdicts live at the end; 100 KiB bounds the LLM request
           tail -c 102400 full-log.txt > excerpt.txt
           [ -s excerpt.txt ] || echo "(lane produced no log output)" > excerpt.txt
-      # One post per distinct failure: the signature is the set of failing tests and failed checks
-      # (URLs and numbers normalized away, so flow ids and counts do not split it). A run whose
-      # signature matches ANY triage post on the open issue edits that post — no notification, no
-      # LLM call — so a deployment that alternates between a baseline failure and an occasional
-      # extra one does not re-post the baseline every time it returns.
+      # Comment only when something NEW breaks. A run's failures are its failing tests and failed
+      # checks (URLs and numbers normalized away, so flow ids and counts do not split them); every
+      # triage post records its list in a hidden marker. A run with a failure no post on the open
+      # issue has reported gets a new comment and an LLM triage; a run whose failures were all
+      # reported before edits the latest post instead (no notification, no LLM call). A flaky
+      # deployment therefore notifies once per distinct failure, not once per night.
       - name: Compare with the open issue
         id: compare
         if: env.OUTCOME == 'failure'
         run: |
-          normalize() { sed -E 's#https?://[^ )"]*#<url>#g; s/[0-9]+/#/g; s/[[:space:]]+$//'; }
+          normalize() { sed -E 's#https?://[^ )"]*#<url>#g; s/[0-9]+/#/g; s/^[[:space:]]+//; s/[[:space:]]+$//'; }
           grep -E '^[[:space:]]*(✗ |unexpected: |flaky: |expected to run but did not|executed but not in the expected set|unjustified skip)' full-log.txt \
-            | normalize | sort -u > signature.txt || true
+            | normalize | sort -u > failures.txt || true
           # nothing verdict-shaped (the lane died early): the log's last lines stand in
-          [ -s signature.txt ] || tail -n 5 full-log.txt | normalize > signature.txt
-          sig="$(sha256sum signature.txt | cut -c1-16)"
-          echo "signature=$sig" >> "$GITHUB_OUTPUT"
+          [ -s failures.txt ] || tail -n 5 full-log.txt | normalize | sort -u > failures.txt
+          echo "failures=$(base64 -w0 failures.txt)" >> "$GITHUB_OUTPUT"
+          cp failures.txt new-failures.txt
           [ "$DRY_RUN" != "true" ] || exit 0
           num="$(gh issue list --state open --label "$LABEL" --json number --jq '.[0].number // empty')"
           [ -n "$num" ] || exit 0
           { gh api "repos/$GH_REPO/issues/$num" --jq '{kind: "issue", id: .number, body: (.body // "")}'
             gh api --paginate "repos/$GH_REPO/issues/$num/comments" --jq '.[] | {kind: "comment", id: .id, body: (.body // "")}'
-          } | jq -s --arg marker "<!-- triage-signature: $sig -->" 'map(select(.body | contains($marker))) | last // empty' > last-post.json
-          [ -s last-post.json ] || exit 0
+          } | jq -s 'map(. + {list: (.body | capture("<!-- triage-failures: (?<b>[A-Za-z0-9+/=]*) -->").b)})' > posts.json
+          [ "$(jq length posts.json)" -gt 0 ] || exit 0
+          jq -r '.[].list' posts.json | while read -r b; do printf '%s' "$b" | base64 -d; echo; done \
+            | sed '/^$/d' | sort -u > known.txt
+          comm -23 failures.txt known.txt > new-failures.txt
+          [ ! -s new-failures.txt ] || exit 0
+          jq '.[-1]' posts.json > last-post.json
           jq -r .body last-post.json > last-post.md
           {
             echo "repeat=true"
@@ -170,7 +176,7 @@ jobs:
       - name: File or update the lane issue
         if: env.OUTCOME == 'failure' && env.DRY_RUN != 'true' && steps.compare.outputs.repeat != 'true'
         env:
-          SIGNATURE: ${{ steps.compare.outputs.signature }}
+          FAILURES: ${{ steps.compare.outputs.failures }}
         run: |
           gh label create "$LABEL" --force --color D93F0B \
             --description "Automated triage for the '$LANE' lane" || true
@@ -179,12 +185,19 @@ jobs:
             echo
             echo "Run: $RUN_URL"
             [ -z "$EVIDENCE" ] || { echo; echo "$EVIDENCE"; }
+            if [ -f known.txt ]; then
+              echo
+              echo "Not reported earlier on this issue:"
+              echo '```'
+              cat new-failures.txt
+              echo '```'
+            fi
             echo
             cat triage.md
             echo
             echo "---"
             echo "_Filed automatically. The triage above may be LLM-generated: verify every claim against the run artifacts before acting on it._"
-            echo "<!-- triage-signature: $SIGNATURE -->"
+            echo "<!-- triage-failures: $FAILURES -->"
           } > body.md
           num="$(gh issue list --state open --label "$LABEL" --json number --jq '.[0].number // empty')"
           if [ -n "$num" ]; then
@@ -192,7 +205,7 @@ jobs:
           else
             gh issue create --title "[ci] $LANE failing" --label "$LABEL" --body-file body.md
           fi
-      - name: Record a repeat on the matching post
+      - name: Record known failures on the latest post
         if: env.OUTCOME == 'failure' && env.DRY_RUN != 'true' && steps.compare.outputs.repeat == 'true'
         env:
           KIND: ${{ steps.compare.outputs.kind }}
@@ -200,11 +213,16 @@ jobs:
         run: |
           count="$(grep -oE 'repeat-count: [0-9]+' last-post.md | grep -oE '[0-9]+' || echo 0)"
           count=$((count + 1))
-          # drop the previous repeat block, then append the current one
+          # drop the previous status block, then append the current one
           awk '/^<!-- repeat -->$/{skip=1} !skip{print} /^<!-- \/repeat -->$/{skip=0}' last-post.md > updated.md
           {
             echo "<!-- repeat -->"
-            echo "**Failed the same way in $count later run(s).** Latest: $(date -u +'%F %H:%M UTC') — $RUN_URL"
+            echo "**Failed again in $count later run(s), with nothing this issue has not already reported.** Latest: $(date -u +'%F %H:%M UTC') — $RUN_URL"
+            echo
+            echo "Failures in the latest run:"
+            echo '```'
+            cat failures.txt
+            echo '```'
             [ -z "$EVIDENCE" ] || { echo; echo "$EVIDENCE"; }
             echo "<!-- repeat-count: $count -->"
             echo "<!-- /repeat -->"
@@ -214,7 +232,7 @@ jobs:
           else
             gh api -X PATCH "repos/$GH_REPO/issues/comments/$ID" -F body=@updated.md --silent
           fi
-          echo "Same failure as the latest triage post ($KIND $ID): updated it (repeat $count)" >> "$GITHUB_STEP_SUMMARY"
+          echo "Only already-reported failures: updated the latest triage post ($KIND $ID, repeat $count)" >> "$GITHUB_STEP_SUMMARY"
       - name: Close the lane issue on green
         if: env.OUTCOME == 'success' && env.DRY_RUN != 'true'
         run: |
