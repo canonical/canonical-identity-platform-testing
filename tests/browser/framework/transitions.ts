@@ -92,6 +92,9 @@ export function assertInternalLane(ctx: ActionContext, feature: string): void {
  *  which is the rejection the code-abuse scenario is about. */
 const WRONG_RECOVERY_CODE = "000000";
 
+/** login-ui's fixed hold on /ui/setup_complete before it follows the flow's return_to. */
+const SETUP_COMPLETE_HOLD_MS = 3_000;
+
 async function submitWrongRecoveryCode(page: Page): Promise<void> {
   await page.getByLabel("Recovery code").fill(WRONG_RECOVERY_CODE);
   await page.getByRole("button", { name: "Submit" }).click();
@@ -336,9 +339,17 @@ export const TRANSITION_TABLE: TransitionTable = {
 
   // --- Setup complete ---
 
+  // login-ui holds this page for a FIXED 3 s after loading the flow, then navigates to its
+  // return_to (canonical/identity-platform-login-ui@d35d5ed896b1 ui/pages/setup_complete.tsx:22-26).
+  // Waiting that out here keeps the timer out of the next state assertion's budget, which is
+  // then all network: hydra, the consent hand-off and the callback.
   "setup-complete → oidc-callback": {
-    description: "Account setup complete — flow auto-continues to callback",
-    action: async (_page) => {
+    description: "Account setup complete — login-ui's 3 s timer, then the flow auto-continues to callback",
+    action: async (page) => {
+      await page.waitForURL((url) => !url.pathname.endsWith("/ui/setup_complete"), {
+        timeout: SETUP_COMPLETE_HOLD_MS + 10_000,
+        waitUntil: "commit",
+      });
     },
   },
 

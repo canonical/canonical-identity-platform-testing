@@ -630,17 +630,22 @@ export async function assertPageState(
   expected: PageState["type"],
 ): Promise<void> {
   // login-ui is a React SPA: poll until it has rendered enough to identify; no fixed sleeps.
+  // State and URL are recorded as a pair once a detection completes: the deadline can land
+  // mid-detection, and pairing that poll's URL with the previous poll's state misreports where
+  // the browser was. Where it is at the deadline is reported separately.
   let lastActual: string = "unknown";
   let lastUrl: string = "";
   let lastError: string = "";
+  const currentUrl = (): string => {
+    try {
+      return page.url().substring(0, 100);
+    } catch {
+      return "<error getting URL>";
+    }
+  };
   try {
     await expect(async () => {
-      // Capture the URL first so a stalled detection still reports where the browser was.
-      try {
-        lastUrl = page.url().substring(0, 100);
-      } catch {
-        lastUrl = "<error getting URL>";
-      }
+      const url = currentUrl();
       let actual: PageState;
       try {
         actual = await detectPageState(page);
@@ -649,9 +654,12 @@ export async function assertPageState(
         actual = { type: "unknown" };
       }
       lastActual = actual.type;
+      lastUrl = url;
       expect(actual.type).toBe(expected);
     }).toPass({ timeout: 10_000 });
   } catch (e) {
-    throw new Error(`assertPageState: expected "${expected}", got "${lastActual}" (URL: ${lastUrl})${lastError ? ` detectError: ${lastError}` : ''}\n${e}`);
+    const now = currentUrl();
+    const moved = now !== lastUrl ? `; at the deadline the browser was on ${now}` : "";
+    throw new Error(`assertPageState: expected "${expected}", got "${lastActual}" (URL: ${lastUrl})${moved}${lastError ? ` detectError: ${lastError}` : ''}\n${e}`);
   }
 }

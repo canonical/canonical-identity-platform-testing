@@ -67,9 +67,39 @@ jobs:
           # tail: verdicts live at the end; 100 KiB bounds the LLM request
           tail -c 102400 full-log.txt > excerpt.txt
           [ -s excerpt.txt ] || echo "(lane produced no log output)" > excerpt.txt
+      # One post per distinct failure: the signature is the set of failing tests and failed checks
+      # (URLs and numbers normalized away, so flow ids and counts do not split it). A run whose
+      # signature matches the issue's latest triage post edits that post — no notification, no LLM
+      # call — instead of adding an identical comment every night.
+      - name: Compare with the open issue
+        id: compare
+        if: env.OUTCOME == 'failure'
+        run: |
+          normalize() { sed -E 's#https?://[^ )"]*#<url>#g; s/[0-9]+/#/g; s/[[:space:]]+$//'; }
+          grep -E '^[[:space:]]*(✗ |unexpected: |flaky: |expected to run but did not|executed but not in the expected set|unjustified skip)' full-log.txt \
+            | normalize | sort -u > signature.txt || true
+          # nothing verdict-shaped (the lane died early): the log's last lines stand in
+          [ -s signature.txt ] || tail -n 5 full-log.txt | normalize > signature.txt
+          sig="$(sha256sum signature.txt | cut -c1-16)"
+          echo "signature=$sig" >> "$GITHUB_OUTPUT"
+          [ "$DRY_RUN" != "true" ] || exit 0
+          num="$(gh issue list --state open --label "$LABEL" --json number --jq '.[0].number // empty')"
+          [ -n "$num" ] || exit 0
+          { gh api "repos/$GH_REPO/issues/$num" --jq '{kind: "issue", id: .number, body: (.body // "")}'
+            gh api --paginate "repos/$GH_REPO/issues/$num/comments" --jq '.[] | {kind: "comment", id: .id, body: (.body // "")}'
+          } | jq -s 'map(select(.body | contains("<!-- triage-signature:"))) | last // empty' > last-post.json
+          [ -s last-post.json ] || exit 0
+          jq -r .body last-post.json > last-post.md
+          if grep -qF "<!-- triage-signature: $sig -->" last-post.md; then
+            {
+              echo "repeat=true"
+              echo "kind=$(jq -r .kind last-post.json)"
+              echo "id=$(jq -r .id last-post.json)"
+            } >> "$GITHUB_OUTPUT"
+          fi
       - name: LLM triage (optional)
         id: llm
-        if: env.OUTCOME == 'failure'
+        if: env.OUTCOME == 'failure' && steps.compare.outputs.repeat != 'true'
         env:
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           MODEL: ${{ vars.CI_TRIAGE_MODEL || 'google/gemini-3.7-flash' }}
@@ -139,7 +169,9 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
           [ "$SOURCE" = "llm" ] || { echo "::error::LLM triage did not run (source=$SOURCE)"; exit 1; }
       - name: File or update the lane issue
-        if: env.OUTCOME == 'failure' && env.DRY_RUN != 'true'
+        if: env.OUTCOME == 'failure' && env.DRY_RUN != 'true' && steps.compare.outputs.repeat != 'true'
+        env:
+          SIGNATURE: ${{ steps.compare.outputs.signature }}
         run: |
           gh label create "$LABEL" --force --color D93F0B \
             --description "Automated triage for the '$LANE' lane" || true
@@ -153,6 +185,7 @@ jobs:
             echo
             echo "---"
             echo "_Filed automatically. The triage above may be LLM-generated: verify every claim against the run artifacts before acting on it._"
+            echo "<!-- triage-signature: $SIGNATURE -->"
           } > body.md
           num="$(gh issue list --state open --label "$LABEL" --json number --jq '.[0].number // empty')"
           if [ -n "$num" ]; then
@@ -160,6 +193,29 @@ jobs:
           else
             gh issue create --title "[ci] $LANE failing" --label "$LABEL" --body-file body.md
           fi
+      - name: Record a repeat on the matching post
+        if: env.OUTCOME == 'failure' && env.DRY_RUN != 'true' && steps.compare.outputs.repeat == 'true'
+        env:
+          KIND: ${{ steps.compare.outputs.kind }}
+          ID: ${{ steps.compare.outputs.id }}
+        run: |
+          count="$(grep -oE 'repeat-count: [0-9]+' last-post.md | grep -oE '[0-9]+' || echo 0)"
+          count=$((count + 1))
+          # drop the previous repeat block, then append the current one
+          awk '/^<!-- repeat -->$/{skip=1} !skip{print} /^<!-- \/repeat -->$/{skip=0}' last-post.md > updated.md
+          {
+            echo "<!-- repeat -->"
+            echo "**Failed the same way in $count later run(s).** Latest: $(date -u +'%F %H:%M UTC') — $RUN_URL"
+            [ -z "$EVIDENCE" ] || { echo; echo "$EVIDENCE"; }
+            echo "<!-- repeat-count: $count -->"
+            echo "<!-- /repeat -->"
+          } >> updated.md
+          if [ "$KIND" = "issue" ]; then
+            gh issue edit "$ID" --body-file updated.md
+          else
+            gh api -X PATCH "repos/$GH_REPO/issues/comments/$ID" -F body=@updated.md --silent
+          fi
+          echo "Same failure as the latest triage post ($KIND $ID): updated it (repeat $count)" >> "$GITHUB_STEP_SUMMARY"
       - name: Close the lane issue on green
         if: env.OUTCOME == 'success' && env.DRY_RUN != 'true'
         run: |
