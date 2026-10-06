@@ -36,11 +36,18 @@ interface SettingsFlow {
   ui: { nodes: FlowNode[] };
 }
 
-type FlowResult = { status: "ok"; flow: SettingsFlow } | { status: "unauthenticated" } | { status: "aal2" };
+type FlowResult =
+  | { status: "ok"; flow: SettingsFlow }
+  | { status: "unauthenticated" }
+  | { status: "aal2" }
+  | { status: "not-created"; detail: string };
 
 /** GET /self-service/settings/browser via the page's cookie jar. Kratos answers
  *  303 + ?flow= (or a redirect to login for a missing/insufficient session); the
- *  login-ui BFF answers 200 with the flow body. */
+ *  login-ui BFF answers 200 with the flow body, and a bare 500 whenever it cannot
+ *  create one — a missing session included
+ *  (canonical/identity-platform-login-ui@cff4faf pkg/kratos/handlers.go:1466-1470).
+ *  So a flow that was not created is reported, not thrown: the caller signs in and asks again. */
 async function settingsFlow(page: Page): Promise<FlowResult> {
   const res = await page.request.get(`${KRATOS_PUBLIC_URL}/self-service/settings/browser`, {
     maxRedirects: 0,
@@ -56,7 +63,7 @@ async function settingsFlow(page: Page): Promise<FlowResult> {
     const body = (await res.json().catch(() => null)) as { id?: string } | null;
     flowId = body?.id ?? null;
   }
-  if (!flowId) throw new Error(`restore: settings flow not created (HTTP ${res.status()})`);
+  if (!flowId) return { status: "not-created", detail: `HTTP ${res.status()}` };
 
   const flowRes = await page.request.get(`${KRATOS_PUBLIC_URL}/self-service/settings/flows?id=${flowId}`);
   if (flowRes.status() === 401) return { status: "unauthenticated" };
@@ -152,12 +159,16 @@ async function signIn(page: Page, user: ManifestUser, ctx: ActionContext): Promi
   throw new Error(`restore: sign-in for "${user.ref}" did not reach the callback`);
 }
 
-/** A settings flow for a session Kratos accepts, signing in if needed. */
+/** A settings flow for a session Kratos accepts: anything short of one signs the
+ *  identity in and asks once more. */
 async function authenticatedFlow(page: Page, user: ManifestUser, ctx: ActionContext): Promise<SettingsFlow> {
   let result = await settingsFlow(page);
   if (result.status !== "ok") {
     await signIn(page, user, ctx);
     result = await settingsFlow(page);
+  }
+  if (result.status === "not-created") {
+    throw new Error(`restore: settings flow not created for "${user.ref}" after sign-in (${result.detail})`);
   }
   if (result.status !== "ok") throw new Error(`restore: no usable session for "${user.ref}" after sign-in (${result.status})`);
   return result.flow;
