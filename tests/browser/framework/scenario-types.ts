@@ -20,10 +20,12 @@ export interface ScenarioRequires {
 
   oidcSequencing?: boolean;
   /**
-   * Whether Kratos is given the login_challenge. login-ui passes it only with OIDC sequencing and
-   * multi-tenancy both off (login-ui@cff4faf5 pkg/kratos/service.go:291); Kratos then makes every flow
-   * of that login a refresh (kratos@v25.4.0 selfservice/flow/login/handler.go:545), so it accepts a
-   * second factor it would otherwise refuse as already signed in.
+   * Derived: whether login-ui gives Kratos the RP's login_challenge. It does only with OIDC
+   * sequencing and multi-tenancy both off (canonical/identity-platform-login-ui@cff4faf5
+   * pkg/kratos/service.go:291; v0.28.0 has the same condition). With the challenge of a request
+   * Hydra does not skip, Kratos makes the flow a refresh (ory/kratos@v25.4.0
+   * selfservice/flow/login/handler.go:545), and a refresh flow takes a second factor that Kratos
+   * otherwise refuses as already signed in (same file, :840-858).
    */
   kratosLoginChallenge?: boolean;
   localUsersEnabled?: boolean;
@@ -221,10 +223,20 @@ export function defineScenario(scenario: Scenario): Scenario {
     [`Scenario "${scenario.id}"`, scenario] as const,
     ...(scenario.phases ?? []).map((p) => [`Scenario "${scenario.id}" phase "${p.name}"`, p] as const),
   ]) {
-    if (declares.expectErrorText !== undefined && !declares.expectError) {
+    if (declares.expectErrorText === undefined) {
+      continue;
+    }
+    if (declares.expectErrorText.trim() === "") {
+      throw new Error(
+        `${where} declares an empty expectErrorText — every message contains it, so it ` +
+        `checks nothing. Give the text the message must contain, or remove it.`
+      );
+    }
+    if (!declares.expectError) {
       throw new Error(
         `${where} declares expectErrorText without expectError — no error message is ` +
-        `looked for, so the text could never be checked.`
+        `looked for, so the text could never be checked.` +
+        (declares === scenario && scenario.phases ? ` With phases, declare both on the phase.` : ``)
       );
     }
   }

@@ -119,13 +119,16 @@ charmed stack, `make test-matrix` — never asserted here) and **offline-provabl
 
 ### The gate (blocking, per-PR)
 
-Measured 2026-10-07 with `make gate-all-profiles`, on a tree collecting 65 tests (66 with sequencing):
+Measured 2026-10-07 with `make gate-all-profiles`, on a tree collecting 65 tests (66 with sequencing).
+The tree now collects one more, `back-on-second-factor-after-tenant-selection-drops-oidc-login`
+(multi-tenancy only). `core` was gated again with it; for the other two rows it is added to the
+measured counts, having run twice on `canonical-portal` outside the gate:
 
 | Profile | Executed (×2 runs) | Failed | Flaky | Capability skips | Manifest shape (both runs) |
 |---|---|---|---|---|---|
-| `core` | 20 | 0 | 0 | 45 | `0076976be2ea` |
-| `canonical-internal` | 49 | 0 | 0 | 17 | `1125d9650c40` |
-| `canonical-portal` | 56 | 0 | 0 | 9 | `438cc139443c` |
+| `core` | 20 | 0 | 0 | 46 | `0076976be2ea` |
+| `canonical-internal` | 49 | 0 | 0 | 18 | `1125d9650c40` |
+| `canonical-portal` | 57 | 0 | 0 | 9 | `438cc139443c` |
 
 Both runs of every profile executed an identical set with an identical manifest fingerprint (§10
 item 13's detector); the union check (§6) passed; `known-coverage-gaps.json` holds 7 entries.
@@ -139,7 +142,7 @@ item 13's detector); the union check (§6) passed; `known-coverage-gaps.json` ho
 |---|---|
 | `pd931-single-oidc-mt` | exactly **12** |
 | `tfdefault-oidc-only` | exactly **8** |
-| `deployed-core-local-mfa` | exactly **21** |
+| `deployed-core-local-mfa` | exactly **22** |
 
 The three sets pairwise differ (two oidc-only shapes, one local-user shape), so the canaries
 discriminate; re-derive any cell with `cd tests/browser && npx tsx scripts/expected-set.ts ../../matrix/rows/<row>/capabilities.json`.
@@ -149,8 +152,8 @@ Generated rows red on the charmed backend are named findings (§10 item 2), reco
 
 | Command | Covers | Count |
 |---|---|---|
-| `make matrix-test` | The matrix runner's pure logic; chained into `matrix-check` | **66** tests |
-| `make test-browser-unit` | The suite framework's pure logic — scenario validation, claim assertions, manifest, ownership | **76** tests |
+| `make matrix-test` | The matrix runner's pure logic; chained into `matrix-check` | **75** tests |
+| `make test-browser-unit` | The suite framework's pure logic — scenario validation, claim assertions, manifest, ownership | **83** tests |
 
 ## 6. The gate
 
@@ -198,9 +201,9 @@ consumes the capabilities file via `BROWSER_TEST_CAPABILITIES`. No hand-written 
 
 | Quantity | Value | Re-derive with |
 |---|---|---|
-| Tests collected | **65** (66 where sequencing is on) | `jq .total tests/browser/expected-tests.json` |
+| Tests collected | **66** (67 where sequencing is on) | `jq .total tests/browser/expected-tests.json` |
 | Registered gaps | **7** — three Google scenarios needing Workspace credentials, plus four shapes no gate profile deploys (prompt-on-use backup codes, verification off, MT + sequencing) | `jq '.gaps \| length' tests/browser/known-coverage-gaps.json` |
-| Executed per profile | `core` 20, `canonical-internal` 49, `canonical-portal` 56 — measured 2026-10-07 (§5) | `make gate-all-profiles`, then `jq '{profile, executed: (.executed \| length)}' tests/browser/coverage/*.json` |
+| Executed per profile | `core` 20, `canonical-internal` 49, `canonical-portal` 57 — measured 2026-10-07 (§5) | `make gate-all-profiles`, then `jq '{profile, executed: (.executed \| length)}' tests/browser/coverage/*.json` |
 
 `oidc.spec.ts` picks its scenario suite at **collection** time from the declared
 `oidc_webauthn_sequencing_enabled`; the sequencing suite carries one extra scenario
@@ -242,6 +245,7 @@ everything; the union across the three is the coverage claim. Decisions that bin
 | `user.ref` | Which seeded archetype to drive — never an inline credential |
 | `expectedPath[]` | The states the journey must pass through, in order |
 | `expectError` | Require a visible error message at every self-transition |
+| `expectErrorText` | With `expectError`: text that message must contain, for a scenario that pins the message shown |
 | `freshSession` | Clear cookies at the start of a later phase, keeping the virtual authenticator |
 | `interventions` | Declared perturbations anchored to this scenario's own path |
 | `postChecks` | Named API-side checks run after the walk |
@@ -272,7 +276,8 @@ flowchart TD
 1. **A bad declaration fails at collection** (`defineScenario()`, `framework/scenario-types.ts`):
    `expectedPath`/`phases` both or neither; `assertions`/`postChecks` off an `oidc-callback` terminal
    (exception: `device-complete` under `requires.deviceFlow`); `expectError` with no self-transition
-   or alongside `phases`; `freshSession` on the first phase; `interventions` alongside `phases`; an
+   or alongside `phases`; `expectErrorText` empty or without `expectError`; `freshSession` on the
+   first phase; `interventions` alongside `phases`; an
    intervention anchored where it would never fire or is illegal (table below); a primitive missing
    its required option (`via`, `untilUrl`, `expect`) or given one it does not take; a duplicate `id`.
 2. **An illegal path fails before any browser work.** `runScenario` resolves every pair of
@@ -306,7 +311,8 @@ consent-screen regression or scope escalation. Decided: no exact-shape `requires
 **Error paths declare `expectError: true`.** An error scenario is a **self-transition**
 (`[…, "login-password", "login-password"]`); "did not navigate" alone is weak, so `expectError`
 makes the runner require a visible, non-empty error message after every self-transition
-(`ERROR_MESSAGE_SELECTORS` in `framework/scenario-runner.ts`). `expired-totp-code` submits a code
+(`ERROR_MESSAGE_SELECTORS` in `framework/scenario-runner.ts`); `expectErrorText` adds the text that
+message must contain, for the one scenario that pins which message is shown. `expired-totp-code` submits a code
 computed three periods back (`totpCodeWindow: "expired"`), past Kratos's skew, so no test sleeps.
 **Error terminals are enterable from `start` only**: the `oidc-error` suite drives malformed
 authorize requests as plain `flowParams`, making `start → oidc-error-page` and
@@ -328,8 +334,12 @@ modifies how that transition submits. Primitives live in `framework/intervention
 | `drop-totp-out-of-band` | `at` | Deletes the identity's TOTP credential through the admin API mid-walk, so the following step sees a key-only identity | Mid-walk only; no options; internal lane |
 | `double-submit` | `on` | Modifies that transition's submit | Transitions whose action supports the flag |
 
-No standalone `history-forward`: Back triggers a server redirect everywhere except the TOTP ⇄
-backup-code method switch, which `history-roundtrip` covers. At runtime the runner fails loudly when
+No standalone `history-forward`: the TOTP ⇄ backup-code method switch is the only pair where Back
+and Forward both land on a live form, and `history-roundtrip` covers it. An intervention returns to
+the path it perturbs. Browser Back that lands on a different state from which the walk goes on is
+a transition instead (`login-totp-verify → login-email`, `oidc-callback → login-totp-verify`): the
+pair then means Back for every scenario, so a page control making the same hop would need a state
+of its own. At runtime the runner fails loudly when
 a `double-submit` targets a transition whose action ignores the flag. Wave 2 is in §10 item 11.
 **`postChecks` are named API-side checks** (`framework/intervention-checks.ts`) run after the walk
 against the RP's tokens; `code-replay-revokes-family` re-exchanges the authorization code and
@@ -495,16 +505,23 @@ and across the one push-based pair, and walked history with `page.goBack()`, whi
 consent hop a real Back button skips, so it never stood on a stale second-factor page, and nothing
 submitted on one. `back-on-second-factor-drops-oidc-login` pins PD-11 (login-ui#984): Back on the
 second-factor page restarts the login without the `login_challenge`, so the redone walk ends on the
-settings hub and the RP gets no code. `stale-second-factor-submit-server-error` pins PD-12
+settings hub and the RP gets no code; `back-on-second-factor-after-tenant-selection-drops-oidc-login`
+pins the same for a user who picks a tenant, whose password page is reached from the tenant
+selection: a fix has to cover both ways to it. `stale-second-factor-submit-server-error` pins PD-12
 (login-ui#985): a code submitted on the second-factor page of a login that already completed is
-answered "Server error" (`expectErrorText`). Both fail loudly when login-ui fixes them: end the
-first path at `oidc-callback` and the second where the submit then leads. PD-12 exists only where
-Kratos is not given the `login_challenge` (`requires.kratosLoginChallenge: false`): login-ui passes
-it with OIDC sequencing and multi-tenancy both off (login-ui@cff4faf5 `pkg/kratos/service.go:291`),
-Kratos then makes the flow a refresh (kratos@v25.4.0 `selfservice/flow/login/handler.go:545`) and
-takes the code, and the RP gets `access_denied` for a consent verifier already used. That was seen
-on login-ui's own `docker-compose.dev.yml` stack and is not pinned: the only row with a second
-factor and both off, `deployed-core-local-mfa`, is bound to the urls backend and was not run. Staged, in value order: passkey delete (no scenario or transition exists);
+answered "Server error" (`expectErrorText`), login-ui's answer to a Kratos message it does not map.
+Both were measured on 2026-10-07 on login-ui v0.28.0 (`:stable`) with Kratos v25.4.0, and both fail
+loudly when login-ui fixes them: end the first path at `oidc-callback` and the second where the
+submit then leads. Kratos refuses the submit as already signed in
+(ory/kratos@v25.4.0 `selfservice/flow/login/handler.go:840-858`) only when the flow is not a
+refresh, so PD-12 is pinned only where Kratos is not given the `login_challenge`
+(`requires.kratosLoginChallenge: false`): login-ui passes it with OIDC sequencing and multi-tenancy
+both off (canonical/identity-platform-login-ui@cff4faf5 `pkg/kratos/service.go:291`; v0.28.0 has
+the same condition), Kratos then makes the flow a refresh (ory/kratos@v25.4.0
+`selfservice/flow/login/handler.go:545`) and takes the code, and the RP gets `access_denied` for a
+consent verifier already used. That was seen on login-ui's own `docker-compose.dev.yml` stack and
+is not pinned: the only row with a second factor and both off, `deployed-core-local-mfa`, is
+bound to the urls backend and was not run. Staged, in value order: passkey delete (no scenario or transition exists);
 S-2 mode 1 (used consent challenge with a live session); kratos-vs-hydra session split-brain (admin
 revoke → re-authorize must re-challenge); short-lifespan expiry lanes (S-1);
 `prompt=login`/`prompt=none`/`id_token_hint` request-shaping; the tenant token webhook (Go-suite work).

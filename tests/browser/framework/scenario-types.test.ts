@@ -53,6 +53,32 @@ test("expectErrorText without expectError is rejected at import", () => {
   );
 });
 
+test("an empty expectErrorText is rejected at import: every message contains it", () => {
+  for (const text of ["", "  "]) {
+    assert.throws(() => defineScenario({ ...BASE, expectErrorText: text }), /declares an empty expectErrorText/);
+  }
+});
+
+test("scenario-level expectErrorText beside phases says where it belongs", () => {
+  assert.throws(
+    () =>
+      defineScenario({
+        ...BASE,
+        expectedPath: undefined,
+        expectError: undefined,
+        expectErrorText: "Server error",
+        phases: [
+          {
+            name: "reject",
+            expectedPath: ["login-email", "login-password", "login-password"],
+            expectError: true,
+          },
+        ],
+      }),
+    /declares expectErrorText without expectError.*With phases, declare both on the phase/,
+  );
+});
+
 test("phase-level expectErrorText without expectError is rejected at import", () => {
   assert.throws(
     () =>

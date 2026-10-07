@@ -17,8 +17,9 @@ export async function listTenantOptions(page: Page): Promise<string[]> {
 }
 
 /** One browser-history traversal back to the nearest earlier entry whose URL contains `urlPart`.
- *  This is where the Back button lands when the entries in between were never interacted with
- *  (Chrome skips those); `page.goBack()` would stop on each of them. Chromium only (CDP). */
+ *  The caller names the page the Back button lands on when the entries in between were never
+ *  interacted with (Chrome skips those); `page.goBack()` would stop on each of them. The runner's
+ *  state poll waits for the navigation. Chromium only (CDP). */
 export async function backToHistoryEntry(page: Page, urlPart: string): Promise<void> {
   const cdp = await page.context().newCDPSession(page);
   try {
@@ -30,7 +31,7 @@ export async function backToHistoryEntry(page: Page, urlPart: string): Promise<v
     if (!target) {
       throw new Error(
         `backToHistoryEntry: no earlier history entry with URL containing "${urlPart}" ` +
-        `(history: ${entries.slice(0, currentIndex + 1).map((e) => new URL(e.url).pathname).join(" → ")})`,
+        `(history: ${entries.slice(0, currentIndex + 1).map((e) => e.url.split("?")[0]).join(" → ")})`,
       );
     }
     await cdp.send("Page.navigateToHistoryEntry", { entryId: target.id });

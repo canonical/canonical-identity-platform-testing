@@ -86,10 +86,30 @@ export const resilienceScenarios = defineScenarioSuite({
       ],
     }),
 
+    // PD-11 again, for a user who picks a tenant: the password page is then reached from the tenant
+    // selection, a second way to it that a fix has to cover as well.
+    defineScenario({
+      id: "back-on-second-factor-after-tenant-selection-drops-oidc-login",
+      description: "PD-11: browser Back on the second-factor page after a tenant selection loses the RP's login request too",
+      requires: { mfaEnabled: true, multiTenancy: true, localUsersEnabled: true },
+      user: { ref: "multi-tenant-user", credentials: ["password", "totp"], totpConfigured: true, selectTenant: "alpha" },
+      expectedPath: [
+        "login-email",
+        "tenant-selection",
+        "login-password",
+        "login-totp-verify",
+        "login-email",
+        "login-password",
+        "login-totp-verify",
+        "manage-details",
+      ],
+    }),
+
     // PD-12 (login-ui#985), pinned: Kratos refuses the submit because the session already satisfies
     // the flow, with a message login-ui does not map, so the page shows "Server error". Once fixed the
     // submit leaves the page, which fails this pin: end the path at where it leads then. Only where
     // Kratos is not given the login_challenge: with it the flow is a refresh and Kratos takes the code.
+    // The code submitted is the wrong-code step's: Kratos refuses before it looks at the code.
     defineScenario({
       id: "stale-second-factor-submit-server-error",
       description: "PD-12: a code submitted on the second-factor page of a login that already completed is answered with a server error",
@@ -107,7 +127,7 @@ export const resilienceScenarios = defineScenarioSuite({
       expectErrorText: "Server error",
     }),
 
-    // The TOTP ⇄ backup-code switch is the app's only push-based history pair, so Forward is reachable exactly here.
+    // The TOTP ⇄ backup-code switch is the app's only push-based history pair, so only here do Back and Forward both land on a live form.
     defineScenario({
       id: "backup-code-history-roundtrip",
       description: "Browser Back/Forward across the TOTP ⇄ backup-code switch keeps the form live",
