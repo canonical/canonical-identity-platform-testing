@@ -493,17 +493,17 @@ loudly when that is fixed). Browser Back mid-walk and onto a finished login's pa
 after both were found outside this plane: until then the suite pressed Back only at the RP terminal
 and across the one push-based pair, and walked history with `page.goBack()`, which stops on the
 consent hop a real Back button skips, so it never stood on a stale second-factor page, and nothing
-submitted on one. `back-on-second-factor-drops-oidc-login` pins PD-11 (login-ui#984): Back on the
-second-factor page restarts the login without the `login_challenge`, so the redone walk ends on the
-settings hub and the RP gets no code. `stale-second-factor-submit-server-error` pins PD-12
-(login-ui#985): a code submitted on the second-factor page of a login that already completed is
-answered "Server error" (`expectErrorText`). Both fail loudly when login-ui fixes them: end the
-first path at `oidc-callback` and the second where the submit then leads. PD-12 exists only where
+submitted on one. Both walks were product defects, fixed in login-ui: PD-11 (login-ui#984, fixed by
+login-ui#986), where Back on the second-factor page restarted the login without the
+`login_challenge` and the RP got no code, and PD-12 (login-ui#985, fixed by login-ui#987), where a
+code submitted on the second-factor page of a login that already completed was answered "Server
+error". `back-on-second-factor-keeps-oidc-login` now ends at the RP, and
+`stale-second-factor-submit-leads-to-settings` on the settings hub. The second runs only where
 Kratos is not given the `login_challenge` (`requires.kratosLoginChallenge: false`): login-ui passes
 it with OIDC sequencing and multi-tenancy both off (login-ui@cff4faf5 `pkg/kratos/service.go:291`),
 Kratos then makes the flow a refresh (kratos@v25.4.0 `selfservice/flow/login/handler.go:545`) and
 takes the code, and the RP gets `access_denied` for a consent verifier already used. That was seen
-on login-ui's own `docker-compose.dev.yml` stack and is not pinned: the only row with a second
+on login-ui's own `docker-compose.dev.yml` stack and is not a scenario: the only row with a second
 factor and both off, `deployed-core-local-mfa`, is bound to the urls backend and was not run. Staged, in value order: passkey delete (no scenario or transition exists);
 S-2 mode 1 (used consent challenge with a live session); kratos-vs-hydra session split-brain (admin
 revoke → re-authorize must re-challenge); short-lifespan expiry lanes (S-1);
