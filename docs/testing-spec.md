@@ -507,19 +507,18 @@ submitted on one. PD-11 (login-ui#984, fixed by login-ui#986) was Back on the se
 restarting the login without the `login_challenge`, so that the redone walk ended on the settings
 hub and the RP got no code. `back-on-second-factor-keeps-oidc-login` now ends at the RP, and so does
 `back-on-second-factor-after-tenant-selection-keeps-oidc-login` for a user who picks a tenant, whose
-password page is reached from the tenant selection. `stale-second-factor-submit-server-error` pins PD-12
-(login-ui#985): a code submitted on the second-factor page of a login that already completed is
-answered "Server error" (`expectErrorText`), login-ui's answer to a Kratos message it does not map.
-It was measured on 2026-10-07 on login-ui v0.28.0 with Kratos v25.4.0, and fails loudly when
-login-ui fixes it: end the path where the submit then leads. Kratos refuses the submit as already signed in
+password page is reached from the tenant selection. PD-12 (login-ui#985, fixed by login-ui#987) was a code
+submitted on the second-factor page of a login that already completed being answered "Server
+error", login-ui's answer to a Kratos message it did not map.
+`stale-second-factor-submit-leads-to-settings` now ends on the settings hub. Kratos refuses the submit as already signed in
 (ory/kratos@v25.4.0 `selfservice/flow/login/handler.go:840-858`) only when the flow is not a
-refresh, so PD-12 is pinned only where Kratos is not given the `login_challenge`
+refresh, so the scenario runs only where Kratos is not given the `login_challenge`
 (`requires.kratosLoginChallenge: false`): login-ui passes it with OIDC sequencing and multi-tenancy
 both off (canonical/identity-platform-login-ui@cff4faf5 `pkg/kratos/service.go:291`; v0.28.0 has
 the same condition), Kratos then makes the flow a refresh (ory/kratos@v25.4.0
 `selfservice/flow/login/handler.go:545`) and takes the code, and the RP gets `access_denied` for a
 consent verifier already used. That was seen on login-ui's own `docker-compose.dev.yml` stack and
-is not pinned: the only row with a second factor and both off, `deployed-core-local-mfa`, is
+is not a scenario: the only row with a second factor and both off, `deployed-core-local-mfa`, is
 bound to the urls backend and was not run. Staged, in value order: passkey delete (no scenario or transition exists);
 S-2 mode 1 (used consent challenge with a live session); kratos-vs-hydra session split-brain (admin
 revoke → re-authorize must re-challenge); short-lifespan expiry lanes (S-1);

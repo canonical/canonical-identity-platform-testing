@@ -105,14 +105,12 @@ export const resilienceScenarios = defineScenarioSuite({
       assertions: { tenantIdFromSeed: true },
     }),
 
-    // PD-12 (login-ui#985), pinned: Kratos refuses the submit because the session already satisfies
-    // the flow, with a message login-ui does not map, so the page shows "Server error". Once fixed the
-    // submit leaves the page, which fails this pin: end the path at where it leads then. Only where
+    // Kratos refuses the submit because the session already satisfies the flow; login-ui answers
+    // session_already_available and the SPA goes to the settings hub (login-ui#987). Only where
     // Kratos is not given the login_challenge: with it the flow is a refresh and Kratos takes the code.
-    // The code submitted is the wrong-code step's: Kratos refuses before it looks at the code.
     defineScenario({
-      id: "stale-second-factor-submit-server-error",
-      description: "PD-12: a code submitted on the second-factor page of a login that already completed is answered with a server error",
+      id: "stale-second-factor-submit-leads-to-settings",
+      description: "A code submitted on the second-factor page of a login that already completed leads to the settings hub, not to an error",
       requires: { mfaEnabled: true, localUsersEnabled: true, kratosLoginChallenge: false },
       user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
       expectedPath: [
@@ -121,10 +119,8 @@ export const resilienceScenarios = defineScenarioSuite({
         "login-totp-verify",
         "oidc-callback",
         "login-totp-verify",
-        "login-totp-verify",
+        "manage-details",
       ],
-      expectError: true,
-      expectErrorText: "Server error",
     }),
 
     // The TOTP ⇄ backup-code switch is the app's only push-based history pair, so only here do Back and Forward both land on a live form.
