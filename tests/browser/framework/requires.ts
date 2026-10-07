@@ -51,19 +51,6 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
-  if (requires.kratosLoginChallenge !== undefined) {
-    const actual = !(
-      (activeConfig.oidc_webauthn_sequencing_enabled ?? false) ||
-      (activeConfig.multi_tenancy_enabled ?? false)
-    );
-    if (actual !== requires.kratosLoginChallenge) {
-      return {
-        met: false,
-        reason: `requires kratosLoginChallenge=${requires.kratosLoginChallenge}, ActiveConfig=${actual}`,
-      };
-    }
-  }
-
   if (requires.registrationEnabled !== undefined) {
     const actual = activeConfig.registration_enabled ?? false;
     if (actual !== requires.registrationEnabled) {
@@ -218,6 +205,23 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
       return {
         met: false,
         reason: `requires verificationEnabled=${requires.verificationEnabled}, ActiveConfig verification_enabled=${actual}`,
+      };
+    }
+  }
+
+  // Derived, so evaluated after the keys a declaration states directly: their reason is the plainer
+  // one. login-ui gives Kratos the login_challenge only with both inputs off; an unknown input
+  // gates OFF, as a null boolean does.
+  if (requires.kratosLoginChallenge !== undefined) {
+    const sequencing = activeConfig.oidc_webauthn_sequencing_enabled;
+    const multiTenancy = activeConfig.multi_tenancy_enabled;
+    const actual = sequencing === false && multiTenancy === false;
+    if (actual !== requires.kratosLoginChallenge) {
+      return {
+        met: false,
+        reason:
+          `requires kratosLoginChallenge=${requires.kratosLoginChallenge}, ActiveConfig=${actual} ` +
+          `(oidc_webauthn_sequencing_enabled=${sequencing}, multi_tenancy_enabled=${multiTenancy})`,
       };
     }
   }

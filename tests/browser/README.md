@@ -49,7 +49,7 @@ Configuration in `playwright.config.ts` enforces `workers: 1`, `fullyParallel: f
 
 | Path | Purpose |
 | --- | --- |
-| `scenarios/*-scenarios.ts` | Declarative `Scenario` objects grouped via `defineScenarioSuite()`. 15 files, ~64 scenarios (e.g. `login-scenarios.ts`, `session-scenarios.ts`, `device-scenarios.ts`, `oidc-scenarios.ts`, `tenant-scenarios.ts`, `settings-scenarios.ts`, `webauthn-scenarios.ts`). |
+| `scenarios/*-scenarios.ts` | Declarative `Scenario` objects grouped via `defineScenarioSuite()`. 15 files, ~67 scenarios (e.g. `login-scenarios.ts`, `session-scenarios.ts`, `device-scenarios.ts`, `oidc-scenarios.ts`, `tenant-scenarios.ts`, `settings-scenarios.ts`, `webauthn-scenarios.ts`). |
 | `specs/*.spec.ts` | One test file per suite executing a 4-line loop: `for (const scenario of suite.scenarios) test(scenario.id, async ({ page }) => runScenario(page, scenario))`. Includes three hand-written specs: `navigation.spec.ts`, `recovery-code-abuse.spec.ts`, `google-oidc.spec.ts`. |
 | `framework/scenario-types.ts` | Type definitions for `Scenario`, `Phase`, `ScenarioRequires`, `ScenarioUser`, `ScenarioAssertions`, and `ClaimAssertion`. Provides import-time validation via `defineScenario()`. |
 | `framework/scenario-runner.ts` | `runScenario(page, scenario)`: lane-gates, applies `satisfies()`, resolves manifest users, walks `expectedPath`, captures RP tokens, executes assertions, runs post checks, and runs cleanup (even if the walk fails). |
@@ -80,10 +80,10 @@ Scenarios declare an expected user journey through identity flow states.
 | `requires` | `ScenarioRequires` flags declaring only features exercised by the walk. |
 | `user` | Identity reference (`ref`, `credentials`, `totpConfigured`, optional `selectTenant`). `ref` must match an archetype in `seeder/archetypes.ts`. |
 | `expectedPath` | Ordered array of `PageStateType` entries for single-phase walks. |
-| `phases` | Ordered array of phase definitions for multi-phase walks (`name`, `expectedPath`, optional `flowParams`, `expectError`, `freshSession`, `interventions`, `finalUrlContains`). Context is preserved; `freshSession: true` clears cookies while retaining virtual WebAuthn authenticators. |
+| `phases` | Ordered array of phase definitions for multi-phase walks (`name`, `expectedPath`, optional `flowParams`, `expectError`, `expectErrorText`, `freshSession`, `interventions`, `finalUrlContains`). Context is preserved; `freshSession: true` clears cookies while retaining virtual WebAuthn authenticators. |
 | `flowParams` | Optional URL parameters appended to the initial authorization URL (e.g. `{ max_age: "0" }`). |
 | `expectError` | Set to `true` when the path contains a self-transition (e.g. `["login-password", "login-password"]`). The runner requires a visible, non-empty error message. |
-| `expectErrorText` | With `expectError`: text the visible message must contain, for a scenario that pins WHICH error is shown (e.g. `"Server error"`). Rejected at import without `expectError`. |
+| `expectErrorText` | With `expectError`: text the visible message must contain, for a scenario that pins the message shown (e.g. `"Server error"`, login-ui's answer to a Kratos message it does not map). Rejected at import when empty or without `expectError`. |
 | `interventions` | Array of perturbation rules anchored to a state (`at`) or transition (`on`). `defineScenario()` rejects anchors not on the scenario path. |
 | `finalUrlContains` | String substring expected in the terminal URL. |
 | `assertions` | Token assertions (`noTenantId`, `tenantIdFromSeed`, `groups`, `noGroups`, `claims`). Only valid when the final state is `oidc-callback` (or `device-complete` with `requires.deviceFlow`); an empty `claims: []` is rejected at import. |
@@ -178,7 +178,7 @@ Post checks run API-side verification after walk completion via `framework/inter
 
 ## Debugging
 
-- **Skipped: requires X=…, ActiveConfig=…**: The row's `capabilities.json` does not satisfy scenario requirements. This is expected gating. Verify settings in `active-config.json`.
+- **Skipped: requires X=…, ActiveConfig=…**: The row's `capabilities.json` does not satisfy scenario requirements. This is expected gating. Verify settings in `active-config.json`; a derived key (`kratosLoginChallenge`) names the settings it is computed from in the reason.
 - **Unknown transition error**: The state pair is missing from `TRANSITION_TABLE`. Add `"<from> → <to>"` in `framework/transitions.ts`.
 - **Page-state detection timeout**: The runner outputs the expected state and detected state. Open `test-results/run-N/<test>/trace.zip` using `npx playwright show-trace`.
 - **Flakes**: A scenario that passes only on the second run is a flake and fails the gate. Retries and quarantine tags are prohibited.

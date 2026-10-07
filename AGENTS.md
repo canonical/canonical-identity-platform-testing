@@ -26,7 +26,7 @@ Scenarios are data, not logic; adding a test means adding a data object. How-to:
 - `scenarios/*-scenarios.ts`: declarative `Scenario` objects via `defineScenario()`, which rejects malformed entries at import time.
 - `framework/scenario-runner.ts` walks `expectedPath` pairwise; each `"A → B"` pair indexes `framework/transitions.ts`.
 - `helpers/page-state.ts` detects state from the DOM — login-ui multiplexes many states onto few URLs.
-- `expectError: true` on a repeated state requires a visible, non-empty error message; "did not navigate" is never the assertion.
+- `expectError: true` on a repeated state requires a visible, non-empty error message; "did not navigate" is never the assertion. `expectErrorText` adds text that message must contain.
 - `freshSession: true` on a later phase clears cookies but not the virtual authenticator (how WebAuthn sign-in is reachable).
 - `interventions` perturb the scenario's own path (`reload`, `replay-current-url`, `history-back`, `history-roundtrip`, `double-submit`); primitives in `framework/interventions.ts`.
 - Error terminals (`oidc-error-page`, `oidc-callback-error`) are enterable from `start` only, via malformed-authorize `flowParams`.

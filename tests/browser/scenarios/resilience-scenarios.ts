@@ -67,11 +67,12 @@ export const resilienceScenarios = defineScenarioSuite({
       ],
     }),
 
-    // The SPA starts a new login for the same login_challenge (login-ui#984), so the redone walk
-    // still returns to the RP.
+    // PD-11 (login-ui#984), pinned: the SPA restarts the login without the login_challenge, so the
+    // redone walk ends on the settings hub and the RP never gets its code. A walk that reaches the RP
+    // fails this pin: end the path at "oidc-callback" then.
     defineScenario({
-      id: "back-on-second-factor-keeps-oidc-login",
-      description: "Browser Back on the second-factor page restarts the login for the same RP request; signing in again completes it",
+      id: "back-on-second-factor-drops-oidc-login",
+      description: "PD-11: browser Back on the second-factor page loses the RP's login request; signing in again ends on the settings hub",
       requires: { mfaEnabled: true, localUsersEnabled: true },
       user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
       expectedPath: [
@@ -81,16 +82,37 @@ export const resilienceScenarios = defineScenarioSuite({
         "login-email",
         "login-password",
         "login-totp-verify",
-        "oidc-callback",
+        "manage-details",
       ],
     }),
 
-    // Kratos refuses the submit because the session already satisfies the flow; login-ui answers
-    // session_already_available and the SPA goes to the settings hub (login-ui#985). Only where
-    // Kratos is not given the login_challenge: with it the flow is a refresh and Kratos takes the code.
+    // PD-11 again, for a user who picks a tenant: the password page is then reached from the tenant
+    // selection, a second way to it that a fix has to cover as well.
     defineScenario({
-      id: "stale-second-factor-submit-leads-to-settings",
-      description: "A code submitted on the second-factor page of a login that already completed leads to the settings hub, not to an error",
+      id: "back-on-second-factor-after-tenant-selection-drops-oidc-login",
+      description: "PD-11: browser Back on the second-factor page after a tenant selection loses the RP's login request too",
+      requires: { mfaEnabled: true, multiTenancy: true, localUsersEnabled: true },
+      user: { ref: "multi-tenant-user", credentials: ["password", "totp"], totpConfigured: true, selectTenant: "alpha" },
+      expectedPath: [
+        "login-email",
+        "tenant-selection",
+        "login-password",
+        "login-totp-verify",
+        "login-email",
+        "login-password",
+        "login-totp-verify",
+        "manage-details",
+      ],
+    }),
+
+    // PD-12 (login-ui#985), pinned: Kratos refuses the submit because the session already satisfies
+    // the flow, with a message login-ui does not map, so the page shows "Server error". Once fixed the
+    // submit leaves the page, which fails this pin: end the path at where it leads then. Only where
+    // Kratos is not given the login_challenge: with it the flow is a refresh and Kratos takes the code.
+    // The code submitted is the wrong-code step's: Kratos refuses before it looks at the code.
+    defineScenario({
+      id: "stale-second-factor-submit-server-error",
+      description: "PD-12: a code submitted on the second-factor page of a login that already completed is answered with a server error",
       requires: { mfaEnabled: true, localUsersEnabled: true, kratosLoginChallenge: false },
       user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
       expectedPath: [
@@ -99,11 +121,13 @@ export const resilienceScenarios = defineScenarioSuite({
         "login-totp-verify",
         "oidc-callback",
         "login-totp-verify",
-        "manage-details",
+        "login-totp-verify",
       ],
+      expectError: true,
+      expectErrorText: "Server error",
     }),
 
-    // The TOTP ⇄ backup-code switch is the app's only push-based history pair, so Forward is reachable exactly here.
+    // The TOTP ⇄ backup-code switch is the app's only push-based history pair, so only here do Back and Forward both land on a live form.
     defineScenario({
       id: "backup-code-history-roundtrip",
       description: "Browser Back/Forward across the TOTP ⇄ backup-code switch keeps the form live",

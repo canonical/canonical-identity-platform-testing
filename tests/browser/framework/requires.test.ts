@@ -154,6 +154,12 @@ test("mailApi: an explicit false gates mail-reading scenarios off", () => {
 test("kratosLoginChallenge: derived, true only with OIDC sequencing and multi-tenancy both off", () => {
   assert.equal(satisfies({ kratosLoginChallenge: true }, MINIMAL).met, true);
   assert.equal(satisfies({ kratosLoginChallenge: false }, FULL).met, true);
+  const bothOff = satisfies({ kratosLoginChallenge: false }, MINIMAL);
+  assert.equal(bothOff.met, false);
+  assert.match(
+    `Skipped: ${bothOff.reason}`,
+    /^Skipped: requires kratosLoginChallenge=false, ActiveConfig=true \(oidc_webauthn_sequencing_enabled=false, multi_tenancy_enabled=false\)$/,
+  );
   for (const on of [{ oidc_webauthn_sequencing_enabled: true }, { multi_tenancy_enabled: true }]) {
     const config: ActiveConfig = { ...MINIMAL, ...on };
     assert.equal(satisfies({ kratosLoginChallenge: false }, config).met, true, JSON.stringify(on));
@@ -161,6 +167,16 @@ test("kratosLoginChallenge: derived, true only with OIDC sequencing and multi-te
     assert.equal(no.met, false, JSON.stringify(on));
     assert.match(`Skipped: ${no.reason}`, /^Skipped: requires kratosLoginChallenge=true, ActiveConfig=false/);
   }
+});
+
+test("kratosLoginChallenge: an unknown input gates OFF, and a direct key's reason comes first", () => {
+  const unknown = { ...MINIMAL, multi_tenancy_enabled: null } as unknown as ActiveConfig;
+  assert.equal(satisfies({ kratosLoginChallenge: true }, unknown).met, false);
+  assert.equal(satisfies({ kratosLoginChallenge: false }, unknown).met, true);
+  // MINIMAL has no second factor and gives Kratos the challenge: the direct key is the reason.
+  const no = satisfies({ mfaEnabled: true, kratosLoginChallenge: false }, MINIMAL);
+  assert.equal(no.met, false);
+  assert.match(no.reason ?? "", /^requires mfaEnabled=true/);
 });
 
 test("multiple keys: the FIRST unmet one is reported and met-ness is conjunctive", () => {

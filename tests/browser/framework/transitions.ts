@@ -460,10 +460,11 @@ export const TRANSITION_TABLE: TransitionTable = {
 
   // --- Browser history, mid-walk and after it ---
 
-  // Kratos rotates its CSRF token after the first factor, so the page Back lands on can no
-  // longer fetch its flow and the SPA starts a login of its own.
+  // Kratos regenerates its CSRF token when the first factor creates the session (ory/kratos@v25.4.0
+  // session/manager_http.go:161-168), so the page Back lands on can no longer fetch its flow and the
+  // SPA starts a login of its own. No entry lies in between: one traversal, as the button does.
   "login-totp-verify → login-email": {
-    description: "Browser Back from the second-factor page (one real Back)",
+    description: "Browser Back from the second-factor page",
     action: async (page) => {
       await page.goBack({ waitUntil: "load" }).catch(() => null);
     },
@@ -520,11 +521,11 @@ export const TRANSITION_TABLE: TransitionTable = {
     },
   },
   "login-totp-verify → manage-details": {
-    description: "Submit TOTP — the challenge-less link login lands on the settings hub",
+    description: "Submit TOTP — a login with no RP behind it lands on the settings hub",
     action: async (page, user, ctx) => {
       const secret = user.totpSecret ?? ctx.totpSecret;
       if (!secret) {
-        throw new Error("TOTP secret not available for the link login's second factor.");
+        throw new Error("TOTP secret not available for the second factor of a login with no RP.");
       }
       await submitTotpCode(page, secret);
     },

@@ -1,7 +1,7 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/** In-page Back buttons (FlowBackButton, ResetEmailBackButton); never page.goBack(): flow steps use router.replace, so history is not the state machine. */
+/** In-page Back buttons (FlowBackButton, ResetEmailBackButton), not the browser's: flow steps use router.replace, so history is not the state machine. The browser's Back is walked by the resilience suite. */
 
 import { test, expect } from "../framework/test";
 import { assertPageState } from "../helpers/page-state";
