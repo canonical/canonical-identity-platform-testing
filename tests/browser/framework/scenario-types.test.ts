@@ -35,6 +35,43 @@ test("expectError without a self-transition is rejected at import", () => {
   );
 });
 
+test("expectErrorText is accepted with expectError", () => {
+  const scenario = defineScenario({ ...BASE, expectErrorText: "incorrect username or password" });
+  assert.equal(scenario.expectErrorText, "incorrect username or password");
+});
+
+test("expectErrorText without expectError is rejected at import", () => {
+  assert.throws(
+    () =>
+      defineScenario({
+        ...BASE,
+        expectedPath: ["login-email", "login-password", "oidc-callback"],
+        expectError: undefined,
+        expectErrorText: "Server error",
+      }),
+    /declares expectErrorText without expectError/,
+  );
+});
+
+test("phase-level expectErrorText without expectError is rejected at import", () => {
+  assert.throws(
+    () =>
+      defineScenario({
+        ...BASE,
+        expectedPath: undefined,
+        expectError: undefined,
+        phases: [
+          {
+            name: "reject",
+            expectedPath: ["login-email", "login-password", "login-password"],
+            expectErrorText: "Server error",
+          },
+        ],
+      }),
+    /phase "reject" declares expectErrorText without expectError/,
+  );
+});
+
 test("expectError on the scenario is rejected when it declares phases", () => {
   assert.throws(
     () =>

@@ -76,6 +76,8 @@ const DEPLOYED_CORE_RUN = [
   "specs/resilience.spec.ts :: double-click-submit",
   "specs/resilience.spec.ts :: callback-replay-rejected",
   "specs/resilience.spec.ts :: back-after-auth-terminal",
+  "specs/resilience.spec.ts :: back-on-second-factor-drops-oidc-login",
+  "specs/resilience.spec.ts :: stale-second-factor-submit-server-error",
   "specs/session.spec.ts :: session-reuse-no-max-age",
   "specs/session.spec.ts :: forced-reauth-max-age-0",
   "specs/settings.spec.ts :: settings-change-password",

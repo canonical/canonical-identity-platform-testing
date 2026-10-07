@@ -63,7 +63,7 @@ const ERROR_MESSAGE_TIMEOUT_MS = 10_000;
 
 /** A self-transition is only a rejection if an error is visible with non-empty text: a swallowed
  *  submit, a disabled button or a missing banner all re-detect the same page. */
-async function assertVisibleError(page: Page, state: PageStateType): Promise<void> {
+async function assertVisibleError(page: Page, state: PageStateType, text?: string): Promise<void> {
   const message = page
     .locator(ERROR_MESSAGE_SELECTORS.map((selector) => `${selector}:visible`).join(", "))
     .first();
@@ -78,6 +78,10 @@ async function assertVisibleError(page: Page, state: PageStateType): Promise<voi
     ((await message.textContent()) ?? "").trim(),
     `error element on "${state}" rendered but its text is empty`,
   ).not.toBe("");
+
+  if (text !== undefined) {
+    await expect(message, `the error shown on "${state}" is not the one this scenario pins`).toContainText(text);
+  }
 }
 
 /** Runs one phase; returns the tokens THIS phase's callback received (scraped, no extra navigation). */
@@ -118,7 +122,7 @@ async function runPhase(
 
     if (phase.expectError && i > 0 && phase.expectedPath[i - 1] === expectedState) {
       await test.step(`Assert visible error on: ${expectedState}`, async () => {
-        await assertVisibleError(page, expectedState);
+        await assertVisibleError(page, expectedState, phase.expectErrorText);
       });
     }
 
@@ -361,6 +365,7 @@ export async function runScenario(
       flowParams: scenario.flowParams,
       expectedPath: scenario.expectedPath!,
       expectError: scenario.expectError,
+      expectErrorText: scenario.expectErrorText,
       interventions: scenario.interventions,
       finalUrlContains: scenario.finalUrlContains,
     },

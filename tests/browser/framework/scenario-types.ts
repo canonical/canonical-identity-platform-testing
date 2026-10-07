@@ -110,6 +110,8 @@ export interface Phase {
   expectedPath: PageStateType[];
   /** Require a visible, non-empty error message after every self-transition in this phase. */
   expectError?: true;
+  /** With `expectError`: the visible message must contain this text (pins WHICH error is shown). */
+  expectErrorText?: string;
   /** Clear every cookie before the start action. The virtual WebAuthn authenticator (CDP session) survives. */
   freshSession?: true;
   interventions?: Intervention[];
@@ -128,6 +130,8 @@ export interface Scenario {
   expectedPath?: PageStateType[];
   /** Single-phase form of `Phase.expectError`. */
   expectError?: true;
+  /** Single-phase form of `Phase.expectErrorText`. */
+  expectErrorText?: string;
   /** Unset → a wrong code. "expired" → a well-formed code from a window Kratos no longer accepts. */
   totpCodeWindow?: "expired";
   /** "stale-after-resend" → resend, then submit the ORIGINAL code the resend invalidated (helpers/resend.ts). */
@@ -203,6 +207,17 @@ export function defineScenario(scenario: Scenario): Scenario {
         `Scenario "${scenario.id}" declares expectError but its expectedPath has no ` +
         `self-transition (no state repeated back-to-back), so nothing would ever check ` +
         `for an error message — remove it, or repeat the state the flow stays on.`
+      );
+    }
+  }
+  for (const [where, declares] of [
+    [`Scenario "${scenario.id}"`, scenario] as const,
+    ...(scenario.phases ?? []).map((p) => [`Scenario "${scenario.id}" phase "${p.name}"`, p] as const),
+  ]) {
+    if (declares.expectErrorText !== undefined && !declares.expectError) {
+      throw new Error(
+        `${where} declares expectErrorText without expectError — no error message is ` +
+        `looked for, so the text could never be checked.`
       );
     }
   }

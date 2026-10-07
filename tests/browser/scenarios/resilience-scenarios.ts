@@ -67,6 +67,45 @@ export const resilienceScenarios = defineScenarioSuite({
       ],
     }),
 
+    // PD-11 (login-ui#984), pinned: the SPA restarts the login without the login_challenge, so the
+    // redone walk ends on the settings hub and the RP never gets its code. A walk that reaches the RP
+    // fails this pin: end the path at "oidc-callback" then.
+    defineScenario({
+      id: "back-on-second-factor-drops-oidc-login",
+      description: "PD-11: browser Back on the second-factor page loses the RP's login request; signing in again ends on the settings hub",
+      requires: { mfaEnabled: true, localUsersEnabled: true },
+      user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
+      expectedPath: [
+        "login-email",
+        "login-password",
+        "login-totp-verify",
+        "login-email",
+        "login-password",
+        "login-totp-verify",
+        "manage-details",
+      ],
+    }),
+
+    // PD-12 (login-ui#985), pinned: Kratos refuses the submit because the session already satisfies
+    // the flow, with a message login-ui does not map, so the page shows "Server error". Once fixed the
+    // submit leaves the page, which fails this pin: end the path at where it leads then.
+    defineScenario({
+      id: "stale-second-factor-submit-server-error",
+      description: "PD-12: a code submitted on the second-factor page of a login that already completed is answered with a server error",
+      requires: { mfaEnabled: true, localUsersEnabled: true },
+      user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
+      expectedPath: [
+        "login-email",
+        "login-password",
+        "login-totp-verify",
+        "oidc-callback",
+        "login-totp-verify",
+        "login-totp-verify",
+      ],
+      expectError: true,
+      expectErrorText: "Server error",
+    }),
+
     // The TOTP ⇄ backup-code switch is the app's only push-based history pair, so Forward is reachable exactly here.
     defineScenario({
       id: "backup-code-history-roundtrip",

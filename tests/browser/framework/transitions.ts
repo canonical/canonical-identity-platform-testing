@@ -21,7 +21,7 @@ import { startOIDCFlowWithParams, expectOIDCFlowComplete, startDeviceAuth, expec
 // oidc.ts starter never waits for; they use the raw hydra navigation instead.
 import { startOIDCFlowWithParams as startAuthorizeNavigation } from "../helpers/hydra";
 import { verifyBackupCode } from "../helpers/backupCode";
-import { selectTenant } from "../helpers/navigation";
+import { backToHistoryEntry, selectTenant } from "../helpers/navigation";
 import { MAIL_SUBJECTS, mailCursor, waitForMailCode } from "../helpers/mail";
 import { enterNewPassword, fillRegistrationPassword } from "../helpers/password";
 import { startRecoveryFlow, startVerificationFlow, startRegistrationFlow } from "../helpers/kratos";
@@ -455,6 +455,26 @@ export const TRANSITION_TABLE: TransitionTable = {
         );
       }
       await submitTotpCode(page, secret, Date.now() - EXPIRED_TOTP_WINDOW_OFFSET_MS);
+    },
+  },
+
+  // --- Browser history, mid-walk and after it ---
+
+  // Kratos rotates its CSRF token after the first factor, so the page Back lands on can no
+  // longer fetch its flow and the SPA starts a login of its own.
+  "login-totp-verify → login-email": {
+    description: "Browser Back from the second-factor page (one real Back)",
+    action: async (page) => {
+      await page.goBack({ waitUntil: "load" }).catch(() => null);
+    },
+  },
+
+  // The consent hop between the second-factor page and the RP is never interacted with, so the
+  // Back button skips it; page.goBack() would stop on it, and it re-submits itself.
+  "oidc-callback → login-totp-verify": {
+    description: "Browser Back from the RP to the second-factor page the finished login left behind",
+    action: async (page) => {
+      await backToHistoryEntry(page, "/ui/login");
     },
   },
 

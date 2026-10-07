@@ -119,13 +119,13 @@ charmed stack, `make test-matrix` — never asserted here) and **offline-provabl
 
 ### The gate (blocking, per-PR)
 
-Measured 2026-09-19 with `make gate PROFILE=<name>`, on a tree collecting 63 tests (64 with sequencing):
+Measured 2026-10-07 with `make gate-all-profiles`, on a tree collecting 65 tests (66 with sequencing):
 
 | Profile | Executed (×2 runs) | Failed | Flaky | Capability skips | Manifest shape (both runs) |
 |---|---|---|---|---|---|
-| `core` | 20 | 0 | 0 | 43 | `0076976be2ea` |
-| `canonical-internal` | 47 | 0 | 0 | 17 | `1125d9650c40` |
-| `canonical-portal` | 54 | 0 | 0 | 9 | `438cc139443c` |
+| `core` | 20 | 0 | 0 | 45 | `0076976be2ea` |
+| `canonical-internal` | 49 | 0 | 0 | 17 | `1125d9650c40` |
+| `canonical-portal` | 56 | 0 | 0 | 9 | `438cc139443c` |
 
 Both runs of every profile executed an identical set with an identical manifest fingerprint (§10
 item 13's detector); the union check (§6) passed; `known-coverage-gaps.json` holds 7 entries.
@@ -198,9 +198,9 @@ consumes the capabilities file via `BROWSER_TEST_CAPABILITIES`. No hand-written 
 
 | Quantity | Value | Re-derive with |
 |---|---|---|
-| Tests collected | **63** (64 where sequencing is on) | `jq .total tests/browser/expected-tests.json` |
+| Tests collected | **65** (66 where sequencing is on) | `jq .total tests/browser/expected-tests.json` |
 | Registered gaps | **7** — three Google scenarios needing Workspace credentials, plus four shapes no gate profile deploys (prompt-on-use backup codes, verification off, MT + sequencing) | `jq '.gaps \| length' tests/browser/known-coverage-gaps.json` |
-| Executed per profile | `core` 20, `canonical-internal` 47, `canonical-portal` 54 — measured 2026-09-19 (§5) | `make gate-all-profiles`, then `jq '{profile, executed: (.executed \| length)}' tests/browser/coverage/*.json` |
+| Executed per profile | `core` 20, `canonical-internal` 49, `canonical-portal` 56 — measured 2026-10-07 (§5) | `make gate-all-profiles`, then `jq '{profile, executed: (.executed \| length)}' tests/browser/coverage/*.json` |
 
 `oidc.spec.ts` picks its scenario suite at **collection** time from the declared
 `oidc_webauthn_sequencing_enabled`; the sequencing suite carries one extra scenario
@@ -489,7 +489,16 @@ settings surface (TOTP unlink, backup-code deactivate/reuse/regenerate; `backup_
 models the login-ui version fork), and `resend-code` (two `verification-resend-*` scenarios; pins
 PD-10: the verification resend button re-enables after 90 ms while the UI shows a 1m30s countdown —
 login-ui passes `RESEND_CODE_TIMEOUT = 90 // seconds` unscaled to `setTimeout`; the primitive fails
-loudly when that is fixed). Staged, in value order: passkey delete (no scenario or transition exists);
+loudly when that is fixed). Browser Back mid-walk and onto a finished login's pages, added 2026-10-07
+after both were found outside this plane: until then the suite pressed Back only at the RP terminal
+and across the one push-based pair, and walked history with `page.goBack()`, which stops on the
+consent hop a real Back button skips, so it never stood on a stale second-factor page, and nothing
+submitted on one. `back-on-second-factor-drops-oidc-login` pins PD-11 (login-ui#984): Back on the
+second-factor page restarts the login without the `login_challenge`, so the redone walk ends on the
+settings hub and the RP gets no code. `stale-second-factor-submit-server-error` pins PD-12
+(login-ui#985): a code submitted on the second-factor page of a login that already completed is
+answered "Server error" (`expectErrorText`). Both fail loudly when login-ui fixes them: end the
+first path at `oidc-callback` and the second where the submit then leads. Staged, in value order: passkey delete (no scenario or transition exists);
 S-2 mode 1 (used consent challenge with a live session); kratos-vs-hydra session split-brain (admin
 revoke → re-authorize must re-challenge); short-lifespan expiry lanes (S-1);
 `prompt=login`/`prompt=none`/`id_token_hint` request-shaping; the tenant token webhook (Go-suite work).

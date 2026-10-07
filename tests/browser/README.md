@@ -83,6 +83,7 @@ Scenarios declare an expected user journey through identity flow states.
 | `phases` | Ordered array of phase definitions for multi-phase walks (`name`, `expectedPath`, optional `flowParams`, `expectError`, `freshSession`, `interventions`, `finalUrlContains`). Context is preserved; `freshSession: true` clears cookies while retaining virtual WebAuthn authenticators. |
 | `flowParams` | Optional URL parameters appended to the initial authorization URL (e.g. `{ max_age: "0" }`). |
 | `expectError` | Set to `true` when the path contains a self-transition (e.g. `["login-password", "login-password"]`). The runner requires a visible, non-empty error message. |
+| `expectErrorText` | With `expectError`: text the visible message must contain, for a scenario that pins WHICH error is shown (e.g. `"Server error"`). Rejected at import without `expectError`. |
 | `interventions` | Array of perturbation rules anchored to a state (`at`) or transition (`on`). `defineScenario()` rejects anchors not on the scenario path. |
 | `finalUrlContains` | String substring expected in the terminal URL. |
 | `assertions` | Token assertions (`noTenantId`, `tenantIdFromSeed`, `groups`, `noGroups`, `claims`). Only valid when the final state is `oidc-callback` (or `device-complete` with `requires.deviceFlow`); an empty `claims: []` is rejected at import. |
