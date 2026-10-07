@@ -67,12 +67,11 @@ export const resilienceScenarios = defineScenarioSuite({
       ],
     }),
 
-    // PD-11 (login-ui#984), pinned: the SPA restarts the login without the login_challenge, so the
-    // redone walk ends on the settings hub and the RP never gets its code. A walk that reaches the RP
-    // fails this pin: end the path at "oidc-callback" then.
+    // The SPA starts a new login for the same login_challenge (login-ui#986), so the redone walk
+    // still returns to the RP.
     defineScenario({
-      id: "back-on-second-factor-drops-oidc-login",
-      description: "PD-11: browser Back on the second-factor page loses the RP's login request; signing in again ends on the settings hub",
+      id: "back-on-second-factor-keeps-oidc-login",
+      description: "Browser Back on the second-factor page restarts the login for the same RP request; signing in again completes it",
       requires: { mfaEnabled: true, localUsersEnabled: true },
       user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
       expectedPath: [
@@ -82,15 +81,15 @@ export const resilienceScenarios = defineScenarioSuite({
         "login-email",
         "login-password",
         "login-totp-verify",
-        "manage-details",
+        "oidc-callback",
       ],
     }),
 
-    // PD-11 again, for a user who picks a tenant: the password page is then reached from the tenant
-    // selection, a second way to it that a fix has to cover as well.
+    // The same for a user who picks a tenant: the password page is then reached from the tenant
+    // selection, and the tenant picked for this login_challenge is kept.
     defineScenario({
-      id: "back-on-second-factor-after-tenant-selection-drops-oidc-login",
-      description: "PD-11: browser Back on the second-factor page after a tenant selection loses the RP's login request too",
+      id: "back-on-second-factor-after-tenant-selection-keeps-oidc-login",
+      description: "Browser Back on the second-factor page after a tenant selection restarts the login for the same RP request",
       requires: { mfaEnabled: true, multiTenancy: true, localUsersEnabled: true },
       user: { ref: "multi-tenant-user", credentials: ["password", "totp"], totpConfigured: true, selectTenant: "alpha" },
       expectedPath: [
@@ -101,8 +100,9 @@ export const resilienceScenarios = defineScenarioSuite({
         "login-email",
         "login-password",
         "login-totp-verify",
-        "manage-details",
+        "oidc-callback",
       ],
+      assertions: { tenantIdFromSeed: true },
     }),
 
     // PD-12 (login-ui#985), pinned: Kratos refuses the submit because the session already satisfies

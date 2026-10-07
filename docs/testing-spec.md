@@ -503,16 +503,15 @@ loudly when that is fixed). Browser Back mid-walk and onto a finished login's pa
 after both were found outside this plane: until then the suite pressed Back only at the RP terminal
 and across the one push-based pair, and walked history with `page.goBack()`, which stops on the
 consent hop a real Back button skips, so it never stood on a stale second-factor page, and nothing
-submitted on one. `back-on-second-factor-drops-oidc-login` pins PD-11 (login-ui#984): Back on the
-second-factor page restarts the login without the `login_challenge`, so the redone walk ends on the
-settings hub and the RP gets no code; `back-on-second-factor-after-tenant-selection-drops-oidc-login`
-pins the same for a user who picks a tenant, whose password page is reached from the tenant
-selection: a fix has to cover both ways to it. `stale-second-factor-submit-server-error` pins PD-12
+submitted on one. PD-11 (login-ui#984, fixed by login-ui#986) was Back on the second-factor page
+restarting the login without the `login_challenge`, so that the redone walk ended on the settings
+hub and the RP got no code. `back-on-second-factor-keeps-oidc-login` now ends at the RP, and so does
+`back-on-second-factor-after-tenant-selection-keeps-oidc-login` for a user who picks a tenant, whose
+password page is reached from the tenant selection. `stale-second-factor-submit-server-error` pins PD-12
 (login-ui#985): a code submitted on the second-factor page of a login that already completed is
 answered "Server error" (`expectErrorText`), login-ui's answer to a Kratos message it does not map.
-Both were measured on 2026-10-07 on login-ui v0.28.0 (`:stable`) with Kratos v25.4.0, and both fail
-loudly when login-ui fixes them: end the first path at `oidc-callback` and the second where the
-submit then leads. Kratos refuses the submit as already signed in
+It was measured on 2026-10-07 on login-ui v0.28.0 with Kratos v25.4.0, and fails loudly when
+login-ui fixes it: end the path where the submit then leads. Kratos refuses the submit as already signed in
 (ory/kratos@v25.4.0 `selfservice/flow/login/handler.go:840-858`) only when the flow is not a
 refresh, so PD-12 is pinned only where Kratos is not given the `login_challenge`
 (`requires.kratosLoginChallenge: false`): login-ui passes it with OIDC sequencing and multi-tenancy
