@@ -498,7 +498,13 @@ second-factor page restarts the login without the `login_challenge`, so the redo
 settings hub and the RP gets no code. `stale-second-factor-submit-server-error` pins PD-12
 (login-ui#985): a code submitted on the second-factor page of a login that already completed is
 answered "Server error" (`expectErrorText`). Both fail loudly when login-ui fixes them: end the
-first path at `oidc-callback` and the second where the submit then leads. Staged, in value order: passkey delete (no scenario or transition exists);
+first path at `oidc-callback` and the second where the submit then leads. PD-12 exists only where
+Kratos is not given the `login_challenge` (`requires.kratosLoginChallenge: false`): login-ui passes
+it with OIDC sequencing and multi-tenancy both off (login-ui@cff4faf5 `pkg/kratos/service.go:291`),
+Kratos then makes the flow a refresh (kratos@v25.4.0 `selfservice/flow/login/handler.go:545`) and
+takes the code, and the RP gets `access_denied` for a consent verifier already used. That was seen
+on login-ui's own `docker-compose.dev.yml` stack and is not pinned: the only row with a second
+factor and both off, `deployed-core-local-mfa`, is bound to the urls backend and was not run. Staged, in value order: passkey delete (no scenario or transition exists);
 S-2 mode 1 (used consent challenge with a live session); kratos-vs-hydra session split-brain (admin
 revoke → re-authorize must re-challenge); short-lifespan expiry lanes (S-1);
 `prompt=login`/`prompt=none`/`id_token_hint` request-shaping; the tenant token webhook (Go-suite work).

@@ -51,6 +51,19 @@ export function satisfies(requires: ScenarioRequires, activeConfig: ActiveConfig
     }
   }
 
+  if (requires.kratosLoginChallenge !== undefined) {
+    const actual = !(
+      (activeConfig.oidc_webauthn_sequencing_enabled ?? false) ||
+      (activeConfig.multi_tenancy_enabled ?? false)
+    );
+    if (actual !== requires.kratosLoginChallenge) {
+      return {
+        met: false,
+        reason: `requires kratosLoginChallenge=${requires.kratosLoginChallenge}, ActiveConfig=${actual}`,
+      };
+    }
+  }
+
   if (requires.registrationEnabled !== undefined) {
     const actual = activeConfig.registration_enabled ?? false;
     if (actual !== requires.registrationEnabled) {

@@ -19,6 +19,13 @@ export interface ScenarioRequires {
   hookService?: boolean;
 
   oidcSequencing?: boolean;
+  /**
+   * Whether Kratos is given the login_challenge. login-ui passes it only with OIDC sequencing and
+   * multi-tenancy both off (login-ui@cff4faf5 pkg/kratos/service.go:291); Kratos then makes every flow
+   * of that login a refresh (kratos@v25.4.0 selfservice/flow/login/handler.go:545), so it accepts a
+   * second factor it would otherwise refuse as already signed in.
+   */
+  kratosLoginChallenge?: boolean;
   localUsersEnabled?: boolean;
   mfaEnforced?: boolean;
   registrationEnabled?: boolean;

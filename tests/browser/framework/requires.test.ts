@@ -151,6 +151,18 @@ test("mailApi: an explicit false gates mail-reading scenarios off", () => {
   assert.equal(satisfies({ mailApi: true }, FULL).met, true);
 });
 
+test("kratosLoginChallenge: derived, true only with OIDC sequencing and multi-tenancy both off", () => {
+  assert.equal(satisfies({ kratosLoginChallenge: true }, MINIMAL).met, true);
+  assert.equal(satisfies({ kratosLoginChallenge: false }, FULL).met, true);
+  for (const on of [{ oidc_webauthn_sequencing_enabled: true }, { multi_tenancy_enabled: true }]) {
+    const config: ActiveConfig = { ...MINIMAL, ...on };
+    assert.equal(satisfies({ kratosLoginChallenge: false }, config).met, true, JSON.stringify(on));
+    const no = satisfies({ kratosLoginChallenge: true }, config);
+    assert.equal(no.met, false, JSON.stringify(on));
+    assert.match(`Skipped: ${no.reason}`, /^Skipped: requires kratosLoginChallenge=true, ActiveConfig=false/);
+  }
+});
+
 test("multiple keys: the FIRST unmet one is reported and met-ness is conjunctive", () => {
   const all: ScenarioRequires = { oidcEnabled: true, multiTenancy: true, hookService: true, mailApi: true };
   assert.equal(satisfies(all, FULL).met, true);
