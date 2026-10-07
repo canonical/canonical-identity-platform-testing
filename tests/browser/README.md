@@ -49,15 +49,15 @@ Configuration in `playwright.config.ts` enforces `workers: 1`, `fullyParallel: f
 
 | Path | Purpose |
 | --- | --- |
-| `scenarios/*-scenarios.ts` | Declarative `Scenario` objects grouped via `defineScenarioSuite()`. 15 files, ~67 scenarios (e.g. `login-scenarios.ts`, `session-scenarios.ts`, `device-scenarios.ts`, `oidc-scenarios.ts`, `tenant-scenarios.ts`, `settings-scenarios.ts`, `webauthn-scenarios.ts`). |
-| `specs/*.spec.ts` | One test file per suite executing a 4-line loop: `for (const scenario of suite.scenarios) test(scenario.id, async ({ page }) => runScenario(page, scenario))`. Includes three hand-written specs: `navigation.spec.ts`, `recovery-code-abuse.spec.ts`, `google-oidc.spec.ts`. |
+| `scenarios/*-scenarios.ts` | Declarative `Scenario` objects grouped via `defineScenarioSuite()`. 15 files, 69 scenarios (e.g. `login-scenarios.ts`, `session-scenarios.ts`, `device-scenarios.ts`, `oidc-scenarios.ts`, `tenant-scenarios.ts`, `settings-scenarios.ts`, `webauthn-scenarios.ts`). |
+| `specs/*.spec.ts` | One test file per suite executing a 4-line loop: `for (const scenario of suite.scenarios) test(scenario.id, async ({ page }) => runScenario(page, scenario))`. Includes four hand-written specs: `navigation.spec.ts`, `recovery-code-abuse.spec.ts`, `google-oidc.spec.ts`, `tenant-second-email.spec.ts`. |
 | `framework/scenario-types.ts` | Type definitions for `Scenario`, `Phase`, `ScenarioRequires`, `ScenarioUser`, `ScenarioAssertions`, and `ClaimAssertion`. Provides import-time validation via `defineScenario()`. |
 | `framework/scenario-runner.ts` | `runScenario(page, scenario)`: lane-gates, applies `satisfies()`, resolves manifest users, walks `expectedPath`, captures RP tokens, executes assertions, runs post checks, and runs cleanup (even if the walk fails). |
 | `framework/transitions.ts` | `TRANSITION_TABLE`: maps `"<from> → <to>"` state pairs to `{ description, action }`. Examples: `"start → login-email"`, `"login-email → login-password"`, `"login-email → provider:dex:login"`. |
 | `helpers/page-state.ts` | `PageStateType` union of ~36 states (e.g. `login-email`, `login-password`, `login-totp-verify`, `oidc-callback`, `tenant-selection`, `setup-passkey`, `device-code`, `device-complete`) and DOM-driven state detectors. |
 | `framework/claim-assertions.ts` | Token assertion factories returning `ClaimAssertion` objects (`reauthenticated`, `amrRecords`, `subjectIsSeededIdentity`). |
 | `framework/intervention-checks.ts` | API-side verification routines for `postChecks`. |
-| `framework/interventions.ts` | Perturbation primitives (`reload`, `replay-current-url`, `history-back`, `history-roundtrip`, `resend-code`, `double-submit`). |
+| `framework/interventions.ts` | Perturbation primitives (`reload`, `replay-current-url`, `reopen-login-request`, `history-back`, `history-roundtrip`, `resend-code`, `double-submit`). |
 | `framework/requires.ts` | Evaluates deployment compatibility via `satisfies(requires, activeConfig)`. Maps camelCase `ScenarioRequires` keys to snake_case `ActiveConfig` keys. |
 | `framework/active-config.ts` | `ActiveConfig` type definition representing deployment configuration. |
 | `framework/global-setup.ts` | Ingests the row's `capabilities.json` (from `BROWSER_TEST_CAPABILITIES`) into `active-config.json`. |

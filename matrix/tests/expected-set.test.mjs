@@ -79,6 +79,7 @@ const DEPLOYED_CORE_RUN = [
   "specs/resilience.spec.ts :: back-on-second-factor-drops-oidc-login",
   "specs/session.spec.ts :: session-reuse-no-max-age",
   "specs/session.spec.ts :: forced-reauth-max-age-0",
+  "specs/session.spec.ts :: forced-reauth-not-met-by-reopening-the-request",
   "specs/settings.spec.ts :: settings-change-password",
   "specs/settings.spec.ts :: settings-backup-codes-deactivate",
   // backup_code_prompt_on_use=false selects the callback-terminal variant.

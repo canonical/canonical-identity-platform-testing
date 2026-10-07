@@ -122,13 +122,18 @@ charmed stack, `make test-matrix` — never asserted here) and **offline-provabl
 Measured 2026-10-07 with `make gate-all-profiles`, on a tree collecting 65 tests (66 with sequencing).
 The tree now collects one more, `back-on-second-factor-after-tenant-selection-drops-oidc-login`
 (multi-tenancy only). `core` was gated again with it; for the other two rows it is added to the
-measured counts, having run twice on `canonical-portal` outside the gate:
+measured counts, having run twice on `canonical-portal` outside the gate. Four more were added the
+same day (70 collected, 71 with sequencing): the two session scenarios that open the login request
+again and the two tests of `specs/tenant-second-email.spec.ts`. `canonical-portal` runs three of them
+and was gated again (`make gate PROFILE=canonical-portal`). `canonical-internal` runs one and `core`
+none: their rows are the earlier measurement with that scenario and the new skips added, not a new
+gate run on the machine that measured the rest (the PR gate runs all three):
 
 | Profile | Executed (×2 runs) | Failed | Flaky | Capability skips | Manifest shape (both runs) |
 |---|---|---|---|---|---|
-| `core` | 20 | 0 | 0 | 46 | `0076976be2ea` |
-| `canonical-internal` | 49 | 0 | 0 | 18 | `1125d9650c40` |
-| `canonical-portal` | 57 | 0 | 0 | 9 | `438cc139443c` |
+| `core` | 20 | 0 | 0 | 50 | `0076976be2ea` |
+| `canonical-internal` | 50 | 0 | 0 | 21 | `1125d9650c40` |
+| `canonical-portal` | 60 | 0 | 0 | 10 | `438cc139443c` |
 
 Both runs of every profile executed an identical set with an identical manifest fingerprint (§10
 item 13's detector); the union check (§6) passed; `known-coverage-gaps.json` holds 7 entries.
@@ -142,7 +147,7 @@ item 13's detector); the union check (§6) passed; `known-coverage-gaps.json` ho
 |---|---|
 | `pd931-single-oidc-mt` | exactly **12** |
 | `tfdefault-oidc-only` | exactly **8** |
-| `deployed-core-local-mfa` | exactly **22** |
+| `deployed-core-local-mfa` | exactly **23** |
 
 The three sets pairwise differ (two oidc-only shapes, one local-user shape), so the canaries
 discriminate; re-derive any cell with `cd tests/browser && npx tsx scripts/expected-set.ts ../../matrix/rows/<row>/capabilities.json`.
@@ -201,9 +206,9 @@ consumes the capabilities file via `BROWSER_TEST_CAPABILITIES`. No hand-written 
 
 | Quantity | Value | Re-derive with |
 |---|---|---|
-| Tests collected | **66** (67 where sequencing is on) | `jq .total tests/browser/expected-tests.json` |
+| Tests collected | **70** (71 where sequencing is on) | `jq .total tests/browser/expected-tests.json` |
 | Registered gaps | **7** — three Google scenarios needing Workspace credentials, plus four shapes no gate profile deploys (prompt-on-use backup codes, verification off, MT + sequencing) | `jq '.gaps \| length' tests/browser/known-coverage-gaps.json` |
-| Executed per profile | `core` 20, `canonical-internal` 49, `canonical-portal` 57 — measured 2026-10-07 (§5) | `make gate-all-profiles`, then `jq '{profile, executed: (.executed \| length)}' tests/browser/coverage/*.json` |
+| Executed per profile | `core` 20, `canonical-internal` 50, `canonical-portal` 60 — measured 2026-10-07 (§5) | `make gate-all-profiles`, then `jq '{profile, executed: (.executed \| length)}' tests/browser/coverage/*.json` |
 
 `oidc.spec.ts` picks its scenario suite at **collection** time from the declared
 `oidc_webauthn_sequencing_enabled`; the sequencing suite carries one extra scenario
@@ -224,6 +229,8 @@ everything; the union across the three is the coverage claim. Decisions that bin
 - **`auth_time` across phases.** A replayed session produces the same path as a real
   re-authentication, so `reauthenticated(from, to)` (`framework/claim-assertions.ts`) asserts
   `auth_time` **advanced**; under `max_age` the OP must return it (OIDC Core §3.1.3.7), so a missing claim fails.
+  It shows that Hydra did not skip the login, not that the login UI asked for credentials: Hydra
+  stamps every accept of a login it did not skip (§10, PD-13). What was asked is the path's to show.
 - **`amr` as a product assertion.** PD-4: an enrolled security key does not satisfy login-ui's MFA
   *enforcement* decision, TOTP does — asserted as `amr` including `totp` and excluding `webauthn`.
   This pins the branch the scenario **walks**, not a platform impossibility (login-ui#884 made
@@ -328,6 +335,7 @@ modifies how that transition submits. Primitives live in `framework/intervention
 |---|---|---|---|
 | `reload` | `at` | F5; the same state must re-detect afterwards (login-ui persists `?flow=` via `router.replace`) | Anywhere **except** `oidc-callback`, where a reload re-sends the authorization code |
 | `replay-current-url` | `at` | Re-navigate to the exact current URL, assert a declared terminal (`expect`, optional `expectUrlContains`) | Final path state only |
+| `reopen-login-request` | `at` | Open the login request's own address again (`/ui/login?login_challenge=…`, the challenge read from the browser history), assert the declared state (`expect`) | Final path state only |
 | `history-roundtrip` | `at` | Real Back must land on `via`, real Forward must land back on the anchor, **and the walk continues** | Mid-walk, because it is self-returning |
 | `history-back` | `at` | Walk history backwards (bounded) until the URL contains `untilUrl`, let redirects settle, assert the declared terminal | Final path state only |
 | `resend-code` | `at` | Click resend, require the cooldown countdown, wait for the resent mail and re-anchor the mail cursor so the following submit proves newest-code-wins | `verification` only, never at a final state, no `expect`/`untilUrl`/`via` |
@@ -521,7 +529,31 @@ the same condition), Kratos then makes the flow a refresh (ory/kratos@v25.4.0
 `selfservice/flow/login/handler.go:545`) and takes the code, and the RP gets `access_denied` for a
 consent verifier already used. That was seen on login-ui's own `docker-compose.dev.yml` stack and
 is not pinned: the only row with a second factor and both off, `deployed-core-local-mfa`, is
-bound to the urls backend and was not run. Staged, in value order: passkey delete (no scenario or transition exists);
+bound to the urls backend and was not run. A login abandoned and its request opened again, added
+2026-10-07 after two more defects were found outside this plane. Every scenario that demanded a new
+sign-in from a browser with a session (`max_age=0`: `forced-reauth-max-age-0`, `oidc-forced-reauth`
+and four more) walked every credential step; none stopped after the email and opened the request
+again, no intervention did, and the one assertion about re-authentication, `reauthenticated`, reads
+`auth_time`, which Hydra sets when a login it did not skip is accepted, whatever the login UI asked
+for (ory/hydra@v25.4.0 `consent/handler.go:460-465`): only the path can show a login accepted
+without credentials. The `reopen-login-request` intervention opens the login request's address
+again (`/ui/login?login_challenge=…`) from one of its login steps and asserts where that ends.
+`forced-reauth-not-met-by-reopening-the-request` asserts the login is shown again, where
+multi-tenancy is off; `forced-reauth-skipped-by-reopening-the-request` pins PD-13 (login-ui#988):
+with multi-tenancy the request is accepted on the session from before, with no password and no
+second factor, because login-ui takes its state cookie being bound to the request as a sign-in for
+it and binds it at the email step (canonical/identity-platform-login-ui@cff4faf5
+`pkg/kratos/handlers.go:178-191`, `:909-931`, `pkg/tenants/resolver.go:125-127`).
+`specs/tenant-second-email.spec.ts` (two identities in one walk, so hand-written)
+pins PD-14 (login-ui#990): the tenant recorded when an email is entered stays for whoever signs
+in for that request, so a second user gets the first one's `tenant_id`, or none
+(`pkg/tenants/resolver.go:137-140`, `internal/cookies/cookies.go:61-68`,
+`pkg/kratos/handlers.go:286-289`). Here the claim reaches the tokens, because nothing on this plane
+checks membership after login-ui: Kratos has no login webhook to tenant-service
+(canonical/tenant-service@cc6ae33 `pkg/webhooks/service.go:198-246`) and hook-service is given no
+tenant-service address (canonical/hook-service@10292af5 `cmd/serve.go:111-129`). A plane that wires
+either fails the first PD-14 test for that reason, not for a login-ui fix. Both pins were measured
+on 2026-10-07 on login-ui v0.28.0 with Kratos and Hydra v25.4.0, and fail loudly when fixed. Staged, in value order: passkey delete (no scenario or transition exists);
 S-2 mode 1 (used consent challenge with a live session); kratos-vs-hydra session split-brain (admin
 revoke → re-authorize must re-challenge); short-lifespan expiry lanes (S-1);
 `prompt=login`/`prompt=none`/`id_token_hint` request-shaping; the tenant token webhook (Go-suite work).

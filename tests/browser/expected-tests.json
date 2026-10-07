@@ -10,7 +10,7 @@
     "A value may be a number, or an array when a file's collection legitimately",
     "varies by profile — update the array deliberately, never to silence a run."
   ],
-  "total": [66, 67],
+  "total": [70, 71],
   "files": {
     "account-linking.spec.ts": 3,
     "device.spec.ts": 2,
@@ -24,8 +24,9 @@
     "recovery.spec.ts": 3,
     "registration.spec.ts": 3,
     "resilience.spec.ts": 8,
-    "session.spec.ts": 3,
+    "session.spec.ts": 5,
     "settings.spec.ts": 5,
+    "tenant-second-email.spec.ts": 2,
     "tenant.spec.ts": 8,
     "use-backup-codes.spec.ts": 1,
     "verification.spec.ts": 5,

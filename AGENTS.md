@@ -28,7 +28,7 @@ Scenarios are data, not logic; adding a test means adding a data object. How-to:
 - `helpers/page-state.ts` detects state from the DOM — login-ui multiplexes many states onto few URLs.
 - `expectError: true` on a repeated state requires a visible, non-empty error message; "did not navigate" is never the assertion. `expectErrorText` adds text that message must contain.
 - `freshSession: true` on a later phase clears cookies but not the virtual authenticator (how WebAuthn sign-in is reachable).
-- `interventions` perturb the scenario's own path (`reload`, `replay-current-url`, `history-back`, `history-roundtrip`, `double-submit`); primitives in `framework/interventions.ts`.
+- `interventions` perturb the scenario's own path (`reload`, `replay-current-url`, `reopen-login-request`, `history-back`, `history-roundtrip`, `double-submit`); primitives in `framework/interventions.ts`.
 - Error terminals (`oidc-error-page`, `oidc-callback-error`) are enterable from `start` only, via malformed-authorize `flowParams`.
 - Token assertions live in `framework/claim-assertions.ts`, API post checks in `framework/intervention-checks.ts`; scenarios name them, never implement them.
 - `seeder/` owns all admin-API access; `seeder/archetypes.ts` is the sole source of users; `seed.ts` writes `manifest.json`, which specs read.

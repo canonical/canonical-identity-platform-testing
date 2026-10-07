@@ -39,3 +39,30 @@ export async function backToHistoryEntry(page: Page, urlPart: string): Promise<v
     await cdp.detach().catch(() => {});
   }
 }
+
+/** Opens the address of the login request the walk is in again (`/ui/login?login_challenge=…`), as
+ *  following its link a second time does. The challenge is read from the browser history, where the
+ *  first step of the login has it in its URL. Chromium only (CDP). */
+export async function reopenLoginRequest(page: Page): Promise<void> {
+  const cdp = await page.context().newCDPSession(page);
+  let target: URL | undefined;
+  try {
+    const { currentIndex, entries } = await cdp.send("Page.getNavigationHistory");
+    for (const entry of entries.slice(0, currentIndex + 1).reverse()) {
+      const url = URL.canParse(entry.url) ? new URL(entry.url) : undefined;
+      if (url?.searchParams.has("login_challenge") && url.pathname.endsWith("/login")) {
+        target = url;
+        break;
+      }
+    }
+  } finally {
+    await cdp.detach().catch(() => {});
+  }
+  if (!target) {
+    throw new Error("reopenLoginRequest: no login page with a login_challenge in the browser history");
+  }
+  const challenge = target.searchParams.get("login_challenge") as string;
+  await page.goto(`${target.origin}${target.pathname}?login_challenge=${encodeURIComponent(challenge)}`, {
+    waitUntil: "load",
+  });
+}
