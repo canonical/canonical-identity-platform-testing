@@ -40,9 +40,8 @@ export async function backToHistoryEntry(page: Page, urlPart: string): Promise<v
   }
 }
 
-/** Opens the address of the login request the walk is in again (`/ui/login?login_challenge=…`), as
- *  following its link a second time does. The challenge is read from the browser history, where the
- *  first step of the login has it in its URL. Chromium only (CDP). */
+/** Opens the login request's address again (`/ui/login?login_challenge=…`), with the challenge read
+ *  from the browser history. Chromium only (CDP). */
 export async function reopenLoginRequest(page: Page): Promise<void> {
   const cdp = await page.context().newCDPSession(page);
   let target: URL | undefined;

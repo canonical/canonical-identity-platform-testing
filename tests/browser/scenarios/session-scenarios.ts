@@ -61,8 +61,6 @@ export const sessionScenarios = defineScenarioSuite({
       },
     ],
     // The path alone cannot tell a re-challenge from a replayed session; max_age makes `auth_time` mandatory.
-    // `auth_time` shows that Hydra did not skip the login, not what the login UI asked for: see the
-    // two scenarios that open the request again.
     assertions: {
       noTenantId: true,
       claims: [
@@ -72,8 +70,7 @@ export const sessionScenarios = defineScenarioSuite({
     },
   }),
 
-  // The request demands a new sign-in, and entering the email is not one: the login request opened
-  // again shows its login again. The session from before is never handed to the RP.
+  // Entering the email is not a sign-in: the request opened again still shows its login.
   defineScenario({
     id: "forced-reauth-not-met-by-reopening-the-request",
     description: "max_age=0 with a session: after the email step, the login request opened again still asks who is signing in",
@@ -93,12 +90,8 @@ export const sessionScenarios = defineScenarioSuite({
     ],
   }),
 
-  // PD-13 (login-ui#988), pinned: with multi-tenancy the same walk ends at the RP. login-ui takes
-  // the state cookie being bound to the request as proof of a sign-in for it
-  // (canonical/identity-platform-login-ui@cff4faf5 pkg/kratos/handlers.go:178-191,
-  // pkg/tenants/resolver.go:125-127), and binds it at the email step (handlers.go:909-931); no
-  // password and no second factor is asked. When fixed the request shows its login again, which
-  // fails this pin: drop it then, and the multiTenancy gate of the scenario above.
+  // PD-13 (login-ui#988), pinned: with multi-tenancy the same walk ends at the RP (testing-spec §10).
+  // When fixed, drop this pin and the multiTenancy gate of the scenario above.
   defineScenario({
     id: "forced-reauth-skipped-by-reopening-the-request",
     description: "PD-13: max_age=0 with a session and multi-tenancy: after the email step, the login request opened again is accepted on the old session",

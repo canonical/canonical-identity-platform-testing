@@ -397,8 +397,7 @@ export function defineScenario(scenario: Scenario): Scenario {
           );
         }
         if (iv.do === "reopen-login-request") {
-          // A login state shows this phase's own request; anywhere else the nearest one in the
-          // browser history could be an earlier phase's.
+          // Anywhere else the nearest request in the history could be an earlier phase's.
           if (!iv.at.startsWith("login-")) {
             throw new Error(
               `Scenario "${scenario.id}" ${where}: "reopen-login-request" is only legal at a ` +

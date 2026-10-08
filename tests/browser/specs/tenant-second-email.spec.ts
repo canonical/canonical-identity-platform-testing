@@ -1,18 +1,10 @@
 // Copyright 2026 Canonical Ltd.
 // SPDX-License-Identifier: AGPL-3.0
 
-/** PD-14 (login-ui#990), pinned: the tenant of a login is recorded for the login request when an
- *  email is entered, and whoever then signs in for that request gets that record instead of their
- *  own tenant (canonical/identity-platform-login-ui@cff4faf5 pkg/tenants/resolver.go:137-140,
- *  internal/cookies/cookies.go:61-68, pkg/kratos/handlers.go:286-289). Two identities in one walk,
- *  so hand-written. When login-ui resolves the tenant for the user who signs in, both tests fail:
- *  read the expected tenant from `user` instead of `entered` then.
- *
- *  The record reaches the tokens because nothing on this plane checks membership after login-ui:
- *  Kratos has no login webhook to tenant-service (canonical/tenant-service@cc6ae33
- *  pkg/webhooks/service.go:198-246) and hook-service is given no tenant-service address
- *  (canonical/hook-service@10292af5 cmd/serve.go:111-129). If either is wired, the first test fails
- *  for that reason and not for a login-ui fix. */
+/** PD-14 (login-ui#990), pinned: whoever signs in for a login request gets the tenant recorded for
+ *  the email entered first (testing-spec §10). Two identities in one walk, so hand-written. The
+ *  first test also needs a plane that checks membership nowhere after login-ui. When fixed, read
+ *  the expected tenant from `user` instead of `entered`. */
 
 import { expect, test } from "../framework/test";
 import { readManifest, findUserByRef } from "../framework/manifest";
@@ -70,7 +62,7 @@ test.describe("second email for one login request", () => {
       await enterEmail(page, entered.email);
       await assertPageState(page, "login-password");
 
-      // No credential was given for the first email: the request is opened again for another one.
+      // No credential was given for the first email.
       await reopenLoginRequest(page);
       await enterEmail(page, user.email);
       await enterPassword(page, user.password as string);
