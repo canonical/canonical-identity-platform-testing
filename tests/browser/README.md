@@ -57,6 +57,7 @@ Configuration in `playwright.config.ts` enforces `workers: 1`, `fullyParallel: f
 | `helpers/page-state.ts` | `PageStateType` union of ~36 states (e.g. `login-email`, `login-password`, `login-totp-verify`, `oidc-callback`, `tenant-selection`, `setup-passkey`, `device-code`, `device-complete`) and DOM-driven state detectors. |
 | `framework/claim-assertions.ts` | Token assertion factories returning `ClaimAssertion` objects (`reauthenticated`, `amrRecords`, `subjectIsSeededIdentity`). |
 | `framework/intervention-checks.ts` | API-side verification routines for `postChecks`. |
+| `framework/invariants.ts` | Rules the runner checks on every walk without a declaration: no platform 5xx (I0), a re-authenticating login walked its credential steps (I2), the tokens belong to the identity that signed in (I3). |
 | `framework/interventions.ts` | Perturbation primitives (`reload`, `replay-current-url`, `reopen-login-request`, `history-back`, `history-roundtrip`, `resend-code`, `double-submit`). |
 | `framework/requires.ts` | Evaluates deployment compatibility via `satisfies(requires, activeConfig)`. Maps camelCase `ScenarioRequires` keys to snake_case `ActiveConfig` keys. |
 | `framework/active-config.ts` | `ActiveConfig` type definition representing deployment configuration. |

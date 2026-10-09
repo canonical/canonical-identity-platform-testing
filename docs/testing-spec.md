@@ -303,6 +303,7 @@ flowchart TD
 | `framework/interventions.ts` | The executable half of `interventions` |
 | `framework/claim-assertions.ts` | The `assertions.claims` factories: `reauthenticated`, `amrRecords`, `subjectIsSeededIdentity` |
 | `framework/intervention-checks.ts` | Named `postChecks` implementations |
+| `framework/invariants.ts` | Rules checked on every walk with no declaration: I0 no ≥500 from login-ui/Kratos/Hydra; I2 a login Hydra could not skip (phase 0, `freshSession`, `max_age=0`, `prompt=login`) walked a credential step, and a second factor where MFA is enforced and the user has TOTP; I3 the tokens' `sub` is the signed-in identity and `tenant_id` is one of its tenants (hook-service present) or absent. `invariants.test.ts` proves I2 silent over every declared path |
 | `helpers/page-state.ts` | Detects the current state from the DOM — never the URL; login-ui multiplexes many states onto few URLs |
 | `seeder/` | **All** admin-API access; writes `manifest.json`. Specs are browser-only |
 

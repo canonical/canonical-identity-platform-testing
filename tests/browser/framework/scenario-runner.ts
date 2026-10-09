@@ -27,6 +27,26 @@ import {
 import { readActiveConfig } from "./active-config";
 import { satisfies } from "./requires";
 import { restoreViaSelfService } from "./restore";
+import { LOGIN_UI_URL, KRATOS_PUBLIC_URL, HYDRA_PUBLIC_URL } from "../helpers/config";
+import {
+  assertNoServerErrors,
+  demandsReauthentication,
+  i2Applies,
+  i2Violation,
+  i3Violation,
+  watchServerErrors,
+  type ServerErrorRecord,
+} from "./invariants";
+
+/** What the invariants need beyond the phase itself. */
+interface InvariantScope {
+  phaseIndex: number;
+  serverErrors: ServerErrorRecord[];
+  mfaEnforced: boolean;
+  totpConfigured: boolean;
+  hookServicePresent: boolean;
+  identityCreatedByWalk: boolean;
+}
 
 // --- Phase execution ---
 
@@ -91,6 +111,7 @@ async function runPhase(
   phase: Phase,
   ctx: ActionContext,
   manifest: Manifest,
+  scope: InvariantScope,
 ): Promise<OIDCTokens | undefined> {
   // Cookies only: the virtual authenticator lives on the CDP session and must survive.
   if (phase.freshSession) {
@@ -109,9 +130,12 @@ async function runPhase(
   });
 
   const interventions = phase.interventions ?? [];
+  /** States seen since the request started; the I2 oracle reads it. */
+  const walked: PageStateType[] = [];
 
   for (let i = 0; i < phase.expectedPath.length; i++) {
     const expectedState = phase.expectedPath[i];
+    walked.push(expectedState);
 
     await test.step(`Assert page state: ${expectedState}`, async () => {
       await assertPageState(page, expectedState);
@@ -169,11 +193,30 @@ async function runPhase(
   const tokens =
     lastState === "oidc-callback" ? await expectOIDCFlowComplete(page) : undefined;
 
+  await test.step("Invariants", async () => {
+    if (i2Applies(phase.expectedPath) && demandsReauthentication(scope.phaseIndex, phase)) {
+      const violation = i2Violation({ walked, mfaEnforced: scope.mfaEnforced, totpConfigured: scope.totpConfigured });
+      if (violation) throw new Error(violation);
+    }
+    if (tokens) {
+      const violation = i3Violation({
+        idTokenClaims: tokens.idTokenClaims,
+        accessTokenClaims: tokens.accessTokenClaims,
+        user,
+        manifest,
+        hookServicePresent: scope.hookServicePresent,
+        identityCreatedByWalk: scope.identityCreatedByWalk,
+      });
+      if (violation) throw new Error(violation);
+    }
+  });
   for (const iv of interventions) {
     if ("at" in iv && iv.at === lastState) {
       await runStateIntervention(page, iv, user, ctx);
     }
   }
+  // After the final-state interventions, which also talk to the platform. Each phase reports its own.
+  assertNoServerErrors(scope.serverErrors.splice(0), `phase "${phase.name}"`);
 
   if (phase.finalUrlContains) {
     await test.step(`Assert final URL contains "${phase.finalUrlContains}"`, async () => {
@@ -371,6 +414,20 @@ export async function runScenario(
     },
   ];
 
+  const activeConfig = readActiveConfig();
+  const serverErrors = watchServerErrors(
+    page,
+    [LOGIN_UI_URL, KRATOS_PUBLIC_URL, HYDRA_PUBLIC_URL].map((u) => new URL(u).origin),
+  );
+  const scope: Omit<InvariantScope, "phaseIndex"> = {
+    serverErrors,
+    mfaEnforced: activeConfig.mfa_enforced === true,
+    totpConfigured: scenario.user.totpConfigured === true,
+    hookServicePresent: (activeConfig.services ?? []).includes("hook-service"),
+    // A registration creates the identity, so the manifest id is not the subject.
+    identityCreatedByWalk: walks.some((p) => p.some((s) => s.startsWith("register-"))),
+  };
+
   const cleanup = scenario.cleanup;
   try {
     // Sparse: index i is phase i. device-complete phases redeem ctx.deviceCode at the token endpoint
@@ -378,7 +435,7 @@ export async function runScenario(
     const phaseTokens: Array<OIDCTokens | undefined> = [];
     for (const [index, phase] of phases.entries()) {
       await test.step(`Phase: ${phase.name}`, async () => {
-        phaseTokens[index] = await runPhase(page, user, phase, ctx, manifest);
+        phaseTokens[index] = await runPhase(page, user, phase, ctx, manifest, { ...scope, phaseIndex: index });
         const terminal = phase.expectedPath[phase.expectedPath.length - 1];
         if (!phaseTokens[index] && terminal === "device-complete" && ctx.deviceCode) {
           phaseTokens[index] = await pollDeviceToken(page, ctx.deviceCode);
