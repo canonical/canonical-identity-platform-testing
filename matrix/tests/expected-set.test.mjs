@@ -32,8 +32,6 @@ function expectedSet(row) {
 // Single oidc provider + multi-tenancy + webauthn sequencing. Sequencing swaps
 // in the sequencing oidc suite (the only WebAuthn ASSERTION scenario).
 const PD931_RUN = [
-  "specs/derived.spec.ts :: oidc-dex-login ⟂ reload@0",
-  "specs/derived.spec.ts :: oidc-dex-login ⟂ reopen-request@0",
   "specs/device.spec.ts :: device-code-invalid-rejected",
   "specs/oidc-error.spec.ts :: unknown-client-renders-error-page",
   "specs/oidc-error.spec.ts :: invalid-redirect-uri-renders-error-page",

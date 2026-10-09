@@ -53,7 +53,15 @@ function eligible(s: Scenario): boolean {
   return p.every((st) => LOGIN_STEPS[st] || st === "oidc-callback" || st.startsWith("provider:dex:"));
 }
 
-const SOURCES: ScenarioSuite[] = [loginScenarios, oidcScenarios, tenantScenarios, sessionScenarios, resilienceScenarios];
+/** `oidc.spec.ts` picks `oidcScenarios` only where sequencing is off (a collection-time fork); here
+ *  that fork is a `requires` key, so the derived walks gate like the rest. */
+const SOURCES: [ScenarioSuite, ScenarioRequires][] = [
+  [loginScenarios, {}],
+  [oidcScenarios, { oidcSequencing: false }],
+  [tenantScenarios, {}],
+  [sessionScenarios, {}],
+  [resilienceScenarios, {}],
+];
 
 /** One base per path shape, the least demanding `requires` among the duplicates: duplicates differ
  *  in what they assert, not in what a browser can do to them, and the least demanding one runs on
@@ -61,9 +69,10 @@ const SOURCES: ScenarioSuite[] = [loginScenarios, oidcScenarios, tenantScenarios
 function bases(): Scenario[] {
   const byShape: Record<string, Scenario> = {};
   const order: string[] = [];
-  for (const suite of SOURCES) {
-    for (const s of suite.scenarios) {
-      if (!eligible(s)) continue;
+  for (const [suite, extra] of SOURCES) {
+    for (const raw of suite.scenarios) {
+      if (!eligible(raw)) continue;
+      const s: Scenario = { ...raw, requires: { ...raw.requires, ...extra } };
       const key = `${s.expectedPath!.join(">")}|${s.user.selectTenant ?? ""}`;
       const held = byShape[key];
       if (!held) order.push(key);
