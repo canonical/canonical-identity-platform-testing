@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { demandsReauthentication, i2Applies, i2Violation, i3Violation, walkedAtTerminal } from "./invariants";
+import { assertNoServerErrors, demandsReauthentication, i2Applies, i2Violation, i3Violation, walkedAtTerminal } from "./invariants";
 import type { Manifest, ManifestUser } from "../seeder/manifest-schema";
 import type { Scenario } from "./scenario-types";
 
@@ -62,6 +62,16 @@ test("walkedAtTerminal restarts the record at the last re-entry's landing", () =
   const path = ["login-email", "login-password", "login-totp-verify", "login-email", "login-password", "oidc-callback"] as const;
   assert.deepEqual(walkedAtTerminal(path, [{ atIndex: 2, do: "back" }]), ["login-email", "login-password", "oidc-callback"]);
   assert.deepEqual(walkedAtTerminal(path), [...path]);
+});
+
+test("I0: a pinned 5xx is required and tolerated; any other 5xx still fails", () => {
+  const pinned = { status: 500, method: "GET", url: "http://localhost/self-service/settings/browser" };
+  const other = { status: 502, method: "POST", url: "http://localhost/api/kratos/self-service/login?flow=x" };
+  assert.equal(assertNoServerErrors([], "p"), false);
+  assert.equal(assertNoServerErrors([pinned], "p", "/self-service/settings/browser"), true);
+  assert.equal(assertNoServerErrors([], "p", "/self-service/settings/browser"), false);
+  assert.throws(() => assertNoServerErrors([pinned], "p"), /I0: .*500 GET/);
+  assert.throws(() => assertNoServerErrors([pinned, other], "p", "/self-service/settings/browser"), /502 POST/);
 });
 
 test("I2 flags PD-13: the request opened again is accepted with no credential step", () => {

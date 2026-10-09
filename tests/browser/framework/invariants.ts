@@ -11,7 +11,7 @@ import { readClaim } from "../helpers/jwt";
 import type { Manifest, ManifestUser } from "../seeder/manifest-schema";
 import type { Intervention, Phase } from "./scenario-types";
 
-// --- I0: no server error from the platform ---
+// --- I0: no server error from the platform on a step the user did right ---
 
 export interface ServerErrorRecord {
   status: number;
@@ -19,12 +19,15 @@ export interface ServerErrorRecord {
   url: string;
 }
 
-/** Records every ≥500 answer from one of `origins` for the life of the page. The platform's
- *  origins are login-ui, Kratos public and Hydra public; the RP and external providers are not. */
-export function watchServerErrors(page: Page, origins: readonly string[]): ServerErrorRecord[] {
+/** Records every ≥500 answer from one of `origins` for the life of the page, except while
+ *  `tolerated()` holds. The platform's origins are login-ui, Kratos public and Hydra public; the RP
+ *  and external providers are not. login-ui answers a rejected submit (wrong password, wrong or
+ *  reused code, a second click) with 500 — measured 2026-10-09 on v0.28.0, every error path — so a
+ *  self-transition and a double submit are tolerated windows; a 5xx anywhere else is a defect. */
+export function watchServerErrors(page: Page, origins: readonly string[], tolerated: () => boolean): ServerErrorRecord[] {
   const seen: ServerErrorRecord[] = [];
   page.on("response", (res: Response) => {
-    if (res.status() < 500) return;
+    if (res.status() < 500 || tolerated()) return;
     const url = res.url();
     if (!URL.canParse(url) || !origins.includes(new URL(url).origin)) return;
     seen.push({ status: res.status(), method: res.request().method(), url });
@@ -32,12 +35,16 @@ export function watchServerErrors(page: Page, origins: readonly string[]): Serve
   return seen;
 }
 
-export function assertNoServerErrors(seen: readonly ServerErrorRecord[], where: string): void {
-  if (seen.length === 0) return;
-  throw new Error(
-    `I0: the platform answered a server error during ${where}:\n` +
-      seen.map((r) => `  ${r.status} ${r.method} ${r.url}`).join("\n"),
-  );
+/** Throws on any recorded 5xx not matched by `pinnedUrl`; returns whether a pinned one occurred. */
+export function assertNoServerErrors(seen: readonly ServerErrorRecord[], where: string, pinnedUrl?: string): boolean {
+  const unexpected = pinnedUrl ? seen.filter((r) => !r.url.includes(pinnedUrl)) : seen;
+  if (unexpected.length > 0) {
+    throw new Error(
+      `I0: the platform answered a server error during ${where}:\n` +
+        unexpected.map((r) => `  ${r.status} ${r.method} ${r.url}`).join("\n"),
+    );
+  }
+  return unexpected.length < seen.length;
 }
 
 // --- I2: a login that demands re-authentication walked a credential step ---

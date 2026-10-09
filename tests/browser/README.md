@@ -91,6 +91,7 @@ Scenarios declare an expected user journey through identity flow states.
 | `postChecks` | Array of named post-walk API verification checks (`PostCheckName[]`). |
 | `cleanup` | Cleanup action (`"remove-totp" \| "remove-2fa" \| "restore-password" \| "remove-oidc" \| "remove-backup-codes"` or list). Required whenever mutating shared identity state; runs even on walk failure. Internal lane: admin API. Live lane: `framework/restore.ts` signs the identity in and undoes it through the public settings flow, which is what lets one seed serve a whole matrix run. |
 | `pinnedInvariantViolation` | `"I2"` or `"I3"`: a pinned product defect that this invariant catches. The walk must violate it in at least one phase; the test fails as "appears fixed" otherwise. |
+| `pinnedServerError` | URL substring of a 5xx the platform answers today on a step the user did right. Required to occur; any other 5xx still fails I0. |
 | `lanes` | Execution lanes (`ExecutionLane[]`). Defaults to suite `defaultLanes`. |
 
 Example scenario from `scenarios/session-scenarios.ts`:

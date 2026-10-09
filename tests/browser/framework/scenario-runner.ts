@@ -49,6 +49,11 @@ interface InvariantScope {
   /** `scenario.pinnedInvariantViolation`; a matching violation is recorded here instead of thrown. */
   pinned?: "I2" | "I3";
   pinnedSeen: { value: boolean };
+  /** `scenario.pinnedServerError` and whether a phase has produced it. */
+  pinnedServerError?: string;
+  pinnedServerErrorSeen: { value: boolean };
+  /** True while a rejected submit is in flight: a self-transition or a double submit (I0 tolerates those). */
+  tolerating: { value: boolean };
 }
 
 /** Throws the violation unless the scenario pins it, in which case it is the expected outcome. */
@@ -155,6 +160,8 @@ async function runPhase(
 
     await test.step(`Assert page state: ${expectedState}`, async () => {
       await assertPageState(page, expectedState);
+      // The rejected submit has been answered once the page re-detects; a 5xx from here on counts.
+      scope.tolerating.value = false;
       if (expectedState === "tenant-selection") {
         await assertTenantOptions(page, user, manifest);
       }
@@ -187,6 +194,7 @@ async function runPhase(
         ctx.doubleSubmit = true;
         ctx.doubleSubmitConsumed = false;
       }
+      scope.tolerating.value = doubled || nextState === expectedState;
 
       await test.step(
         doubled ? `${transition.description} (double submit)` : transition.description,
@@ -234,7 +242,9 @@ async function runPhase(
     }
   }
   // After the final-state interventions, which also talk to the platform. Each phase reports its own.
-  assertNoServerErrors(scope.serverErrors.splice(0), `phase "${phase.name}"`);
+  if (assertNoServerErrors(scope.serverErrors.splice(0), `phase "${phase.name}"`, scope.pinnedServerError)) {
+    scope.pinnedServerErrorSeen.value = true;
+  }
 
   if (phase.finalUrlContains) {
     await test.step(`Assert final URL contains "${phase.finalUrlContains}"`, async () => {
@@ -435,9 +445,11 @@ export async function runScenario(
   ];
 
   const activeConfig = readActiveConfig();
+  const tolerating = { value: false };
   const serverErrors = watchServerErrors(
     page,
     [LOGIN_UI_URL, KRATOS_PUBLIC_URL, HYDRA_PUBLIC_URL].map((u) => new URL(u).origin),
+    () => tolerating.value,
   );
   const scope: Omit<InvariantScope, "phaseIndex"> = {
     serverErrors,
@@ -448,6 +460,9 @@ export async function runScenario(
     identityCreatedByWalk: walks.some((p) => p.some((s) => s.startsWith("register-"))),
     pinned: scenario.pinnedInvariantViolation,
     pinnedSeen: { value: false },
+    pinnedServerError: scenario.pinnedServerError,
+    pinnedServerErrorSeen: { value: false },
+    tolerating,
   };
 
   const cleanup = scenario.cleanup;
@@ -468,6 +483,12 @@ export async function runScenario(
       throw new Error(
         `Scenario "${scenario.id}" pins a violation of ${scope.pinned} but no phase violated it: ` +
         `the defect appears fixed. Drop pinnedInvariantViolation and declare the fixed behaviour.`,
+      );
+    }
+    if (scope.pinnedServerError && !scope.pinnedServerErrorSeen.value) {
+      throw new Error(
+        `Scenario "${scenario.id}" pins a 5xx on "${scope.pinnedServerError}" but the platform answered none: ` +
+        `the defect appears fixed. Drop pinnedServerError.`,
       );
     }
 

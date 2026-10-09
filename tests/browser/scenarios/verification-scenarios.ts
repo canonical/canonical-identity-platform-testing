@@ -9,6 +9,8 @@ export const verificationScenarios = defineScenarioSuite({
   name: "verification",
   defaultLanes: ["internal"],
   scenarios: [
+  // Pinned on the three walks that verify: after the code is taken, the page asks the BFF for a
+  // settings flow and is answered 500 (measured 2026-10-09 on login-ui v0.28.0); the walk goes on.
   defineScenario({
     id: "verify-email-after-registration",
     description: "New user registers, receives verification email, enters code",
@@ -18,6 +20,7 @@ export const verificationScenarios = defineScenarioSuite({
       "verification",
       "login-email",
     ],
+    pinnedServerError: "/self-service/settings/browser",
   }),
 
   defineScenario({
@@ -29,6 +32,7 @@ export const verificationScenarios = defineScenarioSuite({
       "verification",
       "login-email",
     ],
+    pinnedServerError: "/self-service/settings/browser",
   }),
 
   defineScenario({
@@ -54,6 +58,7 @@ export const verificationScenarios = defineScenarioSuite({
       "login-email",
     ],
     interventions: [{ at: "verification", do: "resend-code" }],
+    pinnedServerError: "/self-service/settings/browser",
   }),
   // kratos replaces the flow's code on resend, so the original code must be rejected visibly.
   defineScenario({

@@ -260,6 +260,7 @@ everything; the union across the three is the coverage claim. Decisions that bin
 | `finalUrlContains` | Declarative pin on the terminal URL, e.g. `error=invalid_scope` |
 | `cleanup` | Named admin-API cleanup, required when the scenario mutates a shared identity |
 | `pinnedInvariantViolation` | A pinned defect an invariant catches (`"I2"`, `"I3"`): the walk MUST violate it in some phase; "appears fixed" fails the test when it no longer does |
+| `pinnedServerError` | URL substring of a 5xx the platform answers today on a step the user did right; required to occur, any other 5xx still fails I0 |
 | `defaultLanes` | Which lanes the scenario belongs to (*Determinism and lanes*, below) |
 
 ### The walk
@@ -304,7 +305,7 @@ flowchart TD
 | `framework/interventions.ts` | The executable half of `interventions` |
 | `framework/claim-assertions.ts` | The `assertions.claims` factories: `reauthenticated`, `amrRecords`, `subjectIsSeededIdentity` |
 | `framework/intervention-checks.ts` | Named `postChecks` implementations |
-| `framework/invariants.ts` | Rules checked on every walk with no declaration: I0 no ≥500 from login-ui/Kratos/Hydra; I2 a login Hydra could not skip (phase 0, `freshSession`, `max_age=0`, `prompt=login`) walked a credential step, and a second factor where MFA is enforced and the user has TOTP; I3 the tokens' `sub` is the signed-in identity and `tenant_id` is one of its tenants (hook-service present) or absent. `invariants.test.ts` proves I2 silent over every declared path |
+| `framework/invariants.ts` | Rules checked on every walk with no declaration. I0: no ≥500 from login-ui/Kratos/Hydra on a step the user did right — a rejected submit (self-transition, double submit) is a tolerated window, because login-ui answers every rejected credential with 500 (wrong password, wrong/expired/reused code, second click; measured 2026-10-09 on v0.28.0, every gate profile), a convention recorded here and not pinned per scenario. I2: a login Hydra could not skip (phase 0, `freshSession`, `max_age=0`, `prompt=login`) walked a credential step, and a second factor where MFA is enforced and the user has TOTP (external providers exempt, login-ui `handlers.go:1050-1055`). I3: the tokens' `sub` is the signed-in identity and `tenant_id` is one of its tenants (hook-service present) or absent. `invariants.test.ts` proves I2 silent over every declared path; the gate proved I0 live, and found the verification 5xx now pinned by `pinnedServerError` |
 | `helpers/page-state.ts` | Detects the current state from the DOM — never the URL; login-ui multiplexes many states onto few URLs |
 | `seeder/` | **All** admin-API access; writes `manifest.json`. Specs are browser-only |
 

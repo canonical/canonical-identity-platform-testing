@@ -172,6 +172,9 @@ export interface Scenario {
   /** A pinned product defect that an invariant (framework/invariants.ts) catches: the walk MUST
    *  violate it in at least one phase, and the test fails as "appears fixed" when it no longer does. */
   pinnedInvariantViolation?: "I2" | "I3";
+  /** A pinned 5xx the platform answers today on a step the user did right: URL substring. Required
+   *  to occur on the walk ("appears fixed" otherwise); any other 5xx still fails I0. */
+  pinnedServerError?: string;
 }
 
 export type CleanupKind = "remove-totp" | "remove-2fa" | "restore-password" | "remove-oidc" | "remove-backup-codes";
