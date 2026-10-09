@@ -238,6 +238,34 @@ test("history-roundtrip rejects expect/untilUrl/expectUrlContains", () => {
   );
 });
 
+test("reopen-login-request off a login state is rejected", () => {
+  assert.throws(
+    () =>
+      defineScenario({
+        ...BASE,
+        expectedPath: ["login-email", "login-password", "oidc-callback"],
+        expectError: undefined,
+        interventions: [{ at: "oidc-callback", do: "reopen-login-request", expect: "login-email" }],
+      }),
+    /only legal at a login state/,
+  );
+});
+
+test("reopen-login-request rejects untilUrl/via/expectUrlContains", () => {
+  assert.throws(
+    () =>
+      defineScenario({
+        ...BASE,
+        expectedPath: ["login-email", "login-password"],
+        expectError: undefined,
+        interventions: [
+          { at: "login-password", do: "reopen-login-request", expect: "login-email", expectUrlContains: "flow=" },
+        ],
+      }),
+    /takes only expect/,
+  );
+});
+
 test("history-roundtrip is accepted mid-walk", () => {
   const scenario = defineScenario({
     ...BASE,

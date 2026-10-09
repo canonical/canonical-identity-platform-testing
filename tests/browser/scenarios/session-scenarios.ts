@@ -70,6 +70,47 @@ export const sessionScenarios = defineScenarioSuite({
     },
   }),
 
+  // Entering the email is not a sign-in: the request opened again still shows its login.
+  defineScenario({
+    id: "forced-reauth-not-met-by-reopening-the-request",
+    description: "max_age=0 with a session: after the email step, the login request opened again still asks who is signing in",
+    requires: { mfaEnabled: true, localUsersEnabled: true, multiTenancy: false },
+    user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
+    phases: [
+      {
+        name: "establish-session",
+        expectedPath: ["login-email", "login-password", "login-totp-verify", "oidc-callback"],
+      },
+      {
+        name: "forced-reauth",
+        flowParams: { max_age: "0" },
+        expectedPath: ["login-email", "login-password"],
+        interventions: [{ at: "login-password", do: "reopen-login-request", expect: "login-email" }],
+      },
+    ],
+  }),
+
+  // PD-13 (login-ui#988), pinned: with multi-tenancy the same walk ends at the RP (testing-spec §10).
+  // When fixed, drop this pin and the multiTenancy gate of the scenario above.
+  defineScenario({
+    id: "forced-reauth-skipped-by-reopening-the-request",
+    description: "PD-13: max_age=0 with a session and multi-tenancy: after the email step, the login request opened again is accepted on the old session",
+    requires: { mfaEnabled: true, localUsersEnabled: true, multiTenancy: true },
+    user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
+    phases: [
+      {
+        name: "establish-session",
+        expectedPath: ["login-email", "login-password", "login-totp-verify", "oidc-callback"],
+      },
+      {
+        name: "forced-reauth",
+        flowParams: { max_age: "0" },
+        expectedPath: ["login-email", "login-password"],
+        interventions: [{ at: "login-password", do: "reopen-login-request", expect: "oidc-callback" }],
+      },
+    ],
+  }),
+
   defineScenario({
     id: "backup-code-regeneration-prompt",
     description: "User running low on backup codes is prompted to regenerate after signing in with one",

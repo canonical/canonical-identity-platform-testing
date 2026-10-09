@@ -7,6 +7,7 @@
 
 import { test, expect, Page } from "@playwright/test";
 import { assertPageState } from "../helpers/page-state";
+import { reopenLoginRequest } from "../helpers/navigation";
 import { resendVerificationCode } from "../helpers/resend";
 import { deleteIdentityCredentialType } from "../helpers/kratos";
 import type { ManifestUser } from "../seeder/manifest-schema";
@@ -44,6 +45,15 @@ export async function runStateIntervention(
         if (iv.expectUrlContains) {
           expect(page.url()).toContain(iv.expectUrlContains);
         }
+      });
+      return;
+
+    case "reopen-login-request":
+      await test.step(`Intervention: open the login request again at ${iv.at}`, async () => {
+        await reopenLoginRequest(page);
+        await settle(page);
+        // assertPageState polls, so an accept's redirect chain to the RP may still be in flight.
+        await assertPageState(page, iv.expect!);
       });
       return;
 

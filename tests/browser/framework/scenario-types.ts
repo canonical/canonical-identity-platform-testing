@@ -92,7 +92,14 @@ export interface ScenarioAssertions {
 export interface StateIntervention {
   /** State in this phase's expectedPath to perturb (after its assertion). */
   at: PageStateType;
-  do: "reload" | "replay-current-url" | "history-back" | "history-roundtrip" | "resend-code" | "drop-totp-out-of-band";
+  do:
+    | "reload"
+    | "replay-current-url"
+    | "reopen-login-request"
+    | "history-back"
+    | "history-roundtrip"
+    | "resend-code"
+    | "drop-totp-out-of-band";
   expect?: PageStateType;
   expectUrlContains?: string;
   /** history-back: rewind until the URL contains this substring (bounded). */
@@ -388,6 +395,21 @@ export function defineScenario(scenario: Scenario): Scenario {
           throw new Error(
             `Scenario "${scenario.id}" ${where}: "history-back" requires untilUrl.`
           );
+        }
+        if (iv.do === "reopen-login-request") {
+          // Anywhere else the nearest request in the history could be an earlier phase's.
+          if (!iv.at.startsWith("login-")) {
+            throw new Error(
+              `Scenario "${scenario.id}" ${where}: "reopen-login-request" is only legal at a ` +
+              `login state, not at "${iv.at}".`
+            );
+          }
+          if (iv.untilUrl || iv.via || iv.expectUrlContains) {
+            throw new Error(
+              `Scenario "${scenario.id}" ${where}: "reopen-login-request" takes only expect; ` +
+              `it takes no untilUrl/via/expectUrlContains.`
+            );
+          }
         }
       }
     }
