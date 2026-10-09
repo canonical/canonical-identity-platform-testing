@@ -5,7 +5,7 @@ import { test, expect, Page } from "@playwright/test";
 import { assertPageState } from "../helpers/page-state";
 import type { PageStateType } from "../helpers/page-state";
 import { resolveAction } from "./action-resolver";
-import { runStateIntervention } from "./interventions";
+import { runReentry, runStateIntervention } from "./interventions";
 import { runPostCheck } from "./intervention-checks";
 import { runClaimAssertions } from "./claim-assertions";
 import { listTenantOptions } from "../helpers/navigation";
@@ -14,7 +14,7 @@ import { readClaim } from "../helpers/jwt";
 import type { Manifest, ManifestUser } from "../seeder/manifest-schema";
 import { expectOIDCFlowComplete, pollDeviceToken, type OIDCTokens } from "../helpers/oidc";
 import type { TokenClaims } from "../helpers/jwt";
-import type { Scenario, Phase } from "./scenario-types";
+import type { Scenario, Phase, ReentryIntervention } from "./scenario-types";
 import type { ActionContext } from "./transitions";
 import { WebAuthnHelper } from "../helpers/webauthn";
 import { getExecutionLane, isLaneEnforcementDisabled } from "../helpers/config";
@@ -46,6 +46,19 @@ interface InvariantScope {
   totpConfigured: boolean;
   hookServicePresent: boolean;
   identityCreatedByWalk: boolean;
+  /** `scenario.pinnedInvariantViolation`; a matching violation is recorded here instead of thrown. */
+  pinned?: "I2" | "I3";
+  pinnedSeen: { value: boolean };
+}
+
+/** Throws the violation unless the scenario pins it, in which case it is the expected outcome. */
+function raiseOrRecordPinned(scope: InvariantScope, violation: string | undefined): void {
+  if (!violation) return;
+  if (scope.pinned && violation.startsWith(`${scope.pinned}:`)) {
+    scope.pinnedSeen.value = true;
+    return;
+  }
+  throw new Error(violation);
 }
 
 // --- Phase execution ---
@@ -135,6 +148,9 @@ async function runPhase(
 
   for (let i = 0; i < phase.expectedPath.length; i++) {
     const expectedState = phase.expectedPath[i];
+    const reentered = i > 0 && interventions.some((iv) => "atIndex" in iv && iv.atIndex === i - 1);
+    // A re-entry restarts the login from the browser's point of view: the credential record restarts too.
+    if (reentered) walked.length = 0;
     walked.push(expectedState);
 
     await test.step(`Assert page state: ${expectedState}`, async () => {
@@ -157,8 +173,12 @@ async function runPhase(
           await runStateIntervention(page, iv, user, ctx);
         }
       }
-
       const nextState = phase.expectedPath[i + 1];
+      const reentry = interventions.find((iv): iv is ReentryIntervention => "atIndex" in iv && iv.atIndex === i);
+      if (reentry) {
+        await runReentry(page, reentry, expectedState, nextState);
+        continue;
+      }
       const transition = resolveAction(expectedState, nextState);
       const doubled = interventions.some(
         (iv) => "on" in iv && iv.on === `${expectedState} → ${nextState}`,
@@ -195,19 +215,17 @@ async function runPhase(
 
   await test.step("Invariants", async () => {
     if (i2Applies(phase.expectedPath) && demandsReauthentication(scope.phaseIndex, phase)) {
-      const violation = i2Violation({ walked, mfaEnforced: scope.mfaEnforced, totpConfigured: scope.totpConfigured });
-      if (violation) throw new Error(violation);
+      raiseOrRecordPinned(scope, i2Violation({ walked, mfaEnforced: scope.mfaEnforced, totpConfigured: scope.totpConfigured }));
     }
     if (tokens) {
-      const violation = i3Violation({
+      raiseOrRecordPinned(scope, i3Violation({
         idTokenClaims: tokens.idTokenClaims,
         accessTokenClaims: tokens.accessTokenClaims,
         user,
         manifest,
         hookServicePresent: scope.hookServicePresent,
         identityCreatedByWalk: scope.identityCreatedByWalk,
-      });
-      if (violation) throw new Error(violation);
+      }));
     }
   });
   for (const iv of interventions) {
@@ -338,12 +356,14 @@ export async function runScenario(
 
   // Every hop of every phase must resolve BEFORE any browser work, so a typo in phase 3 cannot
   // surface after phases 1-2 already mutated the deployment. After the skips, before the manifest read.
-  const phaseWalks = scenario.phases?.map((p) => ({ label: ` (phase "${p.name}")`, expectedPath: p.expectedPath }))
-    ?? [{ label: "", expectedPath: scenario.expectedPath ?? [] }];
+  const phaseWalks = scenario.phases?.map((p) => ({ label: ` (phase "${p.name}")`, expectedPath: p.expectedPath, interventions: p.interventions ?? [] }))
+    ?? [{ label: "", expectedPath: scenario.expectedPath ?? [], interventions: scenario.interventions ?? [] }];
   const missing: string[] = [];
-  for (const { label, expectedPath } of phaseWalks) {
+  for (const { label, expectedPath, interventions } of phaseWalks) {
     const fullPath: (PageStateType | "start")[] = ["start", ...expectedPath];
     for (let i = 0; i < fullPath.length - 1; i++) {
+      // The pair after a re-entry anchor is a landing, not a transition.
+      if (interventions.some((iv) => "atIndex" in iv && iv.atIndex === i - 1)) continue;
       const to = fullPath[i + 1] as PageStateType;
       try {
         resolveAction(fullPath[i], to);
@@ -426,6 +446,8 @@ export async function runScenario(
     hookServicePresent: (activeConfig.services ?? []).includes("hook-service"),
     // A registration creates the identity, so the manifest id is not the subject.
     identityCreatedByWalk: walks.some((p) => p.some((s) => s.startsWith("register-"))),
+    pinned: scenario.pinnedInvariantViolation,
+    pinnedSeen: { value: false },
   };
 
   const cleanup = scenario.cleanup;
@@ -441,6 +463,12 @@ export async function runScenario(
           phaseTokens[index] = await pollDeviceToken(page, ctx.deviceCode);
         }
       });
+    }
+    if (scope.pinned && !scope.pinnedSeen.value) {
+      throw new Error(
+        `Scenario "${scenario.id}" pins a violation of ${scope.pinned} but no phase violated it: ` +
+        `the defect appears fixed. Drop pinnedInvariantViolation and declare the fixed behaviour.`,
+      );
     }
 
     if (scenario.assertions) {

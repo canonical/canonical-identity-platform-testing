@@ -58,7 +58,7 @@ Configuration in `playwright.config.ts` enforces `workers: 1`, `fullyParallel: f
 | `framework/claim-assertions.ts` | Token assertion factories returning `ClaimAssertion` objects (`reauthenticated`, `amrRecords`, `subjectIsSeededIdentity`). |
 | `framework/intervention-checks.ts` | API-side verification routines for `postChecks`. |
 | `framework/invariants.ts` | Rules the runner checks on every walk without a declaration: no platform 5xx (I0), a re-authenticating login walked its credential steps (I2), the tokens belong to the identity that signed in (I3). |
-| `framework/interventions.ts` | Perturbation primitives (`reload`, `replay-current-url`, `reopen-login-request`, `history-back`, `history-roundtrip`, `resend-code`, `double-submit`). |
+| `framework/interventions.ts` | Perturbation primitives (`reload`, `replay-current-url`, `history-back`, `history-roundtrip`, `resend-code`, `double-submit`) and the re-entries (`back`, `reopen-request`, anchored by path index; the next path entry is the landing). |
 | `framework/requires.ts` | Evaluates deployment compatibility via `satisfies(requires, activeConfig)`. Maps camelCase `ScenarioRequires` keys to snake_case `ActiveConfig` keys. |
 | `framework/active-config.ts` | `ActiveConfig` type definition representing deployment configuration. |
 | `framework/global-setup.ts` | Ingests the row's `capabilities.json` (from `BROWSER_TEST_CAPABILITIES`) into `active-config.json`. |
@@ -90,6 +90,7 @@ Scenarios declare an expected user journey through identity flow states.
 | `assertions` | Token assertions (`noTenantId`, `tenantIdFromSeed`, `groups`, `noGroups`, `claims`). Only valid when the final state is `oidc-callback` (or `device-complete` with `requires.deviceFlow`); an empty `claims: []` is rejected at import. |
 | `postChecks` | Array of named post-walk API verification checks (`PostCheckName[]`). |
 | `cleanup` | Cleanup action (`"remove-totp" \| "remove-2fa" \| "restore-password" \| "remove-oidc" \| "remove-backup-codes"` or list). Required whenever mutating shared identity state; runs even on walk failure. Internal lane: admin API. Live lane: `framework/restore.ts` signs the identity in and undoes it through the public settings flow, which is what lets one seed serve a whole matrix run. |
+| `pinnedInvariantViolation` | `"I2"` or `"I3"`: a pinned product defect that this invariant catches. The walk must violate it in at least one phase; the test fails as "appears fixed" otherwise. |
 | `lanes` | Execution lanes (`ExecutionLane[]`). Defaults to suite `defaultLanes`. |
 
 Example scenario from `scenarios/session-scenarios.ts`:

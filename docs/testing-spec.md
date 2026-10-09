@@ -259,6 +259,7 @@ everything; the union across the three is the coverage claim. Decisions that bin
 | `assertions` | Named claim assertions over the tokens the RP received: fixed-shape flags (`noTenantId`, `tenantIdFromSeed`, `groups`, `noGroups`) plus `claims[]`, tagged objects built by the `framework/claim-assertions.ts` factories |
 | `finalUrlContains` | Declarative pin on the terminal URL, e.g. `error=invalid_scope` |
 | `cleanup` | Named admin-API cleanup, required when the scenario mutates a shared identity |
+| `pinnedInvariantViolation` | A pinned defect an invariant catches (`"I2"`, `"I3"`): the walk MUST violate it in some phase; "appears fixed" fails the test when it no longer does |
 | `defaultLanes` | Which lanes the scenario belongs to (*Determinism and lanes*, below) |
 
 ### The walk
@@ -336,7 +337,7 @@ modifies how that transition submits. Primitives live in `framework/intervention
 |---|---|---|---|
 | `reload` | `at` | F5; the same state must re-detect afterwards (login-ui persists `?flow=` via `router.replace`) | Anywhere **except** `oidc-callback`, where a reload re-sends the authorization code |
 | `replay-current-url` | `at` | Re-navigate to the exact current URL, assert a declared terminal (`expect`, optional `expectUrlContains`) | Final path state only |
-| `reopen-login-request` | `at` | Open the login request's own address again (`/ui/login?login_challenge=…`, the challenge read from the browser history), assert the declared state (`expect`) | Final path state only |
+| `back` / `reopen-request` | `atIndex` | **Re-entry**: the browser leaves the login mid-way and comes back — one real Back (`back`; from the RP it skips the never-interacted consent hop), or the login request's own address opened again (`reopen-request`). The path entry after the anchor is the state it lands on, not a transition's target, and the walk goes on from there with ordinary transitions. Anchored by index, so a path may repeat states. The I2 record restarts at the landing | Mid-walk; `reopen-request` at a login step; `back` not at index 0 |
 | `history-roundtrip` | `at` | Real Back must land on `via`, real Forward must land back on the anchor, **and the walk continues** | Mid-walk, because it is self-returning |
 | `history-back` | `at` | Walk history backwards (bounded) until the URL contains `untilUrl`, let redirects settle, assert the declared terminal | Final path state only |
 | `resend-code` | `at` | Click resend, require the cooldown countdown, wait for the resent mail and re-anchor the mail cursor so the following submit proves newest-code-wins | `verification` only, never at a final state, no `expect`/`untilUrl`/`via` |
@@ -345,10 +346,9 @@ modifies how that transition submits. Primitives live in `framework/intervention
 
 No standalone `history-forward`: the TOTP ⇄ backup-code method switch is the only pair where Back
 and Forward both land on a live form, and `history-roundtrip` covers it. An intervention returns to
-the path it perturbs. Browser Back that lands on a different state from which the walk goes on is
-a transition instead (`login-totp-verify → login-email`, `oidc-callback → login-totp-verify`): the
-pair then means Back for every scenario, so a page control making the same hop would need a state
-of its own. At runtime the runner fails loudly when
+the path it perturbs, or, for a re-entry, names where it lands and walks on. The two Back edges this
+table once held are re-entries now: the pair after the anchor is never looked up in the transition
+table, so a page control making the same hop keeps its own edge. At runtime the runner fails loudly when
 a `double-submit` targets a transition whose action ignores the flag. Wave 2 is in §10 item 11.
 **`postChecks` are named API-side checks** (`framework/intervention-checks.ts`) run after the walk
 against the RP's tokens; `code-replay-revokes-family` re-exchanges the authorization code and
@@ -537,8 +537,8 @@ and four more) walked every credential step; none stopped after the email and op
 again, no intervention did, and the one assertion about re-authentication, `reauthenticated`, reads
 `auth_time`, which Hydra sets when a login it did not skip is accepted, whatever the login UI asked
 for (ory/hydra@v25.4.0 `consent/handler.go:460-465`): only the path can show a login accepted
-without credentials. The `reopen-login-request` intervention opens the login request's address
-again (`/ui/login?login_challenge=…`) from one of its login steps and asserts where that ends.
+without credentials. The `reopen-request` re-entry opens the login request's address
+again (`/ui/login?login_challenge=…`) from one of its login steps; the path names where that lands.
 `forced-reauth-not-met-by-reopening-the-request` asserts the login is shown again, where
 multi-tenancy is off; `forced-reauth-skipped-by-reopening-the-request` pins PD-13 (login-ui#988):
 with multi-tenancy the request is accepted on the session from before, with no password and no

@@ -7,11 +7,12 @@
 
 import { test, expect, Page } from "@playwright/test";
 import { assertPageState } from "../helpers/page-state";
-import { reopenLoginRequest } from "../helpers/navigation";
+import { backToHistoryEntry, reopenLoginRequest } from "../helpers/navigation";
 import { resendVerificationCode } from "../helpers/resend";
 import { deleteIdentityCredentialType } from "../helpers/kratos";
 import type { ManifestUser } from "../seeder/manifest-schema";
-import type { StateIntervention } from "./scenario-types";
+import type { PageStateType } from "../helpers/page-state";
+import type { ReentryIntervention, StateIntervention } from "./scenario-types";
 import { assertInternalLane, type ActionContext } from "./transitions";
 
 /** Past any legitimate login history chain; hitting it means the entry does not exist. */
@@ -20,6 +21,21 @@ const MAX_HISTORY_BACKS = 10;
 async function settle(page: Page): Promise<void> {
   await page.waitForLoadState("load").catch(() => {});
   await page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => {});
+}
+
+/** Performs the re-entry and lets the caller assert the landing: the runner's state poll waits
+ *  out any redirect chain (an accept's hop to the RP included). */
+export async function runReentry(page: Page, iv: ReentryIntervention, from: PageStateType, landing: PageStateType): Promise<void> {
+  await test.step(`Re-entry: ${iv.do} at ${from} (index ${iv.atIndex}) → ${landing}`, async () => {
+    if (iv.do === "back") {
+      // One real Back: the nearest earlier login page. From the RP that skips the consent hop the
+      // user never interacted with; from a login step it is the previous entry.
+      await backToHistoryEntry(page, "/ui/login");
+    } else {
+      await reopenLoginRequest(page);
+    }
+    await settle(page);
+  });
 }
 
 export async function runStateIntervention(
@@ -45,15 +61,6 @@ export async function runStateIntervention(
         if (iv.expectUrlContains) {
           expect(page.url()).toContain(iv.expectUrlContains);
         }
-      });
-      return;
-
-    case "reopen-login-request":
-      await test.step(`Intervention: open the login request again at ${iv.at}`, async () => {
-        await reopenLoginRequest(page);
-        await settle(page);
-        // assertPageState polls, so an accept's redirect chain to the RP may still be in flight.
-        await assertPageState(page, iv.expect!);
       });
       return;
 

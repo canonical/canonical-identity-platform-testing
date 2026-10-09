@@ -84,6 +84,7 @@ export const resilienceScenarios = defineScenarioSuite({
         "login-totp-verify",
         "manage-details",
       ],
+      interventions: [{ atIndex: 2, do: "back" }],
     }),
 
     // PD-11 again, for a user who picks a tenant: the password page is then reached from the tenant
@@ -103,6 +104,7 @@ export const resilienceScenarios = defineScenarioSuite({
         "login-totp-verify",
         "manage-details",
       ],
+      interventions: [{ atIndex: 3, do: "back" }],
     }),
 
     // PD-12 (login-ui#985), pinned: Kratos refuses the submit because the session already satisfies
@@ -123,6 +125,7 @@ export const resilienceScenarios = defineScenarioSuite({
         "login-totp-verify",
         "login-totp-verify",
       ],
+      interventions: [{ atIndex: 3, do: "back" }],
       expectError: true,
       expectErrorText: "Server error",
     }),

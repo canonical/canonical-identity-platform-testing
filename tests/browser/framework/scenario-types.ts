@@ -95,7 +95,6 @@ export interface StateIntervention {
   do:
     | "reload"
     | "replay-current-url"
-    | "reopen-login-request"
     | "history-back"
     | "history-roundtrip"
     | "resend-code"
@@ -113,7 +112,16 @@ export interface TransitionIntervention {
   do: "double-submit";
 }
 
-export type Intervention = StateIntervention | TransitionIntervention;
+/** The browser leaves the login mid-way and comes back. Anchored by path INDEX: the path entry after
+ *  it is the state the re-entry lands on, not a transition's target, and the walk goes on from there.
+ *  `back`: one real Back (the entry the button lands on; never-interacted hops are skipped).
+ *  `reopen-request`: open `/ui/login?login_challenge=…` of this login again. */
+export interface ReentryIntervention {
+  atIndex: number;
+  do: "back" | "reopen-request";
+}
+
+export type Intervention = StateIntervention | TransitionIntervention | ReentryIntervention;
 
 /** API-side checks run after the walk; implementations live in framework/intervention-checks.ts. */
 export type PostCheckName = "code-replay-revokes-family" | "backup-codes-deactivated" | "device-code-replay-rejected" | "registered-address-unverified" | "linked-identity-tokens";
@@ -161,6 +169,9 @@ export interface Scenario {
   lanes?: ExecutionLane[];
   /** Runs admin-side in order after the scenario, even on failure, so a re-run sees the seeded identity. */
   cleanup?: CleanupKind | CleanupKind[];
+  /** A pinned product defect that an invariant (framework/invariants.ts) catches: the walk MUST
+   *  violate it in at least one phase, and the test fails as "appears fixed" when it no longer does. */
+  pinnedInvariantViolation?: "I2" | "I3";
 }
 
 export type CleanupKind = "remove-totp" | "remove-2fa" | "restore-password" | "remove-oidc" | "remove-backup-codes";
@@ -312,6 +323,35 @@ export function defineScenario(scenario: Scenario): Scenario {
         }
         continue;
       }
+      if ("atIndex" in iv) {
+        const anchor = path[iv.atIndex];
+        if (!Number.isInteger(iv.atIndex) || iv.atIndex < 0 || iv.atIndex >= path.length - 1) {
+          throw new Error(
+            `Scenario "${scenario.id}" ${where}: re-entry "${iv.do}" at index ${iv.atIndex} needs a ` +
+            `path entry after it to land on (path has ${path.length} states).`
+          );
+        }
+        if (iv.do === "reopen-request" && !anchor.startsWith("login-") && anchor !== "tenant-selection") {
+          // Elsewhere the nearest request in the history could be an earlier phase's.
+          throw new Error(
+            `Scenario "${scenario.id}" ${where}: "reopen-request" is only legal at a login step, ` +
+            `not at "${anchor}" (index ${iv.atIndex}).`
+          );
+        }
+        if (iv.do === "back" && iv.atIndex === 0) {
+          throw new Error(
+            `Scenario "${scenario.id}" ${where}: "back" at index 0 leaves the login for the RP; ` +
+            `anchor it at a later step.`
+          );
+        }
+        const twice = interventions.filter((o) => "atIndex" in o && o.atIndex === iv.atIndex).length;
+        if (twice > 1) {
+          throw new Error(
+            `Scenario "${scenario.id}" ${where}: two re-entries at index ${iv.atIndex}; one step re-enters once.`
+          );
+        }
+        continue;
+      }
       const occurrences = path.filter((s) => s === iv.at).length;
       if (occurrences !== 1) {
         throw new Error(
@@ -395,21 +435,6 @@ export function defineScenario(scenario: Scenario): Scenario {
           throw new Error(
             `Scenario "${scenario.id}" ${where}: "history-back" requires untilUrl.`
           );
-        }
-        if (iv.do === "reopen-login-request") {
-          // Anywhere else the nearest request in the history could be an earlier phase's.
-          if (!iv.at.startsWith("login-")) {
-            throw new Error(
-              `Scenario "${scenario.id}" ${where}: "reopen-login-request" is only legal at a ` +
-              `login state, not at "${iv.at}".`
-            );
-          }
-          if (iv.untilUrl || iv.via || iv.expectUrlContains) {
-            throw new Error(
-              `Scenario "${scenario.id}" ${where}: "reopen-login-request" takes only expect; ` +
-              `it takes no untilUrl/via/expectUrlContains.`
-            );
-          }
         }
       }
     }

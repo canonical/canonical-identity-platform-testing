@@ -238,32 +238,50 @@ test("history-roundtrip rejects expect/untilUrl/expectUrlContains", () => {
   );
 });
 
-test("reopen-login-request off a login state is rejected", () => {
+test("a re-entry needs a path entry after it to land on", () => {
   assert.throws(
     () =>
       defineScenario({
         ...BASE,
         expectedPath: ["login-email", "login-password", "oidc-callback"],
         expectError: undefined,
-        interventions: [{ at: "oidc-callback", do: "reopen-login-request", expect: "login-email" }],
+        interventions: [{ atIndex: 2, do: "back" }],
       }),
-    /only legal at a login state/,
+    /needs a path entry after it/,
   );
 });
 
-test("reopen-login-request rejects untilUrl/via/expectUrlContains", () => {
+test("reopen-request off a login step is rejected; back at index 0 is rejected", () => {
   assert.throws(
     () =>
       defineScenario({
         ...BASE,
-        expectedPath: ["login-email", "login-password"],
+        expectedPath: ["login-email", "login-password", "oidc-callback", "login-email"],
         expectError: undefined,
-        interventions: [
-          { at: "login-password", do: "reopen-login-request", expect: "login-email", expectUrlContains: "flow=" },
-        ],
+        interventions: [{ atIndex: 2, do: "reopen-request" }],
       }),
-    /takes only expect/,
+    /only legal at a login step/,
   );
+  assert.throws(
+    () =>
+      defineScenario({
+        ...BASE,
+        expectedPath: ["login-email", "login-email", "login-password", "oidc-callback"],
+        expectError: undefined,
+        interventions: [{ atIndex: 0, do: "back" }],
+      }),
+    /"back" at index 0/,
+  );
+});
+
+test("a re-entry is accepted mid-walk and may land on a state the path repeats", () => {
+  const scenario = defineScenario({
+    ...BASE,
+    expectedPath: ["login-email", "login-password", "login-totp-verify", "login-email", "login-password", "login-totp-verify", "oidc-callback"],
+    expectError: undefined,
+    interventions: [{ atIndex: 2, do: "back" }],
+  });
+  assert.equal(scenario.interventions?.length, 1);
 });
 
 test("history-roundtrip is accepted mid-walk", () => {

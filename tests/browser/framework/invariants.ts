@@ -9,7 +9,7 @@ import type { Page, Response } from "@playwright/test";
 import type { PageStateType } from "../helpers/page-state";
 import { readClaim } from "../helpers/jwt";
 import type { Manifest, ManifestUser } from "../seeder/manifest-schema";
-import type { Phase } from "./scenario-types";
+import type { Intervention, Phase } from "./scenario-types";
 
 // --- I0: no server error from the platform ---
 
@@ -72,6 +72,16 @@ export function demandsReauthentication(phaseIndex: number, phase: Pick<Phase, "
 /** I2 applies to phases that start a client's login and end at its callback. */
 export function i2Applies(path: readonly PageStateType[]): boolean {
   return path.length > 0 && LOGIN_ENTRY_STATES[path[0]] === true && path[path.length - 1] === "oidc-callback";
+}
+
+/** The credential record a declared path leaves at its terminal: every re-entry restarts it at
+ *  its landing. What the runner accumulates live, computed from the data. */
+export function walkedAtTerminal(path: readonly PageStateType[], interventions: readonly Intervention[] = []): PageStateType[] {
+  let start = 0;
+  for (const iv of interventions) {
+    if ("atIndex" in iv && iv.atIndex + 1 > start) start = iv.atIndex + 1;
+  }
+  return path.slice(start);
 }
 
 export interface I2Context {

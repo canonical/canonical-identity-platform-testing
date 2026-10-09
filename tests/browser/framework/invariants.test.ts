@@ -8,7 +8,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { demandsReauthentication, i2Applies, i2Violation, i3Violation } from "./invariants";
+import { demandsReauthentication, i2Applies, i2Violation, i3Violation, walkedAtTerminal } from "./invariants";
 import type { Manifest, ManifestUser } from "../seeder/manifest-schema";
 import type { Scenario } from "./scenario-types";
 
@@ -35,21 +35,33 @@ const ALL: Scenario[] = [
   webauthnScenarios,
 ].flatMap((s) => s.scenarios);
 
-test("I2 is silent on every declared scenario, on the strictest row (MFA enforced)", () => {
+test("I2 is silent on every declared scenario on the strictest row, except where the scenario pins it", () => {
   const violations: string[] = [];
+  const pinsNotMet: string[] = [];
   for (const scenario of ALL) {
-    const phases = scenario.phases ?? [{ name: "default", flowParams: scenario.flowParams, expectedPath: scenario.expectedPath! }];
+    const phases = scenario.phases ?? [{ name: "default", flowParams: scenario.flowParams, expectedPath: scenario.expectedPath!, interventions: scenario.interventions }];
+    let violated = false;
     for (const [index, phase] of phases.entries()) {
       if (!i2Applies(phase.expectedPath) || !demandsReauthentication(index, phase)) continue;
       const v = i2Violation({
-        walked: phase.expectedPath,
+        walked: walkedAtTerminal(phase.expectedPath, phase.interventions),
         mfaEnforced: true,
         totpConfigured: scenario.user.totpConfigured === true,
       });
-      if (v) violations.push(`${scenario.id} phase "${phase.name}": ${v}`);
+      if (!v) continue;
+      if (scenario.pinnedInvariantViolation === "I2") violated = true;
+      else violations.push(`${scenario.id} phase "${phase.name}": ${v}`);
     }
+    if (scenario.pinnedInvariantViolation === "I2" && !violated) pinsNotMet.push(scenario.id);
   }
   assert.deepEqual(violations, []);
+  assert.deepEqual(pinsNotMet, []);
+});
+
+test("walkedAtTerminal restarts the record at the last re-entry's landing", () => {
+  const path = ["login-email", "login-password", "login-totp-verify", "login-email", "login-password", "oidc-callback"] as const;
+  assert.deepEqual(walkedAtTerminal(path, [{ atIndex: 2, do: "back" }]), ["login-email", "login-password", "oidc-callback"]);
+  assert.deepEqual(walkedAtTerminal(path), [...path]);
 });
 
 test("I2 flags PD-13: the request opened again is accepted with no credential step", () => {

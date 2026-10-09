@@ -84,19 +84,21 @@ export const sessionScenarios = defineScenarioSuite({
       {
         name: "forced-reauth",
         flowParams: { max_age: "0" },
-        expectedPath: ["login-email", "login-password"],
-        interventions: [{ at: "login-password", do: "reopen-login-request", expect: "login-email" }],
+        expectedPath: ["login-email", "login-password", "login-email"],
+        interventions: [{ atIndex: 1, do: "reopen-request" }],
       },
     ],
   }),
 
   // PD-13 (login-ui#988), pinned: with multi-tenancy the same walk ends at the RP (testing-spec §10).
-  // When fixed, drop this pin and the multiTenancy gate of the scenario above.
+  // When fixed, drop this pin and the multiTenancy gate of the scenario above. The I2 invariant is
+  // what would flag this walk unpinned: the callback is reached with no credential step after the re-entry.
   defineScenario({
     id: "forced-reauth-skipped-by-reopening-the-request",
     description: "PD-13: max_age=0 with a session and multi-tenancy: after the email step, the login request opened again is accepted on the old session",
     requires: { mfaEnabled: true, localUsersEnabled: true, multiTenancy: true },
     user: { ref: "returning-mfa", credentials: ["password", "totp"], totpConfigured: true },
+    pinnedInvariantViolation: "I2",
     phases: [
       {
         name: "establish-session",
@@ -105,8 +107,8 @@ export const sessionScenarios = defineScenarioSuite({
       {
         name: "forced-reauth",
         flowParams: { max_age: "0" },
-        expectedPath: ["login-email", "login-password"],
-        interventions: [{ at: "login-password", do: "reopen-login-request", expect: "oidc-callback" }],
+        expectedPath: ["login-email", "login-password", "oidc-callback"],
+        interventions: [{ atIndex: 1, do: "reopen-request" }],
       },
     ],
   }),
