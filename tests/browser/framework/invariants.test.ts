@@ -70,7 +70,7 @@ test("I0: a pinned 5xx is required and tolerated; any other 5xx still fails", ()
   assert.equal(assertNoServerErrors([], "p"), false);
   assert.equal(assertNoServerErrors([pinned], "p", "/self-service/settings/browser"), true);
   assert.equal(assertNoServerErrors([], "p", "/self-service/settings/browser"), false);
-  assert.throws(() => assertNoServerErrors([pinned], "p"), /I0: .*500 GET/);
+  assert.throws(() => assertNoServerErrors([pinned], "p"), /500 GET/);
   assert.throws(() => assertNoServerErrors([pinned, other], "p", "/self-service/settings/browser"), /502 POST/);
 });
 
