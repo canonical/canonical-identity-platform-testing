@@ -48,6 +48,8 @@ const PD931_RUN = [
 
 // The terraform-default shape: oidc only, no local users, no MT, no sequencing.
 const TFDEFAULT_RUN = [
+  "specs/derived.spec.ts :: oidc-dex-login ⟂ reload@0",
+  "specs/derived.spec.ts :: oidc-dex-login ⟂ reopen-request@0",
   "specs/device.spec.ts :: device-code-invalid-rejected",
   "specs/oidc-error.spec.ts :: unknown-client-renders-error-page",
   "specs/oidc-error.spec.ts :: invalid-redirect-uri-renders-error-page",
@@ -61,6 +63,15 @@ const TFDEFAULT_RUN = [
 // Local users with MFA enforced, no external IdP, no add-ons, no mail API
 // (mail_api=false keeps recovery/verification/registration out).
 const DEPLOYED_CORE_RUN = [
+  "specs/derived.spec.ts :: returning-login-mfa ⟂ reload@0",
+  "specs/derived.spec.ts :: returning-login-mfa ⟂ reopen-request@0",
+  "specs/derived.spec.ts :: returning-login-mfa ⟂ reload@1",
+  "specs/derived.spec.ts :: returning-login-mfa ⟂ back@1",
+  "specs/derived.spec.ts :: returning-login-mfa ⟂ reopen-request@1",
+  "specs/derived.spec.ts :: returning-login-mfa ⟂ reload@2",
+  "specs/derived.spec.ts :: returning-login-mfa ⟂ back@2 [PD-11]",
+  "specs/derived.spec.ts :: returning-login-mfa ⟂ reopen-request@2",
+  "specs/derived.spec.ts :: returning-login-mfa ⟂ back-resubmit (challenge given to kratos)",
   "specs/device.spec.ts :: device-flow-login",
   "specs/device.spec.ts :: device-code-invalid-rejected",
   "specs/error.spec.ts :: wrong-password-error",
@@ -76,10 +87,10 @@ const DEPLOYED_CORE_RUN = [
   "specs/resilience.spec.ts :: double-click-submit",
   "specs/resilience.spec.ts :: callback-replay-rejected",
   "specs/resilience.spec.ts :: back-after-auth-terminal",
-  "specs/resilience.spec.ts :: back-on-second-factor-drops-oidc-login",
   "specs/session.spec.ts :: session-reuse-no-max-age",
   "specs/session.spec.ts :: forced-reauth-max-age-0",
   "specs/session.spec.ts :: forced-reauth-not-met-by-reopening-the-request",
+  "specs/session.spec.ts :: forced-reauth-skipped-after-abandoned-totp-setup",
   "specs/settings.spec.ts :: settings-change-password",
   "specs/settings.spec.ts :: settings-backup-codes-deactivate",
   // backup_code_prompt_on_use=false selects the callback-terminal variant.

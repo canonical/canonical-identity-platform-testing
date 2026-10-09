@@ -50,6 +50,7 @@ Configuration in `playwright.config.ts` enforces `workers: 1`, `fullyParallel: f
 | Path | Purpose |
 | --- | --- |
 | `scenarios/*-scenarios.ts` | Declarative `Scenario` objects grouped via `defineScenarioSuite()`. 15 files, 69 scenarios (e.g. `login-scenarios.ts`, `session-scenarios.ts`, `device-scenarios.ts`, `oidc-scenarios.ts`, `tenant-scenarios.ts`, `settings-scenarios.ts`, `webauthn-scenarios.ts`). |
+| `scenarios/derived-scenarios.ts`, `derived-pins.ts`, `derived-coverage.json` | Generated re-entry coverage: one base per distinct client-login shape (deduplicated, least demanding `requires`), each login step, each kind (`reload`, `back`, `reopen-request`, `back-resubmit`); the expected path is the spec's (a restarted login stays the client's login), `BACK_LANDS_ON` holds the measured Back landings. Pins swap in today's divergence per `PD-n` (one narrowing key at most; the spec variant keeps the negation). The coverage register names every (step × kind) cell no derived walk covers; `framework/derived-coverage.test.ts` fails on an unregistered or stale gap. |
 | `specs/*.spec.ts` | One test file per suite executing a 4-line loop: `for (const scenario of suite.scenarios) test(scenario.id, async ({ page }) => runScenario(page, scenario))`. Includes four hand-written specs: `navigation.spec.ts`, `recovery-code-abuse.spec.ts`, `google-oidc.spec.ts`, `tenant-second-email.spec.ts`. |
 | `framework/scenario-types.ts` | Type definitions for `Scenario`, `Phase`, `ScenarioRequires`, `ScenarioUser`, `ScenarioAssertions`, and `ClaimAssertion`. Provides import-time validation via `defineScenario()`. |
 | `framework/scenario-runner.ts` | `runScenario(page, scenario)`: lane-gates, applies `satisfies()`, resolves manifest users, walks `expectedPath`, captures RP tokens, executes assertions, runs post checks, and runs cleanup (even if the walk fails). |
@@ -57,7 +58,8 @@ Configuration in `playwright.config.ts` enforces `workers: 1`, `fullyParallel: f
 | `helpers/page-state.ts` | `PageStateType` union of ~36 states (e.g. `login-email`, `login-password`, `login-totp-verify`, `oidc-callback`, `tenant-selection`, `setup-passkey`, `device-code`, `device-complete`) and DOM-driven state detectors. |
 | `framework/claim-assertions.ts` | Token assertion factories returning `ClaimAssertion` objects (`reauthenticated`, `amrRecords`, `subjectIsSeededIdentity`). |
 | `framework/intervention-checks.ts` | API-side verification routines for `postChecks`. |
-| `framework/interventions.ts` | Perturbation primitives (`reload`, `replay-current-url`, `reopen-login-request`, `history-back`, `history-roundtrip`, `resend-code`, `double-submit`). |
+| `framework/invariants.ts` | Rules the runner checks on every walk without a declaration: no platform 5xx (I0), a re-authenticating login walked its credential steps (I2), the tokens belong to the identity that signed in (I3). |
+| `framework/interventions.ts` | Perturbation primitives (`reload`, `replay-current-url`, `history-back`, `history-roundtrip`, `resend-code`, `double-submit`) and the re-entries (`back`, `reopen-request`, anchored by path index; the next path entry is the landing). |
 | `framework/requires.ts` | Evaluates deployment compatibility via `satisfies(requires, activeConfig)`. Maps camelCase `ScenarioRequires` keys to snake_case `ActiveConfig` keys. |
 | `framework/active-config.ts` | `ActiveConfig` type definition representing deployment configuration. |
 | `framework/global-setup.ts` | Ingests the row's `capabilities.json` (from `BROWSER_TEST_CAPABILITIES`) into `active-config.json`. |
@@ -89,6 +91,8 @@ Scenarios declare an expected user journey through identity flow states.
 | `assertions` | Token assertions (`noTenantId`, `tenantIdFromSeed`, `groups`, `noGroups`, `claims`). Only valid when the final state is `oidc-callback` (or `device-complete` with `requires.deviceFlow`); an empty `claims: []` is rejected at import. |
 | `postChecks` | Array of named post-walk API verification checks (`PostCheckName[]`). |
 | `cleanup` | Cleanup action (`"remove-totp" \| "remove-2fa" \| "restore-password" \| "remove-oidc" \| "remove-backup-codes"` or list). Required whenever mutating shared identity state; runs even on walk failure. Internal lane: admin API. Live lane: `framework/restore.ts` signs the identity in and undoes it through the public settings flow, which is what lets one seed serve a whole matrix run. |
+| `pinnedInvariantViolation` | `"I2"` or `"I3"`: a pinned product defect that this invariant catches. The walk must violate it in at least one phase; the test fails as "appears fixed" otherwise. |
+| `pinnedServerError` | URL substring of a 5xx the platform answers today on a step the user did right. Required to occur; any other 5xx still fails I0. |
 | `lanes` | Execution lanes (`ExecutionLane[]`). Defaults to suite `defaultLanes`. |
 
 Example scenario from `scenarios/session-scenarios.ts`:

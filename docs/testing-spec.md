@@ -203,10 +203,11 @@ consumes the capabilities file via `BROWSER_TEST_CAPABILITIES`. No hand-written 
 | `core` | — | off | off | The **no-MFA baseline** — the only shape where `login-mfa-off` can run |
 | `canonical-internal` | hook-service, user-verification, openfga | enforced | off | The only profile with OIDC/WebAuthn **sequencing** (+ Google provider declared) |
 | `canonical-portal` | hook-service, user-verification, openfga, **tenant-service** | enforced | **on** | The widest *runnable* shape: enforced MFA (TOTP + backup codes) with WebAuthn-as-2FA, no sequencing; the **only** pinned row with multi-tenancy on (tenant-service `v0.3.1` carries the PD-1 interceptor fix), so `requires.multiTenancy=true` journeys execute here and nowhere else in the gate |
+| `core-mfa` | — | enforced | off | The internal charmed CORE shape (seed `deployed-core-local-mfa`) on compose: the only gate row with a second factor **and** Kratos given the `login_challenge` (login-ui passes it only with sequencing and multi-tenancy both off), so the stale-submit `access_denied` shape and the abandoned-enrolment re-authentication pin run here and nowhere else. Added 2026-10-09 |
 
 | Quantity | Value | Re-derive with |
 |---|---|---|
-| Tests collected | **70** (71 where sequencing is on) | `jq .total tests/browser/expected-tests.json` |
+| Tests collected | **100** (101 where sequencing is on): 68 declared + 32 derived | `jq .total tests/browser/expected-tests.json` |
 | Registered gaps | **7** — three Google scenarios needing Workspace credentials, plus four shapes no gate profile deploys (prompt-on-use backup codes, verification off, MT + sequencing) | `jq '.gaps \| length' tests/browser/known-coverage-gaps.json` |
 | Executed per profile | `core` 20, `canonical-internal` 50, `canonical-portal` 60 — measured 2026-10-07 (§5) | `make gate-all-profiles`, then `jq '{profile, executed: (.executed \| length)}' tests/browser/coverage/*.json` |
 
@@ -259,6 +260,8 @@ everything; the union across the three is the coverage claim. Decisions that bin
 | `assertions` | Named claim assertions over the tokens the RP received: fixed-shape flags (`noTenantId`, `tenantIdFromSeed`, `groups`, `noGroups`) plus `claims[]`, tagged objects built by the `framework/claim-assertions.ts` factories |
 | `finalUrlContains` | Declarative pin on the terminal URL, e.g. `error=invalid_scope` |
 | `cleanup` | Named admin-API cleanup, required when the scenario mutates a shared identity |
+| `pinnedInvariantViolation` | A pinned defect an invariant catches (`"I2"`, `"I3"`): the walk MUST violate it in some phase; "appears fixed" fails the test when it no longer does |
+| `pinnedServerError` | URL substring of a 5xx the platform answers today on a step the user did right; required to occur, any other 5xx still fails I0 |
 | `defaultLanes` | Which lanes the scenario belongs to (*Determinism and lanes*, below) |
 
 ### The walk
@@ -297,12 +300,14 @@ flowchart TD
 | File (under `tests/browser/`) | Responsibility |
 |---|---|
 | `scenarios/*-scenarios.ts` | The data. One suite per journey family |
+| `scenarios/derived-scenarios.ts` | Generated: distinct client-login shapes × login steps × re-entry kinds, spec-expected; `derived-pins.ts` the `:stable` divergences by `PD-n`; `derived-coverage.json` the named gaps (step × kind), guarded by `framework/derived-coverage.test.ts` |
 | `framework/scenario-types.ts` | `defineScenario()` / `defineScenarioSuite()` — validation at collection time |
 | `framework/scenario-runner.ts` | Walks `expectedPath` pairwise; owns the error-message requirement |
 | `framework/transitions.ts` | The action map: one entry per `"stateA → stateB"` pair — a pair is legal iff it has an entry |
 | `framework/interventions.ts` | The executable half of `interventions` |
 | `framework/claim-assertions.ts` | The `assertions.claims` factories: `reauthenticated`, `amrRecords`, `subjectIsSeededIdentity` |
 | `framework/intervention-checks.ts` | Named `postChecks` implementations |
+| `framework/invariants.ts` | Rules checked on every walk with no declaration. I0: no ≥500 from login-ui/Kratos/Hydra on a step the user did right — a rejected submit (self-transition, double submit) is a tolerated window, because login-ui answers every rejected credential with 500 (wrong password, wrong/expired/reused code, second click; measured 2026-10-09 on v0.28.0, every gate profile), a convention recorded here and not pinned per scenario. I2: a login Hydra could not skip (phase 0, `freshSession`, `max_age=0`, `prompt=login`) walked a credential step, and a second factor where MFA is enforced and the user has TOTP (external providers exempt, login-ui `handlers.go:1050-1055`). I3: the tokens' `sub` is the signed-in identity and `tenant_id` is one of its tenants (hook-service present) or absent. `invariants.test.ts` proves I2 silent over every declared path; the gate proved I0 live, and found the verification 5xx now pinned by `pinnedServerError` |
 | `helpers/page-state.ts` | Detects the current state from the DOM — never the URL; login-ui multiplexes many states onto few URLs |
 | `seeder/` | **All** admin-API access; writes `manifest.json`. Specs are browser-only |
 
@@ -335,7 +340,7 @@ modifies how that transition submits. Primitives live in `framework/intervention
 |---|---|---|---|
 | `reload` | `at` | F5; the same state must re-detect afterwards (login-ui persists `?flow=` via `router.replace`) | Anywhere **except** `oidc-callback`, where a reload re-sends the authorization code |
 | `replay-current-url` | `at` | Re-navigate to the exact current URL, assert a declared terminal (`expect`, optional `expectUrlContains`) | Final path state only |
-| `reopen-login-request` | `at` | Open the login request's own address again (`/ui/login?login_challenge=…`, the challenge read from the browser history), assert the declared state (`expect`) | Final path state only |
+| `back` / `reopen-request` | `atIndex` | **Re-entry**: the browser leaves the login mid-way and comes back — one real Back (`back`; from the RP it skips the never-interacted consent hop), or the login request's own address opened again (`reopen-request`). The path entry after the anchor is the state it lands on, not a transition's target, and the walk goes on from there with ordinary transitions. Anchored by index, so a path may repeat states. The I2 record restarts at the landing | Mid-walk; `reopen-request` at a login step; `back` not at index 0 |
 | `history-roundtrip` | `at` | Real Back must land on `via`, real Forward must land back on the anchor, **and the walk continues** | Mid-walk, because it is self-returning |
 | `history-back` | `at` | Walk history backwards (bounded) until the URL contains `untilUrl`, let redirects settle, assert the declared terminal | Final path state only |
 | `resend-code` | `at` | Click resend, require the cooldown countdown, wait for the resent mail and re-anchor the mail cursor so the following submit proves newest-code-wins | `verification` only, never at a final state, no `expect`/`untilUrl`/`via` |
@@ -344,10 +349,9 @@ modifies how that transition submits. Primitives live in `framework/intervention
 
 No standalone `history-forward`: the TOTP ⇄ backup-code method switch is the only pair where Back
 and Forward both land on a live form, and `history-roundtrip` covers it. An intervention returns to
-the path it perturbs. Browser Back that lands on a different state from which the walk goes on is
-a transition instead (`login-totp-verify → login-email`, `oidc-callback → login-totp-verify`): the
-pair then means Back for every scenario, so a page control making the same hop would need a state
-of its own. At runtime the runner fails loudly when
+the path it perturbs, or, for a re-entry, names where it lands and walks on. The two Back edges this
+table once held are re-entries now: the pair after the anchor is never looked up in the transition
+table, so a page control making the same hop keeps its own edge. At runtime the runner fails loudly when
 a `double-submit` targets a transition whose action ignores the flag. Wave 2 is in §10 item 11.
 **`postChecks` are named API-side checks** (`framework/intervention-checks.ts`) run after the walk
 against the RP's tokens; `code-replay-revokes-family` re-exchanges the authorization code and
@@ -536,8 +540,8 @@ and four more) walked every credential step; none stopped after the email and op
 again, no intervention did, and the one assertion about re-authentication, `reauthenticated`, reads
 `auth_time`, which Hydra sets when a login it did not skip is accepted, whatever the login UI asked
 for (ory/hydra@v25.4.0 `consent/handler.go:460-465`): only the path can show a login accepted
-without credentials. The `reopen-login-request` intervention opens the login request's address
-again (`/ui/login?login_challenge=…`) from one of its login steps and asserts where that ends.
+without credentials. The `reopen-request` re-entry opens the login request's address
+again (`/ui/login?login_challenge=…`) from one of its login steps; the path names where that lands.
 `forced-reauth-not-met-by-reopening-the-request` asserts the login is shown again, where
 multi-tenancy is off; `forced-reauth-skipped-by-reopening-the-request` pins PD-13 (login-ui#988):
 with multi-tenancy the request is accepted on the session from before, with no password and no

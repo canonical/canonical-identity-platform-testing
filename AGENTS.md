@@ -24,11 +24,12 @@ the Go E2E suite against it. Never make a lane depend on a local checkout.
 ## Browser suite architecture
 Scenarios are data, not logic; adding a test means adding a data object. How-to: `tests/browser/README.md`.
 - `scenarios/*-scenarios.ts`: declarative `Scenario` objects via `defineScenario()`, which rejects malformed entries at import time.
+- `scenarios/derived-scenarios.ts` is generated data: every distinct client-login shape × every login step × every re-entry kind (`reload`, `back`, `reopen-request`, `back-resubmit`), expecting the spec path; `derived-pins.ts` names where `:stable` diverges (`PD-n`), `derived-coverage.json` names every uncovered cell. A new base shape or kind widens the set at import; never hand-write a re-entry scenario that the generator covers.
 - `framework/scenario-runner.ts` walks `expectedPath` pairwise; each `"A → B"` pair indexes `framework/transitions.ts`.
 - `helpers/page-state.ts` detects state from the DOM — login-ui multiplexes many states onto few URLs.
 - `expectError: true` on a repeated state requires a visible, non-empty error message; "did not navigate" is never the assertion. `expectErrorText` adds text that message must contain.
 - `freshSession: true` on a later phase clears cookies but not the virtual authenticator (how WebAuthn sign-in is reachable).
-- `interventions` perturb the scenario's own path (`reload`, `replay-current-url`, `reopen-login-request`, `history-back`, `history-roundtrip`, `double-submit`); primitives in `framework/interventions.ts`.
+- `interventions` perturb the scenario's own path (`reload`, `replay-current-url`, `history-back`, `history-roundtrip`, `double-submit`); re-entries (`back`, `reopen-request`, `atIndex`) leave the login and land on the next path entry; primitives in `framework/interventions.ts`.
 - Error terminals (`oidc-error-page`, `oidc-callback-error`) are enterable from `start` only, via malformed-authorize `flowParams`.
 - Token assertions live in `framework/claim-assertions.ts`, API post checks in `framework/intervention-checks.ts`; scenarios name them, never implement them.
 - `seeder/` owns all admin-API access; `seeder/archetypes.ts` is the sole source of users; `seed.ts` writes `manifest.json`, which specs read.

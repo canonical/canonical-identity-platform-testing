@@ -5,7 +5,7 @@ import { test, expect, Page } from "@playwright/test";
 import { assertPageState } from "../helpers/page-state";
 import type { PageStateType } from "../helpers/page-state";
 import { resolveAction } from "./action-resolver";
-import { runStateIntervention } from "./interventions";
+import { runReentry, runStateIntervention } from "./interventions";
 import { runPostCheck } from "./intervention-checks";
 import { runClaimAssertions } from "./claim-assertions";
 import { listTenantOptions } from "../helpers/navigation";
@@ -14,7 +14,7 @@ import { readClaim } from "../helpers/jwt";
 import type { Manifest, ManifestUser } from "../seeder/manifest-schema";
 import { expectOIDCFlowComplete, pollDeviceToken, type OIDCTokens } from "../helpers/oidc";
 import type { TokenClaims } from "../helpers/jwt";
-import type { Scenario, Phase } from "./scenario-types";
+import type { Scenario, Phase, ReentryIntervention } from "./scenario-types";
 import type { ActionContext } from "./transitions";
 import { WebAuthnHelper } from "../helpers/webauthn";
 import { getExecutionLane, isLaneEnforcementDisabled } from "../helpers/config";
@@ -27,6 +27,44 @@ import {
 import { readActiveConfig } from "./active-config";
 import { satisfies } from "./requires";
 import { restoreViaSelfService } from "./restore";
+import { LOGIN_UI_URL, KRATOS_PUBLIC_URL, HYDRA_PUBLIC_URL } from "../helpers/config";
+import {
+  assertNoServerErrors,
+  demandsReauthentication,
+  i2Applies,
+  i2Violation,
+  i3Violation,
+  watchServerErrors,
+  type ServerErrorRecord,
+} from "./invariants";
+
+/** What the invariants need beyond the phase itself. */
+interface InvariantScope {
+  phaseIndex: number;
+  serverErrors: ServerErrorRecord[];
+  mfaEnforced: boolean;
+  totpConfigured: boolean;
+  hookServicePresent: boolean;
+  identityCreatedByWalk: boolean;
+  /** `scenario.pinnedInvariantViolation`; a matching violation is recorded here instead of thrown. */
+  pinned?: "I2" | "I3";
+  pinnedSeen: { value: boolean };
+  /** `scenario.pinnedServerError` and whether a phase has produced it. */
+  pinnedServerError?: string;
+  pinnedServerErrorSeen: { value: boolean };
+  /** True while a rejected submit is in flight: a self-transition or a double submit (I0 tolerates those). */
+  tolerating: { value: boolean };
+}
+
+/** Throws the violation unless the scenario pins it, in which case it is the expected outcome. */
+function raiseOrRecordPinned(scope: InvariantScope, violation: string | undefined): void {
+  if (!violation) return;
+  if (scope.pinned && violation.startsWith(`${scope.pinned}:`)) {
+    scope.pinnedSeen.value = true;
+    return;
+  }
+  throw new Error(violation);
+}
 
 // --- Phase execution ---
 
@@ -91,6 +129,7 @@ async function runPhase(
   phase: Phase,
   ctx: ActionContext,
   manifest: Manifest,
+  scope: InvariantScope,
 ): Promise<OIDCTokens | undefined> {
   // Cookies only: the virtual authenticator lives on the CDP session and must survive.
   if (phase.freshSession) {
@@ -109,9 +148,15 @@ async function runPhase(
   });
 
   const interventions = phase.interventions ?? [];
+  /** States seen since the request started; the I2 oracle reads it. */
+  const walked: PageStateType[] = [];
 
   for (let i = 0; i < phase.expectedPath.length; i++) {
     const expectedState = phase.expectedPath[i];
+    const reentered = i > 0 && interventions.some((iv) => "atIndex" in iv && iv.atIndex === i - 1);
+    // A re-entry restarts the login from the browser's point of view: the credential record restarts too.
+    if (reentered) walked.length = 0;
+    walked.push(expectedState);
 
     await test.step(`Assert page state: ${expectedState}`, async () => {
       await assertPageState(page, expectedState);
@@ -126,6 +171,13 @@ async function runPhase(
       });
     }
 
+    // A rejected submit re-detects the same page before its answer lands; let the answer land,
+    // then a 5xx counts again.
+    if (scope.tolerating.value) {
+      await page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => {});
+      scope.tolerating.value = false;
+    }
+
     // Final-state interventions run after the token scrape below — they navigate off the terminal.
     if (i < phase.expectedPath.length - 1) {
       for (const iv of interventions) {
@@ -133,8 +185,12 @@ async function runPhase(
           await runStateIntervention(page, iv, user, ctx);
         }
       }
-
       const nextState = phase.expectedPath[i + 1];
+      const reentry = interventions.find((iv): iv is ReentryIntervention => "atIndex" in iv && iv.atIndex === i);
+      if (reentry) {
+        await runReentry(page, reentry, expectedState, nextState);
+        continue;
+      }
       const transition = resolveAction(expectedState, nextState);
       const doubled = interventions.some(
         (iv) => "on" in iv && iv.on === `${expectedState} → ${nextState}`,
@@ -143,6 +199,7 @@ async function runPhase(
         ctx.doubleSubmit = true;
         ctx.doubleSubmitConsumed = false;
       }
+      scope.tolerating.value = doubled || nextState === expectedState;
 
       await test.step(
         doubled ? `${transition.description} (double submit)` : transition.description,
@@ -169,10 +226,29 @@ async function runPhase(
   const tokens =
     lastState === "oidc-callback" ? await expectOIDCFlowComplete(page) : undefined;
 
+  await test.step("Invariants", async () => {
+    if (i2Applies(phase.expectedPath) && demandsReauthentication(scope.phaseIndex, phase)) {
+      raiseOrRecordPinned(scope, i2Violation({ walked, mfaEnforced: scope.mfaEnforced, totpConfigured: scope.totpConfigured }));
+    }
+    if (tokens) {
+      raiseOrRecordPinned(scope, i3Violation({
+        idTokenClaims: tokens.idTokenClaims,
+        accessTokenClaims: tokens.accessTokenClaims,
+        user,
+        manifest,
+        hookServicePresent: scope.hookServicePresent,
+        identityCreatedByWalk: scope.identityCreatedByWalk,
+      }));
+    }
+  });
   for (const iv of interventions) {
     if ("at" in iv && iv.at === lastState) {
       await runStateIntervention(page, iv, user, ctx);
     }
+  }
+  // After the final-state interventions, which also talk to the platform. Each phase reports its own.
+  if (assertNoServerErrors(scope.serverErrors.splice(0), `phase "${phase.name}"`, scope.pinnedServerError)) {
+    scope.pinnedServerErrorSeen.value = true;
   }
 
   if (phase.finalUrlContains) {
@@ -295,12 +371,14 @@ export async function runScenario(
 
   // Every hop of every phase must resolve BEFORE any browser work, so a typo in phase 3 cannot
   // surface after phases 1-2 already mutated the deployment. After the skips, before the manifest read.
-  const phaseWalks = scenario.phases?.map((p) => ({ label: ` (phase "${p.name}")`, expectedPath: p.expectedPath }))
-    ?? [{ label: "", expectedPath: scenario.expectedPath ?? [] }];
+  const phaseWalks = scenario.phases?.map((p) => ({ label: ` (phase "${p.name}")`, expectedPath: p.expectedPath, interventions: p.interventions ?? [] }))
+    ?? [{ label: "", expectedPath: scenario.expectedPath ?? [], interventions: scenario.interventions ?? [] }];
   const missing: string[] = [];
-  for (const { label, expectedPath } of phaseWalks) {
+  for (const { label, expectedPath, interventions } of phaseWalks) {
     const fullPath: (PageStateType | "start")[] = ["start", ...expectedPath];
     for (let i = 0; i < fullPath.length - 1; i++) {
+      // The pair after a re-entry anchor is a landing, not a transition.
+      if (interventions.some((iv) => "atIndex" in iv && iv.atIndex === i - 1)) continue;
       const to = fullPath[i + 1] as PageStateType;
       try {
         resolveAction(fullPath[i], to);
@@ -371,6 +449,27 @@ export async function runScenario(
     },
   ];
 
+  const activeConfig = readActiveConfig();
+  const tolerating = { value: false };
+  const serverErrors = watchServerErrors(
+    page,
+    [LOGIN_UI_URL, KRATOS_PUBLIC_URL, HYDRA_PUBLIC_URL].map((u) => new URL(u).origin),
+    () => tolerating.value,
+  );
+  const scope: Omit<InvariantScope, "phaseIndex"> = {
+    serverErrors,
+    mfaEnforced: activeConfig.mfa_enforced === true,
+    totpConfigured: scenario.user.totpConfigured === true,
+    hookServicePresent: (activeConfig.services ?? []).includes("hook-service"),
+    // A registration creates the identity, so the manifest id is not the subject.
+    identityCreatedByWalk: walks.some((p) => p.some((s) => s.startsWith("register-"))),
+    pinned: scenario.pinnedInvariantViolation,
+    pinnedSeen: { value: false },
+    pinnedServerError: scenario.pinnedServerError,
+    pinnedServerErrorSeen: { value: false },
+    tolerating,
+  };
+
   const cleanup = scenario.cleanup;
   try {
     // Sparse: index i is phase i. device-complete phases redeem ctx.deviceCode at the token endpoint
@@ -378,12 +477,24 @@ export async function runScenario(
     const phaseTokens: Array<OIDCTokens | undefined> = [];
     for (const [index, phase] of phases.entries()) {
       await test.step(`Phase: ${phase.name}`, async () => {
-        phaseTokens[index] = await runPhase(page, user, phase, ctx, manifest);
+        phaseTokens[index] = await runPhase(page, user, phase, ctx, manifest, { ...scope, phaseIndex: index });
         const terminal = phase.expectedPath[phase.expectedPath.length - 1];
         if (!phaseTokens[index] && terminal === "device-complete" && ctx.deviceCode) {
           phaseTokens[index] = await pollDeviceToken(page, ctx.deviceCode);
         }
       });
+    }
+    if (scope.pinned && !scope.pinnedSeen.value) {
+      throw new Error(
+        `Scenario "${scenario.id}" pins a violation of ${scope.pinned} but no phase violated it: ` +
+        `the defect appears fixed. Drop pinnedInvariantViolation and declare the fixed behaviour.`,
+      );
+    }
+    if (scope.pinnedServerError && !scope.pinnedServerErrorSeen.value) {
+      throw new Error(
+        `Scenario "${scenario.id}" pins a 5xx on "${scope.pinnedServerError}" but the platform answered none: ` +
+        `the defect appears fixed. Drop pinnedServerError.`,
+      );
     }
 
     if (scenario.assertions) {

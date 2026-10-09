@@ -1,0 +1,22 @@
+{
+  "$comment": [
+    "The (login step × re-entry kind) cells the derived suite (scenarios/derived-scenarios.ts) does NOT cover,",
+    "each with the reason and what unblocks it. framework/derived-coverage.test.ts fails on an unregistered",
+    "empty cell and on a registered cell the generator now covers: a gap is named or it does not exist."
+  ],
+  "gaps": {
+    "login-email × back": "Back on the first step leaves the login for the RP's page: nothing of the login is re-entered. Structural.",
+    "login-email × back-resubmit": "The identifier step is never the last page of a completed login. Structural.",
+    "tenant-selection × back": "Where one real Back lands from the tenant selection is unmeasured; BACK_LANDS_ON lists measured landings only. Unblocked by measuring it on canonical-portal.",
+    "tenant-selection × back-resubmit": "The tenant selection is never the last page of a completed login. Structural.",
+    "login-password × back-resubmit": "No base shape ends password → callback with a stale page to resubmit: login-mfa-off's password step is replaced in history, not pushed (BACK_LANDS_ON). Unblocked by a measured landing for it.",
+    "login-webauthn-verify × reload": "No eligible base walks the key assertion: oidc-webauthn-assertion is multi-phase (the key is enrolled first). Unblocked by the generator accepting a later phase as a base.",
+    "login-webauthn-verify × back": "Same as reload.",
+    "login-webauthn-verify × reopen-request": "Same as reload.",
+    "login-webauthn-verify × back-resubmit": "Kratos's script submits the key as a form and no frontend code sees the answer (login-ui#987 scope); and no eligible base.",
+    "login-backup-code-verify × reload": "Backup codes are one-shot: a base that spends one needs a re-seed between runs, so it is excluded from derivation (lookup_secret). Unblocked by a per-walk code fetch in the generator.",
+    "login-backup-code-verify × back": "Same as reload.",
+    "login-backup-code-verify × reopen-request": "Same as reload.",
+    "login-backup-code-verify × back-resubmit": "Same as reload."
+  }
+}
