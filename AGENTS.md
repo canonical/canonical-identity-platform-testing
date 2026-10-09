@@ -24,6 +24,7 @@ the Go E2E suite against it. Never make a lane depend on a local checkout.
 ## Browser suite architecture
 Scenarios are data, not logic; adding a test means adding a data object. How-to: `tests/browser/README.md`.
 - `scenarios/*-scenarios.ts`: declarative `Scenario` objects via `defineScenario()`, which rejects malformed entries at import time.
+- `scenarios/derived-scenarios.ts` is generated data: every distinct client-login shape × every login step × every re-entry kind (`reload`, `back`, `reopen-request`, `back-resubmit`), expecting the spec path; `derived-pins.ts` names where `:stable` diverges (`PD-n`), `derived-coverage.json` names every uncovered cell. A new base shape or kind widens the set at import; never hand-write a re-entry scenario that the generator covers.
 - `framework/scenario-runner.ts` walks `expectedPath` pairwise; each `"A → B"` pair indexes `framework/transitions.ts`.
 - `helpers/page-state.ts` detects state from the DOM — login-ui multiplexes many states onto few URLs.
 - `expectError: true` on a repeated state requires a visible, non-empty error message; "did not navigate" is never the assertion. `expectErrorText` adds text that message must contain.

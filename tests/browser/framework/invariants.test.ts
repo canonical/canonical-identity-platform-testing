@@ -13,6 +13,7 @@ import type { Manifest, ManifestUser } from "../seeder/manifest-schema";
 import type { Scenario } from "./scenario-types";
 
 import { accountLinkingScenarios } from "../scenarios/account-linking-scenarios";
+import { derivedScenarios } from "../scenarios/derived-scenarios";
 import { deviceScenarios } from "../scenarios/device-scenarios";
 import { errorScenarios } from "../scenarios/error-scenarios";
 import { googleOidcScenarios } from "../scenarios/google-oidc-scenarios";
@@ -29,7 +30,7 @@ import { verificationScenarios } from "../scenarios/verification-scenarios";
 import { webauthnScenarios } from "../scenarios/webauthn-scenarios";
 
 const ALL: Scenario[] = [
-  accountLinkingScenarios, deviceScenarios, errorScenarios, googleOidcScenarios, loginScenarios,
+  accountLinkingScenarios, derivedScenarios, deviceScenarios, errorScenarios, googleOidcScenarios, loginScenarios,
   oidcErrorScenarios, oidcScenarios, oidcSequencingScenarios, recoveryScenarios, registrationScenarios,
   resilienceScenarios, sessionScenarios, settingsScenarios, tenantScenarios, verificationScenarios,
   webauthnScenarios,

@@ -515,6 +515,18 @@ export const TRANSITION_TABLE: TransitionTable = {
       await submitTotpCode(page, secret);
     },
   },
+  // Kratos was given the challenge: the stale page's flow is a refresh, Kratos takes the code and
+  // accepts the request again, and Hydra refuses the used verifier at the RP.
+  "login-totp-verify → oidc-callback-error": {
+    description: "Submit TOTP on the stale page of a completed login — Hydra answers access_denied at the RP",
+    action: async (page, user, ctx) => {
+      const secret = user.totpSecret ?? ctx.totpSecret;
+      if (!secret) {
+        throw new Error("TOTP secret not available for the stale second-factor submit.");
+      }
+      await submitTotpCode(page, secret);
+    },
+  },
   // The password submit links and issues a session (200 + bare session) but the response
   // carries no continue_with, so the SPA renders nothing; walk on by navigation.
   "login-password → manage-details": {

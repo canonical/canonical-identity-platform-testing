@@ -11,6 +11,7 @@ import { JUSTIFIED_SKIP } from "../tests/browser/scripts/skip-allowlist.mjs";
 // tests/browser/scripts/expected-set.ts; matrix/tests/runner.test.mjs pins them.
 export const TIER_A_FILES = new Set([
   "account-linking.spec.ts",
+  "derived.spec.ts",
   "device.spec.ts",
   "error.spec.ts",
   "oidc-error.spec.ts",

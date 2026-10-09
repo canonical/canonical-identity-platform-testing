@@ -203,10 +203,11 @@ consumes the capabilities file via `BROWSER_TEST_CAPABILITIES`. No hand-written 
 | `core` | — | off | off | The **no-MFA baseline** — the only shape where `login-mfa-off` can run |
 | `canonical-internal` | hook-service, user-verification, openfga | enforced | off | The only profile with OIDC/WebAuthn **sequencing** (+ Google provider declared) |
 | `canonical-portal` | hook-service, user-verification, openfga, **tenant-service** | enforced | **on** | The widest *runnable* shape: enforced MFA (TOTP + backup codes) with WebAuthn-as-2FA, no sequencing; the **only** pinned row with multi-tenancy on (tenant-service `v0.3.1` carries the PD-1 interceptor fix), so `requires.multiTenancy=true` journeys execute here and nowhere else in the gate |
+| `core-mfa` | — | enforced | off | The internal charmed CORE shape (seed `deployed-core-local-mfa`) on compose: the only gate row with a second factor **and** Kratos given the `login_challenge` (login-ui passes it only with sequencing and multi-tenancy both off), so the stale-submit `access_denied` shape and the abandoned-enrolment re-authentication pin run here and nowhere else. Added 2026-10-09 |
 
 | Quantity | Value | Re-derive with |
 |---|---|---|
-| Tests collected | **70** (71 where sequencing is on) | `jq .total tests/browser/expected-tests.json` |
+| Tests collected | **100** (101 where sequencing is on): 68 declared + 32 derived | `jq .total tests/browser/expected-tests.json` |
 | Registered gaps | **7** — three Google scenarios needing Workspace credentials, plus four shapes no gate profile deploys (prompt-on-use backup codes, verification off, MT + sequencing) | `jq '.gaps \| length' tests/browser/known-coverage-gaps.json` |
 | Executed per profile | `core` 20, `canonical-internal` 50, `canonical-portal` 60 — measured 2026-10-07 (§5) | `make gate-all-profiles`, then `jq '{profile, executed: (.executed \| length)}' tests/browser/coverage/*.json` |
 
@@ -299,6 +300,7 @@ flowchart TD
 | File (under `tests/browser/`) | Responsibility |
 |---|---|
 | `scenarios/*-scenarios.ts` | The data. One suite per journey family |
+| `scenarios/derived-scenarios.ts` | Generated: distinct client-login shapes × login steps × re-entry kinds, spec-expected; `derived-pins.ts` the `:stable` divergences by `PD-n`; `derived-coverage.json` the named gaps (step × kind), guarded by `framework/derived-coverage.test.ts` |
 | `framework/scenario-types.ts` | `defineScenario()` / `defineScenarioSuite()` — validation at collection time |
 | `framework/scenario-runner.ts` | Walks `expectedPath` pairwise; owns the error-message requirement |
 | `framework/transitions.ts` | The action map: one entry per `"stateA → stateB"` pair — a pair is legal iff it has an entry |
