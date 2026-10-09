@@ -44,10 +44,10 @@
   "stats": {
     "validRows": 280,
     "achievablePairs": 155,
-    "coveredByPinned": 68,
-    "coveredBySeeds": 35,
+    "coveredByPinned": 78,
+    "coveredBySeeds": 26,
     "generatedRows": 5,
-    "totalRows": 11
+    "totalRows": 12
   },
   "excludedPairs": [
     "local_idp=off|verification=on",
@@ -123,6 +123,22 @@
       "newPairs": 10
     },
     {
+      "name": "core-mfa",
+      "kind": "pinned",
+      "dims": {
+        "local_idp": "on",
+        "mfa": "enforced",
+        "verification": "on",
+        "webauthn": "none",
+        "providers": "1",
+        "tenant_service": "absent",
+        "hook_service": "absent",
+        "user_verification": "absent",
+        "access_token": "jwt"
+      },
+      "newPairs": 10
+    },
+    {
       "name": "pd931-single-oidc-mt",
       "kind": "seed",
       "dims": {
@@ -136,7 +152,7 @@
         "user_verification": "absent",
         "access_token": "jwt"
       },
-      "newPairs": 23
+      "newPairs": 21
     },
     {
       "name": "tfdefault-oidc-only",
@@ -152,7 +168,7 @@
         "user_verification": "absent",
         "access_token": "jwt"
       },
-      "newPairs": 10
+      "newPairs": 4
     },
     {
       "name": "deployed-core-local-mfa",
@@ -182,7 +198,7 @@
       "backends": [
         "urls"
       ],
-      "newPairs": 2
+      "newPairs": 1
     },
     {
       "name": "mx-l1m0v0wnp0t0h0u1ao",
@@ -230,7 +246,7 @@
         "user_verification": "absent",
         "access_token": "jwt"
       },
-      "newPairs": 7
+      "newPairs": 6
     },
     {
       "name": "mx-l1m1v1wsp2t0h0u0ao",

@@ -129,5 +129,32 @@ export const sessionScenarios = defineScenarioSuite({
       "oidc-callback",
     ],
   }),
+
+  // Pinned, multi-tenancy off: a session whose TOTP enrolment was abandoned is sent to enrol again
+  // when it opens a request that demands re-authentication, and that request is then accepted with
+  // no credential typed for it — login-ui reads its own "setup" flag instead of asking Hydra
+  // (canonical/identity-platform-login-ui@5ddc4ca1 pkg/kratos/handlers.go:136-163, :1153-1155,
+  // pkg/kratos/service.go:266-268). Walked 2026-10-09 on v0.28.0: amr ["password","totp"], no
+  // password entered since phase 1. When fixed, the second phase starts with
+  // "login-email", "login-password" and the pin goes.
+  defineScenario({
+    id: "forced-reauth-skipped-after-abandoned-totp-setup",
+    description: "max_age=0 after an abandoned TOTP enrolment: the request is accepted on the old session once the enrolment completes, with no sign-in for it",
+    requires: { mfaEnforced: true, localUsersEnabled: true, multiTenancy: false },
+    user: { ref: "first-mfa", credentials: ["password"], totpConfigured: false },
+    pinnedInvariantViolation: "I2",
+    phases: [
+      {
+        name: "abandon-enrolment",
+        expectedPath: ["login-email", "login-password", "setup-secure"],
+      },
+      {
+        name: "forced-reauth",
+        flowParams: { max_age: "0" },
+        expectedPath: ["setup-secure", "setup-complete", "oidc-callback"],
+      },
+    ],
+    cleanup: "remove-totp",
+  }),
   ],
 });

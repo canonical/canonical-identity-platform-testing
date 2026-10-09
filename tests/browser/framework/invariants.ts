@@ -49,7 +49,9 @@ export function assertNoServerErrors(seen: readonly ServerErrorRecord[], where: 
 
 // --- I2: a login that demands re-authentication walked a credential step ---
 
-const LOGIN_ENTRY_STATES: Partial<Record<PageStateType, true>> = { "login-email": true, "tenant-selection": true };
+/** Where a client's login starts: the identifier page, the tenant selection, or — for a session
+ *  login-ui sends to enrol instead of to sign in — the enrolment page. */
+const LOGIN_ENTRY_STATES: Partial<Record<PageStateType, true>> = { "login-email": true, "tenant-selection": true, "setup-secure": true };
 
 const SECOND_FACTOR_STATES: Partial<Record<PageStateType, true>> = {
   "login-totp-verify": true,

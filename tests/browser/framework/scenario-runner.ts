@@ -160,8 +160,6 @@ async function runPhase(
 
     await test.step(`Assert page state: ${expectedState}`, async () => {
       await assertPageState(page, expectedState);
-      // The rejected submit has been answered once the page re-detects; a 5xx from here on counts.
-      scope.tolerating.value = false;
       if (expectedState === "tenant-selection") {
         await assertTenantOptions(page, user, manifest);
       }
@@ -171,6 +169,13 @@ async function runPhase(
       await test.step(`Assert visible error on: ${expectedState}`, async () => {
         await assertVisibleError(page, expectedState, phase.expectErrorText);
       });
+    }
+
+    // A rejected submit re-detects the same page before its answer lands; let the answer land,
+    // then a 5xx counts again.
+    if (scope.tolerating.value) {
+      await page.waitForLoadState("networkidle", { timeout: 3_000 }).catch(() => {});
+      scope.tolerating.value = false;
     }
 
     // Final-state interventions run after the token scrape below — they navigate off the terminal.

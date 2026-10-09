@@ -215,6 +215,23 @@ export const model = {
         "tenant_service: present — RESTORED 2026-08-14, PD-1 UNBLOCKED. The blocker was that the only published artifact (ghcr.io/canonical/tenant-service:v0.2.0, release commit canonical/tenant-service@de1d521 2026-04-28) predated canonical/tenant-service@e2cb03b `fix: add interceptors`, so its gRPC interceptor demanded a bearer token on LookupTenants while login-ui v0.28.0 sends none — enabling MT 500'd every login. v0.3.1 (tagged 2026-08-13) contains it: `compare/e2cb03b...v0.3.1` reports ahead_by 12 / behind_by 0, pkg/authentication/middleware.go:197-217 adds GRPCInterceptorExcluding, and cmd/serve.go:194-196 passes exactly \"/identity.platform.api.tenant.TenantService/LookupTenants\" — per-method, with the rest of the API still authenticated. The compose pin is now v0.3.1@sha256:2aef7ec80703d7f460665413a0a9d0d9f2c872c5c25076c262d035813a0ed62d. The local-rock workaround that once hid this stays deleted (decision D-2 — no machine-local artifact may be load-bearing); this is a published image.",
       ],
     },
+    {
+      name: "core-mfa",
+      dims: {
+        local_idp: "on",
+        mfa: "enforced",
+        verification: "on",
+        webauthn: "none",
+        providers: "1",
+        tenant_service: "absent",
+        hook_service: "absent",
+        user_verification: "absent",
+        access_token: "jwt",
+      },
+      divergences: [
+        "Added 2026-10-09: the internal charmed CORE shape (seed deployed-core-local-mfa, urls-bound to iam.orange) on compose with Dex and mail. The only gate row with a second factor AND Kratos given the login_challenge (login-ui passes it only with sequencing and multi-tenancy both off, canonical/identity-platform-login-ui@5ddc4ca1 pkg/kratos/service.go:291-297): the configuration that must never regress unnoticed, and the one where the abandoned-setup re-authentication bypass (testing-spec §10) reproduces.",
+      ],
+    },
   ],
 
   // ── Seed rows: mandatory generated rows (field defects pinned permanently) ──

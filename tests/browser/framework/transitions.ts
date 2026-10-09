@@ -169,6 +169,12 @@ export const TRANSITION_TABLE: TransitionTable = {
     action: startOIDCFlowAction,
   },
 
+  // A session login-ui sends to enrol instead of to sign in: reachable only through a client's request.
+  "start → setup-secure": {
+    description: "Start OIDC authorization code flow (login-ui redirects the session to TOTP enrolment)",
+    action: startOIDCFlowAction,
+  },
+
   "start → oidc-callback": {
     description: "Start OIDC flow (session reuse — auto-completes)",
     action: async (page, _user, ctx) => {
